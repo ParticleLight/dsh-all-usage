@@ -30,7 +30,7 @@ function makeRequest(method, headers = {}, body = '') {
   }
 }
 
-async function createApp({ key = 'test-key', workspaces = [], withStorage = false } = {}) {
+async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map() } = {}) {
   const routes = new Map()
   const cleanups = []
   const storageUnit = {
@@ -52,10 +52,10 @@ async function createApp({ key = 'test-key', workspaces = [], withStorage = fals
   const ctx = {
     sessionQuery: {
       async listSessions() {
-        return []
+        return sessions
       },
-      async readSession() {
-        return { events: [] }
+      async readSession(sid) {
+        return { events: events instanceof Map ? (events.get(sid) || []) : [] }
       },
     },
     workspaceRegistry: {
@@ -129,6 +129,20 @@ test('restricts API routes to loopback and rotates the process token', async () 
     'x-all-usage-request-token': firstToken,
   }, JSON.stringify({ workspaceId: 'ws-1', alias: 'stale' })))
   assert.equal(staleToken.status, 403)
+})
+
+test('emits a UTC day bucket for English-mode calendar data', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const utcDate = new Date(eventTime).toISOString().slice(0, 10)
+  const app = await createApp({
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo', sessionIds: ['s-1'] }],
+    sessions: [{ header: { id: 's-1', cwd: 'C:\\repo' } }],
+    events: new Map([['s-1', [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }]]]),
+  })
+  for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  const snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  const utcDay = snapshot.json().byDayUtc.find((day) => day.date === utcDate)
+  assert.equal(utcDay && utcDay.turns, 1)
 })
 
 test('uses native fetch for balance after loopback and token checks', async () => {
