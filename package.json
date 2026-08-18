@@ -1,7 +1,12 @@
 {
-  "name": "dsh-usage-stats",
+  "name": "dsh-all-usage",
   "version": "1.0.0",
-  "description": "DeepSeek Harness 用量统计插件：GitHub 风格热力图、Token/缓存命中/账户余额看板、工作区别名管理",
+  "description": "DeepSeek Harness usage dashboard with model, provider, workspace, cache, balance, and CSV insights",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ParticleLight/dsh-all-usage.git"
+  },
+  "homepage": "https://github.com/ParticleLight/dsh-all-usage#readme",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -21,7 +26,7 @@
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-slots",
-        "@deepseek-ai/dsh-client-ui-settings-general"
+        "@deepseek-ai/dsh-client-ui-sidebar"
       ],
       "platform": "web"
     }
@@ -29,7 +34,8 @@
   "files": [
     "lib/index.js",
     "lib/client.js",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "assets"
   ],
   "keywords": [
     "deepseek-harness",
