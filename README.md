@@ -26,7 +26,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 
 ### 安装
 
-本插件是标准的 DSH 社区插件包（声明 `dsh.bundle` manifest + web client 半），数据全部来自持久化会话日志，安装后自动回填历史。
+本插件是标准的 DSH 社区插件包（声明 `dsh.bundle` manifest 与 Web Client），数据全部来自持久化会话日志，安装后自动回填历史。
 
 #### 官方插件命令（推荐）
 
@@ -34,7 +34,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 ~~~
 
-安装后刷新页面即可，无需手动改配置、无需重启。
+安装命令会装配 bundle；随后刷新浏览器页面以加载 Client，无需手动修改 profile。若当前 DSH 版本未动态装配新包，请按 DSH 的提示重载包或重启进程。
 
 #### 手动注册（本地包）
 
@@ -56,11 +56,11 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 ### 架构
 
-- **Host 半**（`lib/index.js`）：扫描持久化会话日志聚合用量（`turn/end` + `assistant/message.usage`），监听 `session/event` 实时折叠；通过 `webServer` 服务注册数据路由：
+- **Host 端**（`lib/index.js`）：扫描持久化会话日志聚合用量（`turn/end` + `assistant/message.usage`），监听 `session/event` 实时折叠；通过 `webServer` 服务注册数据路由：
   - `GET /api/all-usage` — 统计快照
   - `GET /api/all-usage/balance?force=1` — 账户余额（复用 `llm-deepseek` 的 API Key 配置）
   - `POST /api/all-usage/alias` — 设置工作区别名
-- **Client 半**（`lib/client.js`）：`window.__ModuleLoader__` 工厂格式的浏览器 bundle，注册侧边栏「用量统计」入口（`sidebar.footer.action` 槽位）。
+- **Client 端**（`lib/client.js`）：`window.__ModuleLoader__` 工厂格式的浏览器 bundle，注册侧边栏「用量统计」入口（`sidebar.footer.action` 槽位）。所有 API 仅接受本机 loopback 的同源请求；余额读取与别名写入还要求插件启动时生成、仅在当前进程有效的令牌。
 
 ### 数据说明
 
@@ -72,8 +72,8 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 ### 开发
 
-- 修改 `lib/index.js` / `lib/client.js` 后刷新页面即可（client bundle 随页面加载）；host 半改动通过重启 DSH 生效
-- 插件包无第三方依赖：host 半只使用 Cordis 服务，client 半只使用 runtime 提供的 React 模块
+- 修改 `lib/client.js` 后刷新页面即可；修改 `lib/index.js` 后，需由 DSH 重载该包或重启进程，单纯刷新页面不会替换已运行的 Host 代码
+- 插件包无第三方依赖：Host 端只使用 Cordis 服务，Client 端只使用 runtime 提供的 React 模块
 
 ## English
 
@@ -99,7 +99,7 @@ This is a standard DSH community bundle. It declares a `dsh.bundle` manifest and
 dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 ~~~
 
-Refresh the page after installation. No manual configuration or restart is required.
+The installation command assembles the bundle. Refresh the browser page to load the client; no manual profile edits are required. If your DSH version does not dynamically assemble newly installed packages, use its supported package reload or restart the process.
 
 #### Manual local registration
 
@@ -125,7 +125,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
   - `GET /api/all-usage` — usage snapshot
   - `GET /api/all-usage/balance?force=1` — account balance using the configured `llm-deepseek` API key
   - `POST /api/all-usage/alias` — update workspace aliases
-- **Client** (`lib/client.js`): a `window.__ModuleLoader__` browser bundle that registers the “Usage statistics” sidebar entry through the `sidebar.footer.action` slot.
+- **Client** (`lib/client.js`): a `window.__ModuleLoader__` browser bundle that registers the “Usage statistics” sidebar entry through the `sidebar.footer.action` slot. All API routes accept only same-origin loopback requests; balance reads and alias writes also require a process-scoped token generated when the plugin starts.
 
 ### Data semantics
 
@@ -137,8 +137,8 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 
 ### Development
 
-- After editing `lib/index.js` or `lib/client.js`, refresh the page (the client bundle loads with the page); host changes require restarting DSH
-- The plugin has no third-party package dependencies: the host uses Cordis services and the client uses the runtime-provided React module
+- After editing `lib/client.js`, refresh the page. After editing `lib/index.js`, reload the package through DSH or restart the process; a page refresh alone cannot replace running host code
+- The plugin has no third-party package dependencies: the Host uses Cordis services and the Client uses the runtime-provided React module
 
 ## License / 许可证
 
