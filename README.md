@@ -16,6 +16,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **导出**：按当前时间范围和模型聚合方式导出 CSV
 - **时间范围**：今日、近 30 天、近 90 天、全部
 - **工作区别名**：在侧栏入口打开看板后管理，持久化保存到 $DSH_HOME/storages 的 KV 单元 `all-usage-aliases`
+- **界面语言**：在看板顶部切换中文与 English；选择会保存到浏览器本地
 
 ### 截图 / Screenshots
 
@@ -86,6 +87,7 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, acc
 - **CSV export**: export data using the selected time range and aggregation mode
 - **Time ranges**: today, last 30 days, last 90 days, or all time
 - **Workspace aliases**: manage aliases from the sidebar dashboard; values persist in the $DSH_HOME/storages KV cell `all-usage-aliases`
+- **Interface language**: switch between Chinese and English from the dashboard header; your choice persists locally in the browser
 
 ### Installation
 
