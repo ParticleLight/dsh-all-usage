@@ -24,7 +24,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 ### 方式一：官方插件命令（推荐）
 
 ```bash
-dsh plugin --profile web add dsh-all-usage
+dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 ```
 
 安装后刷新页面即可，无需手动改配置、无需重启。
