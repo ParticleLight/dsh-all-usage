@@ -131,7 +131,7 @@ test('restricts API routes to loopback and rotates the process token', async () 
   assert.equal(staleToken.status, 403)
 })
 
-test('uses native fetch for balance only after origin and token checks', async () => {
+test('uses native fetch for balance after loopback and token checks', async () => {
   const app = await createApp({ key: 'secret-key' })
   const stats = await call(app, '/api/all-usage', makeRequest('GET', { host: 'localhost:3080' }))
   const token = stats.json().requestToken
@@ -155,10 +155,9 @@ test('uses native fetch for balance only after origin and token checks', async (
     assert.equal(missingToken.status, 403)
     assert.equal(requests.length, 0)
 
+    // Same-origin browser GET requests may omit Origin entirely.
     const valid = await call(app, '/api/all-usage/balance', makeRequest('GET', {
       host: 'localhost:3080',
-      origin: 'http://localhost:3080',
-      'sec-fetch-site': 'same-origin',
       'x-all-usage-request-token': token,
     }))
     assert.equal(valid.status, 200)
