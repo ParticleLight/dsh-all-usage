@@ -14,7 +14,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **模型统计**：支持混合查看、按模型合并、按供应商汇总三种维度，展示调用次数、各类 Token 与缓存命中率
 - **摘要与工作区**：Token 用量、缓存命中、账户余额、连续使用、工作区 Token 分布和明细
 - **导出**：按当前时间范围和模型聚合方式导出 CSV
-- **时间范围**：今日、近 30 天、近 90 天、全部
+- **时间范围**：今日、近 30 天、近 90 天、全部，或在最近 53 周可用日数据中自定义起止日期
 - **工作区别名**：在侧栏入口打开看板后管理，持久化保存到 $DSH_HOME/storages 的 KV 单元 `all-usage-aliases`
 - **界面语言**：在看板顶部切换中文与 English；选择会保存到浏览器本地
 
@@ -85,7 +85,7 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, acc
 - **Model analytics**: mixed view, model-merged view, and provider summary with calls, token categories, and cache hit rate
 - **Summary and workspaces**: processed tokens, cache hits, account balance, usage streaks, workspace distribution, and details
 - **CSV export**: export data using the selected time range and aggregation mode
-- **Time ranges**: today, last 30 days, last 90 days, or all time
+- **Time ranges**: today, last 30 days, last 90 days, all time, or a custom start/end date within the available 53 weeks of daily data
 - **Workspace aliases**: manage aliases from the sidebar dashboard; values persist in the $DSH_HOME/storages KV cell `all-usage-aliases`
 - **Interface language**: switch between Chinese and English from the dashboard header; your choice persists locally in the browser
 
