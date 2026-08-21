@@ -14,7 +14,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **模型统计**：支持混合查看、按模型合并、按供应商汇总三种维度，展示调用次数、各类 Token 与缓存命中率
 - **摘要与工作区**：Token 用量、缓存命中、账户余额、连续使用、工作区 Token 分布和明细
 - **导出**：按当前时间范围和模型聚合方式导出 CSV
-- **时间范围**：今日、近 30 天、近 90 天、全部，或在最近 53 周可用日数据中自定义起止日期
+- **时间范围**：今日、近 30 天、近 90 天、全部，或在全部可扫描历史日数据中自定义起止日期；热力图始终展示最近 53 周
 - **工作区别名**：在侧栏入口打开看板后管理，持久化保存到 $DSH_HOME/storages 的 KV 单元 `all-usage-aliases`
 - **界面语言**：在看板顶部切换中文与 English；选择会保存到浏览器本地
 
@@ -65,6 +65,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 ### 数据说明
 
 - 使用次数与 Token 全部来自 DSH 持久化会话日志，插件激活时会自动回填全部历史，插件卸载/重启后数据不丢
+- 按日范围统计会保留全部可读取历史会话的有使用记录日期；热力图仅作为最近 53 周的固定视图窗口
 - 同一会话的同一 `turn / step` 只保留一份最终 usage；重试或替换消息会替换旧贡献，不重复累计
 - 看板中的总处理量 = 输入 + 输出 + 缓存读写 + 推理；缓存命中表示复用的上下文 Token，不等于新生成 Token 或实际费用
 - 余额查询走 DeepSeek 官方 `/user/balance` 接口；未配置 API Key 时卡片显示引导文案
@@ -85,7 +86,7 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, acc
 - **Model analytics**: mixed view, model-merged view, and provider summary with calls, token categories, and cache hit rate
 - **Summary and workspaces**: processed tokens, cache hits, account balance, usage streaks, workspace distribution, and details
 - **CSV export**: export data using the selected time range and aggregation mode
-- **Time ranges**: today, last 30 days, last 90 days, all time, or a custom start/end date within the available 53 weeks of daily data
+- **Time ranges**: today, last 30 days, last 90 days, all time, or a custom start/end date across all available historical daily data; the heatmap always shows the latest 53 weeks
 - **Workspace aliases**: manage aliases from the sidebar dashboard; values persist in the $DSH_HOME/storages KV cell `all-usage-aliases`
 - **Interface language**: switch between Chinese and English from the dashboard header; your choice persists locally in the browser
 
@@ -130,6 +131,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 ### Data semantics
 
 - All calls and tokens come from persisted DSH session logs; historical data is backfilled when the plugin activates and survives reloads or uninstall/reinstall cycles
+- Day-level range data retains every readable historical session date with tracked usage; the heatmap is only a fixed latest-53-week view
 - For each session and logical `turn / step`, only the final usage contribution is kept; retries or replaced messages do not double-count
 - Processed tokens = input + output + cache read/write + reasoning; a cache hit means reused context, not newly generated tokens or actual cost
 - Balance data comes from DeepSeek’s official `/user/balance` endpoint; the card shows guidance when no API key is configured

@@ -30,9 +30,10 @@ function makeRequest(method, headers = {}, body = '') {
   }
 }
 
-async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map() } = {}) {
+async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride } = {}) {
   const routes = new Map()
   const cleanups = []
+  const listeners = {}
   const storageUnit = {
     saved: [],
     async loadAll() {
@@ -52,6 +53,7 @@ async function createApp({ key = 'test-key', workspaces = [], withStorage = fals
   const ctx = {
     sessionQuery: {
       async listSessions() {
+        if (typeof listSessionsOverride === 'function') return listSessionsOverride()
         return sessions
       },
       async readSession(sid) {
@@ -64,7 +66,10 @@ async function createApp({ key = 'test-key', workspaces = [], withStorage = fals
       },
     },
     async timeout() {},
-    on() {},
+    on(event, handler) {
+      listeners[event] = listeners[event] || []
+      listeners[event].push(handler)
+    },
     effect(factory) {
       const cleanup = factory()
       if (typeof cleanup === 'function') cleanups.push(cleanup)
@@ -87,7 +92,7 @@ async function createApp({ key = 'test-key', workspaces = [], withStorage = fals
   }
   apply(ctx)
   await new Promise((resolve) => setImmediate(resolve))
-  return { routes, storageUnit, cleanups }
+  return { routes, storageUnit, cleanups, listeners }
 }
 
 async function call(app, path, request) {
@@ -145,6 +150,58 @@ test('emits a UTC day bucket for English-mode calendar data', async () => {
   assert.equal(utcDay && utcDay.turns, 1)
 })
 
+test('keeps daily usage and turns older than the former 53-week window', async () => {
+  const eventTime = Date.now() - 400 * 24 * 60 * 60 * 1000
+  const local = new Date(eventTime)
+  const localDate = local.getFullYear() + '-' + String(local.getMonth() + 1).padStart(2, '0') + '-' + String(local.getDate()).padStart(2, '0')
+  const utcDate = new Date(eventTime).toISOString().slice(0, 10)
+  const app = await createApp({
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo', sessionIds: ['s-1'] }],
+    sessions: [{ header: { id: 's-1', cwd: 'C:\\repo' } }],
+    events: new Map([['s-1', [
+      { seq: 1, time: eventTime, type: 'turn/end', data: {} },
+      { seq: 2, time: eventTime, type: 'assistant/message', data: { turn: 1, step: 1, message: { source: { provider: 'deepseek', model: 'deepseek-chat' } }, usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 30, cacheWriteTokens: 40, reasoningTokens: 50 } } },
+    ]]]),
+  })
+  for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  const snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  const body = snapshot.json()
+  const localDay = body.byDay.find((day) => day.date === localDate)
+  const utcDay = body.byDayUtc.find((day) => day.date === utcDate)
+  assert.equal(localDay && localDay.turns, 1)
+  assert.equal(localDay && localDay.tokens.input, 10)
+  assert.equal(localDay && localDay.sessions, 1)
+  assert.deepEqual(localDay && localDay.sessionIds, ['s-1'])
+  assert.equal(utcDay && utcDay.turns, 1)
+  assert.equal(utcDay && utcDay.tokens.input, 10)
+  assert.equal(utcDay && utcDay.sessions, 1)
+  assert.deepEqual(utcDay && utcDay.sessionIds, ['s-1'])
+})
+
+test('retries the baseline scan when listing sessions fails', async () => {
+  let attempts = 0
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }],
+    sessions: [{ header: { id: 's-1', cwd: 'C:\\repo' } }],
+    events: new Map([['s-1', [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }]]]),
+    listSessions: () => {
+      attempts += 1
+      if (attempts < 2) throw new Error('transient registry failure')
+      return [{ header: { id: 's-1', cwd: 'C:\\repo' } }]
+    },
+  })
+  let snapshot = null
+  for (let i = 0; i < 200; i += 1) {
+    snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (snapshot.json().scan.done) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  const body = snapshot.json()
+  assert.equal(body.scan.done, true)
+  assert.ok(attempts >= 2, 'baseline must retry after a failed listSessions')
+  assert.equal(body.totals.turns, 1)
+})
 test('uses native fetch for balance after loopback and token checks', async () => {
   const app = await createApp({ key: 'secret-key' })
   const stats = await call(app, '/api/all-usage', makeRequest('GET', { host: 'localhost:3080' }))
@@ -206,6 +263,32 @@ test('requires the capability for alias writes and persists trusted updates', as
   assert.deepEqual(allowed.json().aliases, { 'ws-1': 'Main repo' })
   await new Promise((resolve) => setImmediate(resolve))
   assert.deepEqual(app.storageUnit.saved, [{ 'ws-1': 'Main repo' }])
+})
+
+test('stops folding events after disposal', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }],
+    sessions: [{ header: { id: 's-1', cwd: 'C:\\repo' } }],
+    events: new Map([['s-1', [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }]]]),
+  })
+  for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  const handlers = app.listeners['session/event'] || []
+  assert.equal(handlers.length, 1)
+  const emit = (event) => {
+    for (const handler of handlers) handler({ id: 's-1', header: { cwd: 'C:\\repo' } }, event)
+  }
+  emit({ seq: 2, time: Date.now(), type: 'turn/end', data: {} })
+  for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  const before = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  assert.equal(before.json().totals.turns, 2)
+  // The first registered effect only flips the disposal flag; later cleanups
+  // would unregister the API routes this assertion still needs.
+  app.cleanups[0]()
+  emit({ seq: 3, time: Date.now(), type: 'turn/end', data: {} })
+  for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  const after = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  assert.equal(after.json().totals.turns, 2)
 })
 
 test('enforces route methods', async () => {
