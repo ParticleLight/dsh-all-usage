@@ -17,14 +17,16 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **时间范围**：今日、近 30 天、近 90 天、全部，或在全部可扫描历史日数据中自定义起止日期；热力图始终展示最近 53 周
 - **工作区别名**：在侧栏入口打开看板后管理，持久化保存到 $DSH_HOME/storages 的 KV 单元 `all_usage_aliases`
 - **界面语言**：在看板顶部切换中文与 English；选择会保存到浏览器本地
+- **完整历史与增量重建**：基线扫描全部可读历史会话；独立用量账本同时作为每会话游标——未变化的会话直接复用账本，新增事件只增量回填，长历史重启不再全量重建
+- **Token 口径**：输入按「未含缓存命中」计，缓存命中 / 写入与推理独立成桶；全 0 用量的重放事件不会覆盖已记录的真实用量，仅缓存命中的请求也会计入
 
 ### 最近更新
 
-**v1.0.6**
+**v1.0.7**
 
-- 新增独立用量账本：会话删除后，已成功持久化的回合与 Token 仍会保留
-- 修复 inactive Cordis timer 导致 DSH 启动崩溃的问题
-- 修复账本重建、重复写入和插件卸载期间的竞态
+- 增量游标：启动重扫只增量回填新增事件，未变化的会话直接从独立账本复用，不再全量重建
+- 全 0 用量防护：全 0 用量的重放事件不会覆盖已记录的真实用量；纯缓存命中的请求仍会计入
+- 结构化语义声明：API 返回机读的 token 口径（输入不含缓存命中，缓存与推理独立成桶）
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -78,6 +80,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - 按日范围统计会保留全部可读取历史会话的有使用记录日期；热力图仅作为最近 53 周的固定视图窗口
 - 会话删除后，已成功 flush 的用量仍从独立账本恢复；会话销毁提示和周期对账只负责触发重建，不会删除账本记录
 - 同一会话的同一 `turn / step` 只保留一份最终 usage；重试或替换消息会替换旧贡献，不重复累计
+- 输入 Token 按「未含缓存命中」计（缓存命中 / 写入独立成桶）；全 0 用量的重放事件不会覆盖已记录的真实用量，纯缓存命中的请求仍会计入
 - 看板中的总处理量 = 输入 + 输出 + 缓存读写 + 推理；缓存命中表示复用的上下文 Token，不等于新生成 Token 或实际费用
 - 余额查询走 DeepSeek 官方 `/user/balance` 接口；未配置 API Key 时卡片显示引导文案
 - 仅统计能归属到已注册工作区（按会话 cwd 匹配）的会话
@@ -100,14 +103,16 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, acc
 - **Time ranges**: today, last 30 days, last 90 days, all time, or a custom start/end date across all available historical daily data; the heatmap always shows the latest 53 weeks
 - **Workspace aliases**: manage aliases from the sidebar dashboard; values persist in the $DSH_HOME/storages KV cell `all_usage_aliases`
 - **Interface language**: switch between Chinese and English from the dashboard header; your choice persists locally in the browser
+- **Full history & incremental rebuild**: the baseline scans every readable historical session; the durable usage ledger doubles as a per-session cursor, so unchanged sessions are reused straight from the ledger and only newly appended events are folded — long histories restart without a full rebuild
+- **Token accounting semantics**: input tokens are fresh (exclude cache hits/writes, which sit in separate buckets along with reasoning); all-zero usage replays never overwrite recorded usage, while cache-only requests still count
 
 ### Latest Update
 
-**v1.0.6**
+**v1.0.7**
 
-- Added a durable usage ledger so successfully flushed turns and tokens survive session deletion
-- Fixed inactive Cordis timer failures that could crash DSH during startup
-- Hardened ledger rebuild, duplicate-write, and plugin-disposal races
+- Incremental scan cursor: restarts re-fold only newly appended events; unchanged sessions are seeded straight from the durable ledger instead of a full rebuild
+- All-zero usage guard: zero-usage replays no longer overwrite recorded usage, while pure cache-read requests still count
+- Structured token semantics: the API now declares a machine-readable accounting contract (input excludes cache; cache and reasoning are separate buckets)
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 
@@ -155,6 +160,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 - Day-level range data retains every readable historical session date with tracked usage; the heatmap is only a fixed latest-53-week view
 - After a session is deleted, successfully flushed usage is restored from the separate ledger; disposal hints and periodic reconciliation trigger rebuilds without deleting ledger rows
 - For each session and logical `turn / step`, only the final usage contribution is kept; retries or replaced messages do not double-count
+- Input tokens are fresh (exclude cache hits/writes, which sit in their own buckets); all-zero usage replays do not overwrite recorded usage and pure cache-read requests still count
 - Processed tokens = input + output + cache read/write + reasoning; a cache hit means reused context, not newly generated tokens or actual cost
 - Balance data comes from DeepSeek’s official `/user/balance` endpoint; the card shows guidance when no API key is configured
 - English mode uses UTC for date buckets, range filters, streaks, heatmap dates, and export timestamps; Chinese mode uses local time
