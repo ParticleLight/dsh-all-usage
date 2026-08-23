@@ -18,6 +18,16 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **工作区别名**：在侧栏入口打开看板后管理，持久化保存到 $DSH_HOME/storages 的 KV 单元 `all_usage_aliases`
 - **界面语言**：在看板顶部切换中文与 English；选择会保存到浏览器本地
 
+### 最近更新
+
+**v1.0.6**
+
+- 新增独立用量账本：会话删除后，已成功持久化的回合与 Token 仍会保留
+- 修复 inactive Cordis timer 导致 DSH 启动崩溃的问题
+- 修复账本重建、重复写入和插件卸载期间的竞态
+
+完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+
 ### 截图 / Screenshots
 
 ![dsh-all-usage 看板总览 / Dashboard overview](assets/screenshot-1.png)
@@ -26,7 +36,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 
 ### 安装
 
-本插件是标准的 DSH 社区插件包（声明 `dsh.bundle` manifest 与 Web Client），数据全部来自持久化会话日志，安装后自动回填历史。
+本插件是标准的 DSH 社区插件包（声明 `dsh.bundle` manifest 与 Web Client），数据来自持久化会话日志和独立用量账本，安装后自动回填历史。
 
 #### 官方插件命令（推荐）
 
@@ -91,9 +101,19 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, acc
 - **Workspace aliases**: manage aliases from the sidebar dashboard; values persist in the $DSH_HOME/storages KV cell `all_usage_aliases`
 - **Interface language**: switch between Chinese and English from the dashboard header; your choice persists locally in the browser
 
+### Latest Update
+
+**v1.0.6**
+
+- Added a durable usage ledger so successfully flushed turns and tokens survive session deletion
+- Fixed inactive Cordis timer failures that could crash DSH during startup
+- Hardened ledger rebuild, duplicate-write, and plugin-disposal races
+
+See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
+
 ### Installation
 
-This is a standard DSH community bundle. It declares a `dsh.bundle` manifest and a web client, and backfills its data from persisted session logs after installation.
+This is a standard DSH community bundle. It declares a `dsh.bundle` manifest and a web client, and backfills its data from persisted session logs and the durable usage ledger after installation.
 
 #### Official plugin command (recommended)
 
