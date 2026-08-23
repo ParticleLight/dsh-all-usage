@@ -30,19 +30,32 @@ function makeRequest(method, headers = {}, body = '') {
   }
 }
 
-async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride } = {}) {
+async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride, ledgerSeed = {}, storage: storageUnitOverride, timeout: timeoutOverride } = {}) {
   const routes = new Map()
   const cleanups = []
   const listeners = {}
-  const storageUnit = {
+  const storageUnit = storageUnitOverride || {
     saved: [],
+    records: { sessions: {} },
     async loadAll() {
-      return { global: {} }
+      return { global: {}, tables: this.records }
+    },
+    async putRecord(table, key, value) {
+      if (!this.records[table]) this.records[table] = {}
+      this.records[table][key] = value
+    },
+    async deleteRecord(table, key) {
+      if (this.records[table]) delete this.records[table][key]
     },
     async setGlobal(value) {
       this.saved.push(value)
     },
     async close() {},
+  }
+  if (ledgerSeed !== null && typeof ledgerSeed === 'object') {
+    if (!storageUnit.records) storageUnit.records = {}
+    if (!storageUnit.records.sessions) storageUnit.records.sessions = {}
+    Object.assign(storageUnit.records.sessions, ledgerSeed)
   }
   const webServer = {
     register(route) {
@@ -65,7 +78,9 @@ async function createApp({ key = 'test-key', workspaces = [], withStorage = fals
         return workspaces
       },
     },
-    async timeout() {},
+    async timeout(ms) {
+      if (typeof timeoutOverride === 'function') return timeoutOverride(ms)
+    },
     on(event, handler) {
       listeners[event] = listeners[event] || []
       listeners[event].push(handler)
@@ -201,6 +216,205 @@ test('retries the baseline scan when listing sessions fails', async () => {
   assert.equal(body.scan.done, true)
   assert.ok(attempts >= 2, 'baseline must retry after a failed listSessions')
   assert.equal(body.totals.turns, 1)
+})
+test('preserves usage after a disposed session disappears', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const firstSession = { header: { id: 's-1', cwd: 'C:\\repo' } }
+  const secondSession = { header: { id: 's-2', cwd: 'C:\\repo' } }
+  let currentSessions = [firstSession, secondSession]
+  const app = await createApp({
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo', sessionIds: ['s-1', 's-2'] }],
+    sessions: currentSessions,
+    listSessions: () => currentSessions,
+    events: new Map([['s-1', [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }]], ['s-2', [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }]]]),
+  })
+  let snapshot = null
+  for (let i = 0; i < 200; i += 1) {
+    snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (snapshot.json().scan.done && snapshot.json().totals.turns === 2) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  assert.equal(snapshot.json().totals.turns, 2)
+  const disposedHandlers = app.listeners['session/disposed'] || []
+  assert.equal(disposedHandlers.length, 1)
+  currentSessions = [secondSession]
+  disposedHandlers[0]({ id: 's-1' })
+  for (let i = 0; i < 200; i += 1) {
+    snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (snapshot.json().scan.done && snapshot.json().totals.turns === 2) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  assert.equal(snapshot.json().scan.done, true)
+  assert.equal(snapshot.json().totals.turns, 2)
+})
+test('preserves a deletion hint that arrives during the baseline scan', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const firstSession = { header: { id: 's-1', cwd: 'C:\\repo' } }
+  const secondSession = { header: { id: 's-2', cwd: 'C:\\repo' } }
+  let currentSessions = [firstSession, secondSession]
+  let resolveFirstList
+  const firstList = new Promise((resolve) => { resolveFirstList = resolve })
+  let listCalls = 0
+  const app = await createApp({
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo', sessionIds: ['s-1', 's-2'] }],
+    listSessions: () => {
+      listCalls += 1
+      return listCalls === 1 ? firstList : currentSessions
+    },
+    events: new Map([['s-1', [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }]], ['s-2', [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }]]]),
+  })
+  const disposedHandlers = app.listeners['session/disposed'] || []
+  assert.equal(disposedHandlers.length, 1)
+  currentSessions = [secondSession]
+  disposedHandlers[0]({ id: 's-1' })
+  resolveFirstList([firstSession, secondSession])
+  let snapshot = null
+  for (let i = 0; i < 200; i += 1) {
+    snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (snapshot.json().scan.done && snapshot.json().totals.turns === 2) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  assert.equal(snapshot.json().scan.done, true)
+  assert.equal(snapshot.json().totals.turns, 2)
+})
+test('persists canonical usage at session flush', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const events = [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }, { seq: 2, time: eventTime, type: 'assistant/message', data: { turn: 1, step: 1, message: { source: { provider: 'deepseek', model: 'deepseek-chat' } }, usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 30, cacheWriteTokens: 40, reasoningTokens: 50 } } }]
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }],
+    sessions: [{ header: { id: 's-1', cwd: 'C:\\repo' } }],
+    events: new Map([['s-1', events]]),
+  })
+  const handlers = app.listeners['session/flush'] || []
+  assert.equal(handlers.length, 1)
+  await handlers[0]({ id: 's-1', header: { id: 's-1', cwd: 'C:\\repo' }, events })
+  const row = app.storageUnit.records.sessions['s-1']
+  assert.ok(row)
+  assert.equal(row.sessionId, 's-1')
+  assert.equal(row.turns.length, 1)
+  assert.equal(row.usage.length, 1)
+  assert.equal(row.usage[0].values.input, 10)
+})
+
+test('rehydrates deleted-session usage from the durable ledger', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const ledger = { 's-1': { version: 1, sessionId: 's-1', workspaceId: 'ws-1', turns: [{ key: '1', time: eventTime, workspaceId: 'ws-1' }], usage: [{ key: 's-1:step:1:1', seq: 2, time: eventTime, workspaceId: 'ws-1', modelId: 'deepseek / deepseek-chat', values: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40, reasoning: 50 } }] } }
+  const app = await createApp({
+    withStorage: true,
+    ledgerSeed: ledger,
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }],
+    sessions: [],
+    listSessions: () => [],
+  })
+  let snapshot = null
+  for (let i = 0; i < 100; i += 1) {
+    snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (snapshot.json().scan.done) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  const body = snapshot.json()
+  assert.equal(body.scan.done, true)
+  assert.equal(body.totals.turns, 1)
+  assert.equal(body.totals.input, 10)
+  assert.equal(body.totals.sessions, 1)
+})
+test('replaces an existing ledger row without double-counting usage', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const firstEvents = [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }, { seq: 2, time: eventTime, type: 'assistant/message', data: { turn: 1, step: 1, message: { source: { provider: 'deepseek', model: 'deepseek-chat' } }, usage: { inputTokens: 10, outputTokens: 20 } } }]
+  const secondEvents = [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }, { seq: 2, time: eventTime, type: 'assistant/message', data: { turn: 1, step: 1, message: { source: { provider: 'deepseek', model: 'deepseek-chat' } }, usage: { inputTokens: 30, outputTokens: 40 } } }]
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }],
+    sessions: [{ header: { id: 's-1', cwd: 'C:\\repo' } }],
+    events: new Map([['s-1', secondEvents]]),
+  })
+  const handler = (app.listeners['session/flush'] || [])[0]
+  await handler({ id: 's-1', header: { id: 's-1', cwd: 'C:\\repo' }, events: firstEvents })
+  await handler({ id: 's-1', header: { id: 's-1', cwd: 'C:\\repo' }, events: secondEvents })
+  const row = app.storageUnit.records.sessions['s-1']
+  assert.equal(row.usage.length, 1)
+  assert.equal(row.usage[0].values.input, 30)
+})
+
+test('restores flushed usage in a fresh plugin instance after log deletion', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const events = [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }, { seq: 2, time: eventTime, type: 'assistant/message', data: { turn: 1, step: 1, message: { source: { provider: 'deepseek', model: 'deepseek-chat' } }, usage: { inputTokens: 17, outputTokens: 23 } } }]
+  const first = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }],
+    sessions: [{ header: { id: 's-1', cwd: 'C:\\repo' } }],
+    events: new Map([['s-1', events]]),
+  })
+  const handler = (first.listeners['session/flush'] || [])[0]
+  await handler({ id: 's-1', header: { id: 's-1', cwd: 'C:\\repo' }, events })
+  const second = await createApp({
+    withStorage: true,
+    storage: first.storageUnit,
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }],
+    sessions: [],
+    listSessions: () => [],
+  })
+  let snapshot = null
+  for (let i = 0; i < 100; i += 1) {
+    snapshot = await call(second, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (snapshot.json().scan.done) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  assert.equal(snapshot.json().totals.turns, 1)
+  assert.equal(snapshot.json().totals.input, 17)
+  assert.equal(snapshot.json().totals.output, 23)
+})
+test('drains queued ledger writes before disposal closes storage', async () => {
+  let blockWrites = false
+  let putStarted = false
+  let resolvePut
+  let closed = false
+  const putGate = new Promise((resolve) => { resolvePut = resolve })
+  const storage = {
+    records: { sessions: {} },
+    async loadAll() { return { global: {}, tables: this.records } },
+    async putRecord(table, key, value) {
+      if (blockWrites) { putStarted = true; await putGate }
+      this.records[table][key] = value
+    },
+    async deleteRecord(table, key) { delete this.records[table][key] },
+    async setGlobal() {},
+    async close() { closed = true },
+  }
+  const eventTime = Date.now() - 60 * 1000
+  const events = [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }]
+  const app = await createApp({
+    withStorage: true,
+    storage,
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }],
+    sessions: [{ header: { id: 's-1', cwd: 'C:\\repo' } }],
+    events: new Map([['s-1', events]]),
+  })
+  for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  blockWrites = true
+  const flush = (app.listeners['session/flush'] || [])[0]({ id: 's-1', header: { id: 's-1', cwd: 'C:\\repo' }, events })
+  for (let i = 0; i < 20 && !putStarted; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(putStarted, true)
+  const cleanups = app.cleanups.map((cleanup) => cleanup()).filter((value) => value && typeof value.then === 'function')
+  resolvePut()
+  await flush
+  await Promise.all(cleanups)
+  assert.equal(closed, true)
+  assert.ok(storage.records.sessions['s-1'])
+})
+test('does not crash when Cordis timer becomes inactive during baseline', async () => {
+  let timeoutCalls = 0
+  const app = await createApp({
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }],
+    sessions: [{ header: { id: 's-1', cwd: 'C:\\repo' } }],
+    events: new Map([['s-1', [{ seq: 1, time: Date.now(), type: 'turn/end', data: {} }]]]),
+    timeout: () => { timeoutCalls += 1; throw new Error('cannot get required service \"timer\" in inactive context') },
+  })
+  await new Promise((resolve) => setImmediate(resolve))
+  const snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  assert.equal(snapshot.status, 200)
+  assert.ok(timeoutCalls > 0)
 })
 test('uses native fetch for balance after loopback and token checks', async () => {
   const app = await createApp({ key: 'secret-key' })
