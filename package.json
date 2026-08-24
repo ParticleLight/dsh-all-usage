@@ -1,6 +1,6 @@
 {
   "name": "dsh-all-usage",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "DeepSeek Harness usage dashboard with model, provider, workspace, cache, balance, and CSV insights",
   "repository": {
     "type": "git",

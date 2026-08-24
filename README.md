@@ -18,15 +18,15 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **工作区别名**：在侧栏入口打开看板后管理，持久化保存到 $DSH_HOME/storages 的 KV 单元 `all_usage_aliases`
 - **界面语言**：在看板顶部切换中文与 English；选择会保存到浏览器本地
 - **完整历史与增量重建**：基线扫描全部可读历史会话；独立用量账本同时作为每会话游标——未变化的会话直接复用账本，新增事件只增量回填，长历史重启不再全量重建
+- **重启免读**：用持久化日志的 revision 作为每会话的变更信号（只读头部行 + stat，不读全量）——日志未变的会话重启时连事件都不读，直接从账本复用；仅日志变化（新增/修改）的会话才做增量读取
 - **Token 口径**：输入按「未含缓存命中」计，缓存命中 / 写入与推理独立成桶；全 0 用量的重放事件不会覆盖已记录的真实用量，仅缓存命中的请求也会计入
 
 ### 最近更新
 
-**v1.0.7**
+**v1.0.8**
 
-- 增量游标：启动重扫只增量回填新增事件，未变化的会话直接从独立账本复用，不再全量重建
-- 全 0 用量防护：全 0 用量的重放事件不会覆盖已记录的真实用量；纯缓存命中的请求仍会计入
-- 结构化语义声明：API 返回机读的 token 口径（输入不含缓存命中，缓存与推理独立成桶）
+- 重启免读：用持久化日志的 revision 做每会话变更信号，未变化会话重启时完全不读事件，直接复用账本；仅在日志变化时增量读取
+- 账本记录持久化每会话的日志 revision（旧记录首次重读后自动回填）
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -104,15 +104,15 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, acc
 - **Workspace aliases**: manage aliases from the sidebar dashboard; values persist in the $DSH_HOME/storages KV cell `all_usage_aliases`
 - **Interface language**: switch between Chinese and English from the dashboard header; your choice persists locally in the browser
 - **Full history & incremental rebuild**: the baseline scans every readable historical session; the durable usage ledger doubles as a per-session cursor, so unchanged sessions are reused straight from the ledger and only newly appended events are folded — long histories restart without a full rebuild
+- **Restart with no re-read**: the persisted log revision (a header-line + stat via `sessionPersistence.listSnapshots()`) acts as a per-session change signal — sessions whose log is unchanged are applied from the ledger on restart without reading their events at all; only changed/new sessions are read incrementally
 - **Token accounting semantics**: input tokens are fresh (exclude cache hits/writes, which sit in separate buckets along with reasoning); all-zero usage replays never overwrite recorded usage, while cache-only requests still count
 
 ### Latest Update
 
-**v1.0.7**
+**v1.0.8**
 
-- Incremental scan cursor: restarts re-fold only newly appended events; unchanged sessions are seeded straight from the durable ledger instead of a full rebuild
-- All-zero usage guard: zero-usage replays no longer overwrite recorded usage, while pure cache-read requests still count
-- Structured token semantics: the API now declares a machine-readable accounting contract (input excludes cache; cache and reasoning are separate buckets)
+- Restart with no re-read: the persisted log revision acts as a per-session change signal, so unchanged sessions are applied from the ledger on restart without reading any events; only changed logs are read incrementally
+- The ledger now stores each session's log revision; existing rows are re-read once and backfilled automatically
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 

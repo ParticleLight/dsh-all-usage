@@ -2,6 +2,17 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [1.0.8] - 2026-08-23
+
+### Added
+
+- Added a restart read-avoidance cursor: on startup the plugin uses the persisted log revision (via `sessionPersistence.listSnapshots()`, a header-line + stat read) as a per-session change signal. Sessions whose log is unchanged since the last ledger write are applied straight from the durable ledger without reading their full event log; only changed or new sessions are read (incrementally).
+- Stored the log revision in each durable ledger record (`lastRevision`); existing rows without it are re-read once and backfilled, so behavior is backward compatible.
+
+### Fixed
+
+- Eliminated the per-session full-event read at restart for unchanged persisted sessions, so DSH restarts no longer re-read every session's history from scratch.
+
 ## [1.0.7] - 2026-08-23
 
 ### Added
@@ -51,6 +62,7 @@ All notable changes to `dsh-all-usage` are documented here.
 - Allowed same-origin browser balance GET requests that omit `Origin` while retaining token protection.
 - Standardized English date buckets, range filters, streaks, heatmap dates, and export timestamps on UTC.
 
+[1.0.8]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.8
 [1.0.7]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.7
 [1.0.6]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.6
 [1.0.5]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.5
