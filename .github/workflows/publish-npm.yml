@@ -9,13 +9,26 @@ permissions:
   contents: read
   id-token: write
 
+# A delayed release event and a manual recovery dispatch must not race.
+concurrency:
+  group: npm-publish-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - run: npm publish --access public --provenance
+      - name: Publish npm package
+        run: |
+          name="$(node -p \"require('./package.json').name\")"
+          version="$(node -p \"require('./package.json').version\")"
+          if npm view "${name}@${version}" version --json >/dev/null 2>&1; then
+            echo "::notice::${name}@${version} is already published; skipping duplicate publication."
+            exit 0
+          fi
+          npm publish --access public --provenance
