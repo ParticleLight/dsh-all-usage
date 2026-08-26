@@ -2,6 +2,18 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [1.0.9] - 2026-08-26
+
+### Added
+
+- Added a lightweight, guarded `/api/all-usage/status` contract with a per-Host instance ID, monotonic stats revision, scan progress, and non-sensitive sync-health counters.
+- Added sync-health visibility for revision-skipped sessions, actual log reads, ledger-only recoveries, failures, persistence snapshot availability, and last completed baseline time.
+- Added revision-driven Client refresh: after the initial scan, the dashboard polls only lightweight status and fetches the full historical snapshot only when the Host instance or stats revision changes.
+
+### Fixed
+
+- Preserved the last successful usage view after status or full-snapshot failures, exposed a retry action, and added bounded retry backoff instead of silently discarding refresh errors.
+
 ## [1.0.8] - 2026-08-23
 
 ### Added
@@ -62,6 +74,7 @@ All notable changes to `dsh-all-usage` are documented here.
 - Allowed same-origin browser balance GET requests that omit `Origin` while retaining token protection.
 - Standardized English date buckets, range filters, streaks, heatmap dates, and export timestamps on UTC.
 
+[1.0.9]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.9
 [1.0.8]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.8
 [1.0.7]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.7
 [1.0.6]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.6

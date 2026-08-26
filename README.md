@@ -19,14 +19,15 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **界面语言**：在看板顶部切换中文与 English；选择会保存到浏览器本地
 - **完整历史与增量重建**：基线扫描全部可读历史会话；独立用量账本同时作为每会话游标——未变化的会话直接复用账本，新增事件只增量回填，长历史重启不再全量重建
 - **重启免读**：用持久化日志的 revision 作为每会话的变更信号（只读头部行 + stat，不读全量）——日志未变的会话重启时连事件都不读，直接从账本复用；仅日志变化（新增/修改）的会话才做增量读取
+- **数据健康与按需刷新**：扫描完成后浏览器只检查轻量状态版本，只有用量、别名或同步状态变化时才拉完整历史；显示本次数据更新时间、历史扫描健康、revision 免读、实际读取、账本恢复和失败，网络异常保留上次成功数据并可重试
 - **Token 口径**：输入按「未含缓存命中」计，缓存命中 / 写入与推理独立成桶；全 0 用量的重放事件不会覆盖已记录的真实用量，仅缓存命中的请求也会计入
 
 ### 最近更新
 
-**v1.0.8**
+**v1.0.9**
 
-- 重启免读：用持久化日志的 revision 做每会话变更信号，未变化会话重启时完全不读事件，直接复用账本；仅在日志变化时增量读取
-- 账本记录持久化每会话的日志 revision（旧记录首次重读后自动回填）
+- 按需刷新：扫描完成后只轮询轻量状态，Host instance 或统计 revision 变化时才拉完整历史快照
+- 数据健康：显示本次数据更新时间与历史扫描健康，以及 revision 免读、实际读取、账本恢复、失败与优化可用性；刷新失败保留上次成功数据并支持重试
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -81,6 +82,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - 会话删除后，已成功 flush 的用量仍从独立账本恢复；会话销毁提示和周期对账只负责触发重建，不会删除账本记录
 - 同一会话的同一 `turn / step` 只保留一份最终 usage；重试或替换消息会替换旧贡献，不重复累计
 - 输入 Token 按「未含缓存命中」计（缓存命中 / 写入独立成桶）；全 0 用量的重放事件不会覆盖已记录的真实用量，纯缓存命中的请求仍会计入
+- 轻量状态接口只公开 Host 实例、统计 revision、扫描进度与同步计数，不公开会话 ID、工作区路径、提示词或回复正文；完整快照仅在状态变化或手动刷新时获取
 - 看板中的总处理量 = 输入 + 输出 + 缓存读写 + 推理；缓存命中表示复用的上下文 Token，不等于新生成 Token 或实际费用
 - 余额查询走 DeepSeek 官方 `/user/balance` 接口；未配置 API Key 时卡片显示引导文案
 - 仅统计能归属到已注册工作区（按会话 cwd 匹配）的会话
@@ -105,14 +107,15 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, acc
 - **Interface language**: switch between Chinese and English from the dashboard header; your choice persists locally in the browser
 - **Full history & incremental rebuild**: the baseline scans every readable historical session; the durable usage ledger doubles as a per-session cursor, so unchanged sessions are reused straight from the ledger and only newly appended events are folded — long histories restart without a full rebuild
 - **Restart with no re-read**: the persisted log revision (a header-line + stat via `sessionPersistence.listSnapshots()`) acts as a per-session change signal — sessions whose log is unchanged are applied from the ledger on restart without reading their events at all; only changed/new sessions are read incrementally
+- **Data health and on-demand refresh**: after a scan completes, the browser polls only a lightweight status revision and fetches full history only after usage, alias, or sync state changes; it shows the latest full-data update, historical scan health, revision skips, rereads, ledger recovery, and failures while preserving last-good data on network errors
 - **Token accounting semantics**: input tokens are fresh (exclude cache hits/writes, which sit in separate buckets along with reasoning); all-zero usage replays never overwrite recorded usage, while cache-only requests still count
 
 ### Latest Update
 
-**v1.0.8**
+**v1.0.9**
 
-- Restart with no re-read: the persisted log revision acts as a per-session change signal, so unchanged sessions are applied from the ledger on restart without reading any events; only changed logs are read incrementally
-- The ledger now stores each session's log revision; existing rows are re-read once and backfilled automatically
+- On-demand refresh: after the scan completes, the dashboard polls lightweight status and fetches full history only when the Host instance or stats revision changes
+- Data health: latest full-data update, historical scan health, revision skips, rereads, ledger recovery, failures, and optimization availability are visible; failed refreshes keep last-good data and expose retry
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 
@@ -161,6 +164,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 - After a session is deleted, successfully flushed usage is restored from the separate ledger; disposal hints and periodic reconciliation trigger rebuilds without deleting ledger rows
 - For each session and logical `turn / step`, only the final usage contribution is kept; retries or replaced messages do not double-count
 - Input tokens are fresh (exclude cache hits/writes, which sit in their own buckets); all-zero usage replays do not overwrite recorded usage and pure cache-read requests still count
+- The lightweight status endpoint exposes only Host instance, stats revision, scan progress, and sync counters. It does not expose session IDs, workspace paths, prompts, or reply bodies; full snapshots are fetched only after status changes or a manual refresh
 - Processed tokens = input + output + cache read/write + reasoning; a cache hit means reused context, not newly generated tokens or actual cost
 - Balance data comes from DeepSeek’s official `/user/balance` endpoint; the card shows guidance when no API key is configured
 - English mode uses UTC for date buckets, range filters, streaks, heatmap dates, and export timestamps; Chinese mode uses local time

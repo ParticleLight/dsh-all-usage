@@ -318,6 +318,8 @@ test('rehydrates deleted-session usage from the durable ledger', async () => {
   assert.equal(body.totals.turns, 1)
   assert.equal(body.totals.input, 10)
   assert.equal(body.totals.sessions, 1)
+  assert.equal(body.sync.sessionsRead, 0)
+  assert.equal(body.sync.sessionsRestoredFromLedger, 1)
 })
 test('replaces an existing ledger row without double-counting usage', async () => {
   const eventTime = Date.now() - 60 * 1000
@@ -505,9 +507,78 @@ test('stops folding events after disposal', async () => {
   assert.equal(after.json().totals.turns, 2)
 })
 
+
+test('serves a lightweight status snapshot with full stats route protections', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    workspaces: [{ id: 'ws-1', path: 'C:\repo', title: 'Repo', sessionIds: ['s-1'] }],
+    sessions: [{ header: { id: 's-1', cwd: 'C:\repo' } }],
+    events: new Map([['s-1', [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }]]]),
+  })
+  let full = null
+  for (let i = 0; i < 100; i += 1) {
+    full = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (full.json().scan.done) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  const status = await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  assert.equal(status.status, 200)
+  const body = status.json()
+  assert.match(body.instanceId, /^[A-Za-z0-9_-]+$/)
+  assert.equal(typeof body.revision, 'number')
+  assert.equal(typeof body.updatedAt, 'number')
+  assert.equal(body.scan.done, true)
+  assert.equal(body.sync.sessionsTotal, 1)
+  assert.equal(body.sync.sessionsRead, 1)
+  assert.equal(body.sync.persistenceSnapshotsAvailable, false)
+  assert.equal(Object.hasOwn(body, 'requestToken'), false)
+  assert.equal(Object.hasOwn(body, 'totals'), false)
+  assert.equal(Object.hasOwn(body, 'aliases'), false)
+  assert.equal(Object.hasOwn(body, 'workspaces'), false)
+  assert.equal(Object.hasOwn(body, 'byDay'), false)
+  assert.equal(Object.hasOwn(body, 'byDayUtc'), false)
+  assert.equal((await call(app, '/api/all-usage/status', makeRequest('GET', { host: '192.0.2.10:3080' }))).status, 403)
+  assert.equal((await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080', 'sec-fetch-site': 'cross-site' }))).status, 403)
+})
+
+test('advances the status revision after alias and live usage changes', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    workspaces: [{ id: 'ws-1', path: 'C:\repo', title: 'Repo', sessionIds: ['s-1'] }],
+    sessions: [{ header: { id: 's-1', cwd: 'C:\repo' } }],
+    events: new Map([['s-1', [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }]]]),
+  })
+  let full = null
+  for (let i = 0; i < 100; i += 1) {
+    full = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (full.json().scan.done) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  const token = full.json().requestToken
+  const before = (await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  const alias = await call(app, '/api/all-usage/alias', makeRequest('POST', {
+    host: '127.0.0.1:3080',
+    origin: 'http://127.0.0.1:3080',
+    'x-all-usage-request-token': token,
+  }, JSON.stringify({ workspaceId: 'ws-1', alias: 'Main' })))
+  assert.equal(alias.status, 200)
+  await new Promise((resolve) => setImmediate(resolve))
+  const afterAlias = (await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.ok(afterAlias.revision > before.revision)
+  const handlers = app.listeners['session/event'] || []
+  assert.equal(handlers.length, 1)
+  handlers[0]({ id: 's-1', header: { cwd: 'C:\repo' } }, { seq: 2, time: Date.now(), type: 'turn/end', data: {} })
+  await new Promise((resolve) => setImmediate(resolve))
+  const afterLive = (await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.ok(afterLive.revision > afterAlias.revision)
+  const latest = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  assert.equal(latest.json().totals.turns, 2)
+})
+
 test('enforces route methods', async () => {
   const app = await createApp()
   assert.equal((await call(app, '/api/all-usage', makeRequest('POST', { host: '127.0.0.1:3080' }))).status, 405)
+  assert.equal((await call(app, '/api/all-usage/status', makeRequest('POST', { host: '127.0.0.1:3080' }))).status, 405)
   assert.equal((await call(app, '/api/all-usage/balance', makeRequest('POST', { host: '127.0.0.1:3080' }))).status, 405)
   assert.equal((await call(app, '/api/all-usage/alias', makeRequest('GET', { host: '127.0.0.1:3080' }))).status, 405)
 })

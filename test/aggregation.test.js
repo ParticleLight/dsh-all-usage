@@ -344,7 +344,12 @@ test('skips re-reading unchanged sessions after restart using persistence revisi
     if (snap.json().scan.done && snap.json().totals.turns === 1) break
     await new Promise((resolve) => setImmediate(resolve))
   }
-  assert.equal(snap.json().totals.input, 10)
+  const firstBody = snap.json()
+  assert.equal(firstBody.totals.input, 10)
+  assert.equal(firstBody.sync.persistenceSnapshotsAvailable, true)
+  assert.equal(firstBody.sync.sessionsTotal, 1)
+  assert.equal(firstBody.sync.sessionsRead, 1)
+  assert.equal(firstBody.sync.sessionsSkippedByRevision, 0)
   assert.equal(first.readCalls.get('s-1'), 1, 'first baseline must read the session')
   assert.equal(first.storageUnit.records.sessions['s-1'].lastRevision, 'rev-1', 'ledger must store the log revision')
 
@@ -357,10 +362,14 @@ test('skips re-reading unchanged sessions after restart using persistence revisi
     if (snap.json().scan.done && snap.json().totals.turns === 1) break
     await new Promise((resolve) => setImmediate(resolve))
   }
-  assert.equal(snap.json().scan.done, true)
-  assert.equal(snap.json().totals.input, 10)
-  assert.equal(snap.json().totals.output, 20)
-  assert.equal(snap.json().totals.sessions, 1)
+  const secondBody = snap.json()
+  assert.equal(secondBody.scan.done, true)
+  assert.equal(secondBody.totals.input, 10)
+  assert.equal(secondBody.totals.output, 20)
+  assert.equal(secondBody.totals.sessions, 1)
+  assert.equal(secondBody.sync.persistenceSnapshotsAvailable, true)
+  assert.equal(secondBody.sync.sessionsRead, 0)
+  assert.equal(secondBody.sync.sessionsSkippedByRevision, 1)
   assert.equal(second.readCalls.get('s-1') || 0, 0, 'unchanged session must not be re-read')
 
   // A live retry of the seeded step still replaces instead of double-counting.
@@ -416,6 +425,9 @@ test('re-reads a session whose persisted log revision changed', async () => {
   const body = snap.json()
   assert.equal(body.totals.input, 17)
   assert.equal(body.totals.turns, 2)
+  assert.equal(body.sync.persistenceSnapshotsAvailable, true)
+  assert.equal(body.sync.sessionsRead, 1)
+  assert.equal(body.sync.sessionsSkippedByRevision, 0)
   assert.equal(second.readCalls.get('s-1'), 1, 'changed revision must trigger a re-read')
   assert.equal(second.storageUnit.records.sessions['s-1'].lastRevision, 'rev-2')
 })
@@ -440,7 +452,10 @@ test('backfills the revision on the first read after upgrading (old ledger rows)
     if (snap.json().scan.done && snap.json().totals.turns === 1) break
     await new Promise((resolve) => setImmediate(resolve))
   }
-  assert.equal(snap.json().totals.input, 10)
+  const body = snap.json()
+  assert.equal(body.totals.input, 10)
+  assert.equal(body.sync.sessionsRead, 1)
+  assert.equal(body.sync.sessionsSkippedByRevision, 0)
   assert.equal(app.readCalls.get('s-1'), 1, 'rows without a stored revision must be read once')
   assert.equal(app.storageUnit.records.sessions['s-1'].lastRevision, 'rev-9')
 })
