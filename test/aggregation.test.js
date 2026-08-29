@@ -432,6 +432,257 @@ test('re-reads a session whose persisted log revision changed', async () => {
   assert.equal(second.storageUnit.records.sessions['s-1'].lastRevision, 'rev-2')
 })
 
+
+test('serves structured scoped aggregates and privacy-safe paginated records', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const date = new Date(eventTime)
+  const dateText = date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0')
+  const app = await createApp({
+    workspaces: [
+      { id: 'ws-a', path: 'C:\\a', title: 'A' },
+      { id: 'ws-b', path: 'C:\\b', title: 'B' },
+    ],
+    sessions: [
+      { header: { id: 's-a', cwd: 'C:\\a' } },
+      { header: { id: 's-b', cwd: 'C:\\b' } },
+    ],
+    events: new Map([
+      ['s-a', [
+        { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'provider-a', model: 'requested-a' } },
+        usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 20, cacheReadTokens: 30 }, 2),
+        { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+      ]],
+      ['s-b', [
+        { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'provider-b', model: 'requested-b' } },
+        { seq: 2, time: eventTime, type: 'assistant/message', data: { turn: 1, step: 1, message: { source: { provider: 'provider-b', model: 'actual-b' } }, usage: { inputTokens: 7, outputTokens: 8 } } },
+        { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+      ]],
+    ]),
+  })
+  let snapshot = null
+  for (let i = 0; i < 200; i += 1) {
+    snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (snapshot.json().scan.done) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  const full = snapshot.json()
+  assert.equal(full.usageSchemaVersion, 2)
+  const modelA = full.perModel.find((row) => row.provider === 'deepseek')
+  assert.ok(modelA)
+  assert.equal(modelA.requestedModel, 'requested-a')
+  assert.equal(modelA.actualModel, 'deepseek-chat')
+  assert.equal(typeof modelA.identityKey, 'string')
+
+  const request = makeRequest('GET', { host: '127.0.0.1:3080' })
+  request.url = '/api/all-usage/query?start=' + dateText + '&end=' + dateText + '&utc=0&workspaceId=ws-a&provider=deepseek'
+  const scoped = await call(app, '/api/all-usage/query', request)
+  assert.equal(scoped.status, 200)
+  const query = scoped.json()
+  assert.equal(query.usageSchemaVersion, 2)
+  assert.equal(query.scope.workspaceId, 'ws-a')
+  assert.equal(query.scope.provider, 'deepseek')
+  assert.equal(query.totals.calls, 1)
+  assert.equal(query.totals.sessions, 1)
+  assert.equal(query.totals.input, 10)
+  assert.equal(query.totals.cacheRead, 30)
+  assert.equal(query.daily.length, 1)
+  assert.equal(query.daily[0].tokens.output, 20)
+  assert.ok(Array.isArray(query.hourly))
+  assert.ok(query.hourly.length >= 1 && query.hourly.length <= 24)
+  const currentHour = query.hourly.find((row) => eventTime >= row.time && eventTime < row.time + 60 * 60 * 1000)
+  assert.ok(currentHour)
+  assert.equal(currentHour.turns, 1)
+  assert.equal(currentHour.calls, 1)
+  assert.equal(currentHour.tokens.input, 10)
+  assert.equal(currentHour.tokens.cacheRead, 30)
+  assert.ok(Array.isArray(query.heatmap))
+  const longRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  const previousDate = new Date(date); previousDate.setDate(previousDate.getDate() - 1)
+  const previousDateText = previousDate.getFullYear() + '-' + String(previousDate.getMonth() + 1).padStart(2, '0') + '-' + String(previousDate.getDate()).padStart(2, '0')
+  longRequest.url = '/api/all-usage/query?start=' + previousDateText + '&end=' + dateText + '&utc=0&workspaceId=ws-a&provider=deepseek'
+  const longQuery = await call(app, '/api/all-usage/query', longRequest)
+  assert.equal(longQuery.status, 200)
+  assert.deepEqual(longQuery.json().hourly, [])
+  const modelRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  modelRequest.url = '/api/all-usage/query?start=' + dateText + '&end=' + dateText + '&utc=0&modelKey=' + encodeURIComponent(modelA.identityKey)
+  const modelQuery = await call(app, '/api/all-usage/query', modelRequest)
+  assert.equal(modelQuery.json().totals.input, 10)
+  assert.equal(modelQuery.json().totals.sessions, 1)
+  const modelNameRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  modelNameRequest.url = '/api/all-usage/query?start=' + dateText + '&end=' + dateText + '&utc=0&provider=deepseek&modelKey=' + encodeURIComponent(modelA.actualModel)
+  const modelNameQuery = await call(app, '/api/all-usage/query', modelNameRequest)
+  assert.equal(modelNameQuery.json().totals.input, 10)
+  assert.equal(modelNameQuery.json().totals.sessions, 1)
+  const conflictingModelRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  conflictingModelRequest.url = '/api/all-usage/query?start=' + dateText + '&end=' + dateText + '&utc=0&provider=deepseek&modelKey=actual-b'
+  const conflictingModelQuery = await call(app, '/api/all-usage/query', conflictingModelRequest)
+  assert.equal(conflictingModelQuery.json().totals.calls, 0)
+  assert.equal(app.readCalls.get('s-a'), 1)
+  assert.equal(app.readCalls.get('s-b'), 1)
+
+  const recordsRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  recordsRequest.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText + '&utc=0&limit=1'
+  const page = await call(app, '/api/all-usage/records', recordsRequest)
+  assert.equal(page.status, 200)
+  const pageBody = page.json()
+  assert.equal(pageBody.usageSchemaVersion, 2)
+  assert.equal(pageBody.items.length, 1)
+  assert.equal(typeof pageBody.items[0].id, 'string')
+  assert.equal(Object.hasOwn(pageBody.items[0], 'sid'), false)
+  assert.equal(Object.hasOwn(pageBody.items[0], 'sessionId'), false)
+  assert.equal(Object.hasOwn(pageBody.items[0], 'path'), false)
+  assert.equal(Object.hasOwn(pageBody.items[0], 'prompt'), false)
+  assert.equal(Object.hasOwn(pageBody.items[0], 'reply'), false)
+  assert.equal(pageBody.hasMore, true)
+  const nextRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  nextRequest.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText + '&utc=0&limit=1&cursor=' + encodeURIComponent(pageBody.nextCursor)
+  const next = await call(app, '/api/all-usage/records', nextRequest)
+  assert.equal(next.status, 200)
+  assert.notEqual(next.json().items[0].id, pageBody.items[0].id)
+  const liveHandlers = app.listeners['session/event'] || []
+  liveHandlers[0]({ id: 's-a', header: { cwd: 'C:\\a' } }, usageEvent(Date.now(), 2, 1, { inputTokens: 1, outputTokens: 1 }, 4))
+  await new Promise((resolve) => setImmediate(resolve))
+  const staleRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  staleRequest.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText + '&utc=0&limit=1&cursor=' + encodeURIComponent(pageBody.nextCursor)
+  assert.equal((await call(app, '/api/all-usage/records', staleRequest)).status, 409)
+  const freshRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  freshRequest.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText + '&utc=0&limit=1'
+  const freshBody = (await call(app, '/api/all-usage/records', freshRequest)).json()
+  assert.equal(freshBody.items[0].values.input, 1)
+})
+
+test('fills hourly rows for a single calendar day and keeps cross-day trends daily', async () => {
+  const firstTime = Date.UTC(2024, 0, 15, 1, 10)
+  const secondTime = Date.UTC(2024, 0, 15, 4, 20)
+  const app = await createApp({
+    workspaces: [{ id: 'ws-hour', path: 'C:\\hour', title: 'Hour' }],
+    sessions: [{ header: { id: 's-hour', cwd: 'C:\\hour' } }],
+    events: new Map([['s-hour', [
+      usageEvent(firstTime, 1, 1, { inputTokens: 10, outputTokens: 20 }, 1),
+      usageEvent(secondTime, 2, 1, { inputTokens: 7, outputTokens: 8 }, 2),
+    ]]]),
+  })
+  let snapshot = null
+  for (let i = 0; i < 200; i += 1) {
+    snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (snapshot.json().scan.done) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  const request = makeRequest('GET', { host: '127.0.0.1:3080' })
+  request.url = '/api/all-usage/query?start=2024-01-15&end=2024-01-15&utc=1&workspaceId=ws-hour'
+  const query = (await call(app, '/api/all-usage/query', request)).json()
+  assert.equal(query.hourly.length, 24)
+  assert.equal(query.hourly[0].time, Date.UTC(2024, 0, 15, 0, 0))
+  assert.equal(query.hourly[1].calls, 1)
+  assert.equal(query.hourly[1].tokens.input, 10)
+  assert.equal(query.hourly[2].calls, 0)
+  assert.equal(query.hourly[4].calls, 1)
+  assert.equal(query.hourly[4].tokens.output, 8)
+  assert.equal(query.totals.calls, 2)
+  assert.equal(query.hourly.reduce((sum, row) => sum + row.tokens.input, 0), query.totals.input)
+  const longRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  longRequest.url = '/api/all-usage/query?start=2024-01-14&end=2024-01-15&utc=1&workspaceId=ws-hour'
+  const longQuery = (await call(app, '/api/all-usage/query', longRequest)).json()
+  assert.deepEqual(longQuery.hourly, [])
+})
+
+test('reuses the previous route identity when folding a changed session tail', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const firstEvents = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'provider-a', model: 'requested-a' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 20 }, 2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+  ]
+  const secondEvents = firstEvents.concat([
+    usageEvent(eventTime, 2, 1, { inputTokens: 5, outputTokens: 6 }, 4),
+    { seq: 5, time: eventTime, type: 'turn/end', data: { turn: 2 } },
+  ])
+  const first = await createApp({ withStorage: true, workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }], sessions: [{ header: { id: 's-1', cwd: 'C:\\repo' } }], events: new Map([['s-1', firstEvents]]), snapshots: [{ header: { id: 's-1' }, revision: 'r1' }] })
+  let snap = null
+  for (let i = 0; i < 200; i += 1) { snap = await call(first, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' })); if (snap.json().scan.done) break; await new Promise((resolve) => setImmediate(resolve)) }
+  const second = await createApp({ withStorage: true, storage: first.storageUnit, workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }], sessions: [{ header: { id: 's-1', cwd: 'C:\\repo' } }], events: new Map([['s-1', secondEvents]]), snapshots: [{ header: { id: 's-1' }, revision: 'r2' }] })
+  for (let i = 0; i < 200; i += 1) { snap = await call(second, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' })); if (snap.json().scan.done) break; await new Promise((resolve) => setImmediate(resolve)) }
+  const row = snap.json().perModel.find((item) => item.provider === 'deepseek')
+  assert.ok(row)
+  assert.equal(row.actualModel, 'deepseek-chat')
+  assert.equal(snap.json().totals.input, 15)
+})
+
+
+
+
+test('upgrades a legacy ledger row whose canonical usage key changed', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const legacy = { 's-1': { version: 1, sessionId: 's-1', workspaceId: 'ws-1', lastSeq: 2, lastRevision: 'old-rev', turns: [{ key: 'old-turn', time: eventTime, workspaceId: 'ws-1' }], usage: [{ key: 'legacy-key', seq: 2, time: eventTime, workspaceId: 'ws-1', modelId: 'legacy / model', values: { input: 99, output: 88, cacheRead: 0, cacheWrite: 0, reasoning: 0 } }] } }
+  const app = await createApp({
+    withStorage: true,
+    ledgerSeed: legacy,
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }],
+    sessions: [{ header: { id: 's-1', cwd: 'C:\\repo' } }],
+    events: new Map([['s-1', [
+      { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+      usageEvent(eventTime, 1, 1, { inputTokens: 3, outputTokens: 4 }, 2),
+      { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    ]]]),
+    snapshots: [{ header: { id: 's-1' }, revision: 'new-rev' }],
+  })
+  let snap = null
+  for (let i = 0; i < 200; i += 1) { snap = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' })); if (snap.json().scan.done) break; await new Promise((resolve) => setImmediate(resolve)) }
+  assert.equal(snap.json().totals.input, 3)
+  assert.equal(snap.json().totals.output, 4)
+  assert.equal(app.readCalls.get('s-1'), 1)
+  assert.equal(app.storageUnit.records.sessions['s-1'].version, 2)
+  assert.equal(app.storageUnit.records.sessions['s-1'].usage.length, 1)
+})
+
+test('rebuilds from the full log when a changed session is truncated', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const fullEvents = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 20 }, 2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    usageEvent(eventTime, 2, 1, { inputTokens: 30, outputTokens: 40 }, 4),
+  ]
+  const truncatedEvents = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 3, outputTokens: 4 }, 2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+  ]
+  const opts = { withStorage: true, workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }], sessions: [{ header: { id: 's-1', cwd: 'C:\\repo' } }], snapshots: [{ header: { id: 's-1' }, revision: 'r1' }] }
+  const first = await createApp({ ...opts, events: new Map([['s-1', fullEvents]]) })
+  let snap = null
+  for (let i = 0; i < 200; i += 1) { snap = await call(first, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' })); if (snap.json().scan.done) break; await new Promise((resolve) => setImmediate(resolve)) }
+  const second = await createApp({ ...opts, storage: first.storageUnit, events: new Map([['s-1', truncatedEvents]]), snapshots: [{ header: { id: 's-1' }, revision: 'r2' }] })
+  for (let i = 0; i < 200; i += 1) { snap = await call(second, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' })); if (snap.json().scan.done) break; await new Promise((resolve) => setImmediate(resolve)) }
+  assert.equal(snap.json().totals.input, 3)
+  assert.equal(snap.json().totals.output, 4)
+  assert.equal(snap.json().totals.turns, 1)
+})
+
+
+test('includes historical turn-only records outside the heatmap window', async () => {
+  const eventTime = Date.UTC(2024, 0, 15, 12, 0, 0)
+  const app = await createApp({
+    workspaces: [{ id: 'ws-old', path: 'C:\\old', title: 'Old' }],
+    sessions: [{ header: { id: 's-old', cwd: 'C:\\old' } }],
+    events: new Map([['s-old', [{ seq: 1, time: eventTime, type: 'turn/end', data: { turn: 1 } }]]]),
+  })
+  let snapshot = null
+  for (let i = 0; i < 200; i += 1) {
+    snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (snapshot.json().scan.done) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  const request = makeRequest('GET', { host: '127.0.0.1:3080' })
+  request.url = '/api/all-usage/query?start=2024-01-15&end=2024-01-15&utc=1&workspaceId=ws-old'
+  const result = await call(app, '/api/all-usage/query', request)
+  assert.equal(result.status, 200)
+  assert.equal(result.json().totals.turns, 1)
+  assert.equal(result.json().totals.calls, 0)
+  assert.equal(result.json().totals.sessions, 1)
+  assert.equal(result.json().daily[0].turns, 1)
+})
+
 test('backfills the revision on the first read after upgrading (old ledger rows)', async () => {
   const eventTime = Date.now() - 60 * 1000
   const ledger = { 's-1': { version: 1, sessionId: 's-1', workspaceId: 'ws-1', lastSeq: 2, turns: [{ key: '1', time: eventTime, workspaceId: 'ws-1' }], usage: [{ key: 's-1:step:1:1', seq: 2, time: eventTime, workspaceId: 'ws-1', modelId: 'deepseek / deepseek-chat', values: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, reasoning: 0 } }] } }
@@ -457,5 +708,7 @@ test('backfills the revision on the first read after upgrading (old ledger rows)
   assert.equal(body.sync.sessionsRead, 1)
   assert.equal(body.sync.sessionsSkippedByRevision, 0)
   assert.equal(app.readCalls.get('s-1'), 1, 'rows without a stored revision must be read once')
+  assert.equal(app.storageUnit.records.sessions['s-1'].version, 2)
+  assert.ok(body.perModel.some((row) => row.provider === 'deepseek'), 'upgraded ledger should expose structured identity')
   assert.equal(app.storageUnit.records.sessions['s-1'].lastRevision, 'rev-9')
 })

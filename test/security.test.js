@@ -575,10 +575,59 @@ test('advances the status revision after alias and live usage changes', async ()
   assert.equal(latest.json().totals.turns, 2)
 })
 
+
+test('guards scoped query and records endpoints and omits private fields', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const date = new Date(eventTime)
+  const dateText = date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0')
+  const app = await createApp({
+    workspaces: [{ id: 'ws-1', path: 'C:\repo', title: 'Repo' }],
+    sessions: [{ header: { id: 's-1', cwd: 'C:\repo' } }],
+    events: new Map([['s-1', [
+      { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+      { seq: 2, time: eventTime, type: 'assistant/message', data: { turn: 1, step: 1, message: { source: { provider: 'deepseek', model: 'deepseek-chat' } }, usage: { inputTokens: 4, outputTokens: 5 } } },
+      { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    ]] ]),
+  })
+  let full = null
+  for (let i = 0; i < 100; i += 1) {
+    full = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (full.json().scan.done) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  const queryRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  queryRequest.url = '/api/all-usage/query?start=' + dateText + '&end=' + dateText + '&utc=0'
+  const query = await call(app, '/api/all-usage/query', queryRequest)
+  assert.equal(query.status, 200)
+  assert.equal(query.headers['cache-control'], 'no-store')
+  assert.equal(query.json().totals.calls, 1)
+  assert.equal(query.json().totals.sessions, 1)
+  assert.equal(Object.hasOwn(query.json(), 'requestToken'), false)
+  assert.equal(Object.hasOwn(query.json(), 'sessionIds'), false)
+  assert.equal(Object.hasOwn(query.json(), 'workspaces'), false)
+  const recordsRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  recordsRequest.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText + '&utc=0&limit=201'
+  assert.equal((await call(app, '/api/all-usage/records', recordsRequest)).status, 400)
+  const badTimezone = makeRequest('GET', { host: '127.0.0.1:3080' })
+  badTimezone.url = '/api/all-usage/query?start=' + dateText + '&end=' + dateText + '&utc=2'
+  assert.equal((await call(app, '/api/all-usage/query', badTimezone)).status, 400)
+  const staleCursor = makeRequest('GET', { host: '127.0.0.1:3080' })
+  staleCursor.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText + '&utc=0&cursor=' + encodeURIComponent(Buffer.from(JSON.stringify({ revision: -1, scope: '{}', offset: 1 })).toString('base64url'))
+  assert.equal((await call(app, '/api/all-usage/records', staleCursor)).status, 409)
+  const outside = makeRequest('GET', { host: '192.0.2.10:3080' })
+  outside.url = '/api/all-usage/query?start=' + dateText + '&end=' + dateText
+  assert.equal((await call(app, '/api/all-usage/query', outside)).status, 403)
+  const cross = makeRequest('GET', { host: '127.0.0.1:3080', 'sec-fetch-site': 'cross-site' })
+  cross.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText
+  assert.equal((await call(app, '/api/all-usage/records', cross)).status, 403)
+})
+
 test('enforces route methods', async () => {
   const app = await createApp()
   assert.equal((await call(app, '/api/all-usage', makeRequest('POST', { host: '127.0.0.1:3080' }))).status, 405)
   assert.equal((await call(app, '/api/all-usage/status', makeRequest('POST', { host: '127.0.0.1:3080' }))).status, 405)
+  assert.equal((await call(app, '/api/all-usage/query', makeRequest('POST', { host: '127.0.0.1:3080' }))).status, 405)
+  assert.equal((await call(app, '/api/all-usage/records', makeRequest('POST', { host: '127.0.0.1:3080' }))).status, 405)
   assert.equal((await call(app, '/api/all-usage/balance', makeRequest('POST', { host: '127.0.0.1:3080' }))).status, 405)
   assert.equal((await call(app, '/api/all-usage/alias', makeRequest('GET', { host: '127.0.0.1:3080' }))).status, 405)
 })

@@ -5,13 +5,13 @@ import vm from 'node:vm'
 
 const source = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
 const start = source.indexOf('    function pad2')
-const end = source.indexOf('    function modelParts')
+const end = source.indexOf('    function trendSeriesLabel')
 assert.notEqual(start, -1, 'client date helpers must exist')
 assert.notEqual(end, -1, 'client range helper boundary must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg }', context)
-const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg } = context.__rangeHelpers
+vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath }', context)
+const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath } = context.__rangeHelpers
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
   return {
@@ -80,6 +80,117 @@ test('aggregates custom ranges inclusively across summary, workspace, and model 
   assert.equal(aggregate.perModel.length, 1)
   assert.equal(aggregate.perModel[0].calls, 5)
   assert.equal(aggregate.perModel[0].reasoning, 250)
+})
+
+
+
+test('builds a stable scope and zero-fills daily trend rows', () => {
+  const stats = { byDay: [day('2026-08-01', 1, 10), day('2026-08-03', 2, 20)], byDayUtc: [] }
+  const bounds = resolveRangeBounds(stats, 'custom', false, { start: '2026-08-01', end: '2026-08-03' })
+  const scope = makeUsageScope(stats, 'custom', false, { start: '2026-08-01', end: '2026-08-03' }, 'ws-main', 'deepseek', 'model-key')
+  assert.equal(bounds.start, '2026-08-01')
+  assert.equal(bounds.end, '2026-08-03')
+  assert.equal(usageScopeKey(scope), JSON.stringify({ start: '2026-08-01', end: '2026-08-03', utc: false, workspaceId: 'ws-main', provider: 'deepseek', modelKey: 'model-key' }))
+  const rows = buildTrendRows(stats.byDay, bounds, false)
+  assert.equal(Array.from(rows, (row) => row.date).join('|'), '2026-08-01|2026-08-02|2026-08-03')
+  assert.equal(rows[1].total, 0)
+  assert.equal(rows[2].tokens.cacheRead, 60)
+})
+
+test('calculates streaks from complete history instead of selected range', () => {
+  const now = new Date()
+  const keyFor = (offset) => {
+    const date = new Date(now)
+    date.setDate(date.getDate() + offset)
+    return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0')
+  }
+  const fullHistory = new Map([
+    [keyFor(0), { turns: 1 }],
+    [keyFor(-1), { turns: 1 }],
+    [keyFor(-2), { turns: 1 }],
+  ])
+  const todayOnly = new Map([[keyFor(0), { turns: 1 }]])
+  const todayResult = streaks(todayOnly, false)
+  const fullResult = streaks(fullHistory, false)
+  assert.equal(todayResult.streak, 1)
+  assert.equal(todayResult.best, 1)
+  assert.equal(fullResult.streak, 3)
+  assert.equal(fullResult.best, 3)
+})
+
+test('normalizes hourly trend rows with unique time points', () => {
+  const first = Date.UTC(2026, 7, 1, 0, 0, 0)
+  const rows = buildTrendHourlyRows([
+    { time: first + 60 * 60 * 1000, turns: 2, calls: 3, tokens: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40, reasoning: 50 } },
+    { time: first, turns: 1, calls: 1, tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, reasoning: 5 } },
+  ], true)
+  assert.deepEqual(Array.from(rows, (row) => row.time), [first, first + 60 * 60 * 1000])
+  assert.deepEqual(Array.from(rows, (row) => row.date), ['2026-08-01', '2026-08-01'])
+  assert.equal(rows[0].total, 15)
+  assert.equal(rows[1].tokens.cacheRead, 30)
+})
+
+test('builds donut segments with normalized percentages and remainder', () => {
+  const donut = buildDonutSegments([
+    { label: 'A', value: 70, color: '#0a84ff' },
+    { label: 'B', value: 20, color: '#30d158' },
+    { label: 'C', value: 10, color: '#bf5af2' },
+    { label: 'D', value: 5, color: '#ff9f0a' },
+  ], '其他', 2)
+  assert.equal(donut.total, 105)
+  assert.equal(donut.segments.length, 3)
+  assert.equal(donut.segments[0].label, 'A')
+  assert.equal(donut.segments[2].label, '其他 (2)')
+  assert.equal(donut.segments[2].color, '#b8c2cf')
+  assert.equal(Math.round(donut.segments.reduce((sum, item) => sum + item.percentage, 0)), 100)
+  assert.ok(donut.segments.every((item) => item.endAngle > item.startAngle))
+  assert.match(donutArcPath(130, 130, 94, 61, donut.segments[0].startAngle, donut.segments[0].endAngle), /A94 94/)
+  assert.match(donutArcLinePath(130, 130, 77.5, donut.segments[0].startAngle, donut.segments[0].endAngle), /A77.5 77.5/)
+  const single = buildDonutSegments([{ label: 'Only', value: 1 }], '其他')
+  assert.equal(single.segments.length, 1)
+  assert.match(donutArcPath(130, 130, 94, 61, single.segments[0].startAngle, single.segments[0].endAngle), /A94 94 0 1 1/)
+})
+
+test('builds safe single-point and large-value trend geometry', () => {
+  const rows = buildTrendRows([day('2026-08-01', 1, 1000000)], { start: '2026-08-01', end: '2026-08-01' }, false)
+  const geometry = buildTrendGeometry(rows, ['total', 'input'], 900, 250)
+  assert.equal(geometry.points.total.length, 1)
+  assert.equal(geometry.points.total[0].x, 466)
+  assert.ok(Number.isFinite(geometry.points.total[0].y))
+  assert.ok(geometry.max > 1000000)
+  const path = smoothTrendPath([{ x: 0, y: 10 }, { x: 10, y: 2 }, { x: 20, y: 8 }])
+  assert.match(path, /C/)
+})
+
+test('renders a visible marker for a single-day trend series', () => {
+  assert.match(source, /points.length !== 1/)
+  assert.match(source, /key: 'single-point-' \+ key/)
+})
+
+test('animates smooth chart paths', () => {
+  assert.match(source, /uh-trend-draw/)
+  assert.match(source, /stroke-dasharray:var\(--uh-draw-length\)/)
+  assert.match(source, /uh-trend-area/)
+  assert.match(source, /uh-trend-gradient-/)
+  assert.match(source, /uh-trend-cursor/)
+  assert.match(source, /uh-trend-point/)
+  assert.doesNotMatch(source, /uh-trend-point-in/)
+  assert.match(source, /smoothTrendPath/)
+  assert.match(source, /key: 'line-base-' \+ key/)
+  assert.match(source, /key: 'line-draw-' \+ key/)
+  assert.match(source, /uh-trend-line-draw/)
+  assert.match(source, /stroke-dashoffset:var\(--uh-draw-length\)/)
+})
+
+test('uses structured identity instead of splitting display labels', () => {
+  const rows = [
+    { identityKey: 'a', provider: 'p/one', actualModel: 'm / alpha', model: 'p/one / m / alpha', calls: 1, input: 1, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+    { identityKey: 'b', provider: 'p/two', actualModel: 'm / alpha', model: 'p/two / m / alpha', calls: 2, input: 2, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+  ]
+  const grouped = aggregateModelRows(rows, 'model', 'Unknown provider', 'Unknown model')
+  assert.equal(grouped.length, 1)
+  assert.equal(grouped[0].model, 'm / alpha')
+  assert.equal(grouped[0].calls, 3)
 })
 
 test('uses the selected language calendar bucket for custom ranges', () => {

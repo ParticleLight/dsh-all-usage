@@ -20,14 +20,20 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **完整历史与增量重建**：基线扫描全部可读历史会话；独立用量账本同时作为每会话游标——未变化的会话直接复用账本，新增事件只增量回填，长历史重启不再全量重建
 - **重启免读**：用持久化日志的 revision 作为每会话的变更信号（只读头部行 + stat，不读全量）——日志未变的会话重启时连事件都不读，直接从账本复用；仅日志变化（新增/修改）的会话才做增量读取
 - **数据健康与按需刷新**：扫描完成后浏览器只检查轻量状态版本，只有用量、别名或同步状态变化时才拉完整历史；显示本次数据更新时间、历史扫描健康、revision 免读、实际读取、账本恢复和失败，网络异常保留上次成功数据并可重试
+- **性能优化**：Host 复用 canonical identity、local/UTC 日期键和当前 revision 的 records 排序；Client memo 化 scope 聚合与统计行，并只渲染当前明细页签
+- **趋势折线图**：按当前范围、时区、工作区、供应商和模型显示输入、缓存读写、输出、推理及总处理量；单日范围按小时聚合并显示小时轴，跨日范围按日聚合；使用平滑单调曲线与入场动画，悬停查看精确值，图例可切换曲线，点击点位进入当日明细
+- **统一筛选与审计**：工作区、供应商、模型和日期筛选贯穿摘要、热力图、趋势、表格与 CSV；工作区、供应商、模型三个筛选维度可独立自由组合，工作区、供应商和模型选项只展示当前日期范围内实际使用过的值；切换范围后失效筛选会自动清除；请求日志以紧凑分页表常驻显示，选择单条后查看分组 Token 详情
 - **Token 口径**：输入按「未含缓存命中」计，缓存命中 / 写入与推理独立成桶；全 0 用量的重放事件不会覆盖已记录的真实用量，仅缓存命中的请求也会计入
 
 ### 最近更新
 
-**v1.0.9**
+**v1.1.0**
 
-- 按需刷新：扫描完成后只轮询轻量状态，Host instance 或统计 revision 变化时才拉完整历史快照
-- 数据健康：显示本次数据更新时间与历史扫描健康，以及 revision 免读、实际读取、账本恢复、失败与优化可用性；刷新失败保留上次成功数据并支持重试
+- 结构化模型身份与兼容 ledger v2：区分 Provider、请求模型和实际模型，旧账本自动升级
+- 统一 scope 查询：时间、时区、工作区、Provider、模型筛选同时作用于摘要、热力图、趋势、表格和 CSV
+- Token 趋势折线图：单日范围按小时、跨日范围按日；平滑单调曲线、分层入场动画、多桶图例切换、悬停精确值和点位审计钻取
+- 模型与工作区统计：在明细表上方提供 Token 占比环形图、中心总量、Top 项目图例和 hover 明细；环段带绘制动画，tooltip 会跟随鼠标位置
+- turn / step 审计明细：常驻请求日志标签、紧凑分页表、选中行分组详情、脱敏来源标记和当前筛选范围明细 CSV
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -35,7 +41,17 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 
 ![dsh-all-usage 看板总览 / Dashboard overview](assets/screenshot-1.png)
 
-![dsh-all-usage 模型与工作区明细 / Model and workspace details](assets/screenshot-2.png)
+![dsh-all-usage Token 使用趋势 / Token usage trend](assets/screenshot-2.png)
+
+![dsh-all-usage 使用热力图 / Usage heatmap](assets/screenshot-3.png)
+
+![dsh-all-usage 请求日志 / Request logs](assets/screenshot-4.png)
+
+![dsh-all-usage 模型占比环图 / Model usage donut chart](assets/screenshot-5.png)
+
+![dsh-all-usage 模型明细表 / Model details table](assets/screenshot-6.png)
+
+![dsh-all-usage 工作区占比环图与明细 / Workspace donut chart and details](assets/screenshot-7.png)
 
 ### 安装
 
@@ -70,7 +86,10 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 ### 架构
 
 - **Host 端**（`lib/index.js`）：扫描持久化会话日志聚合用量（`turn/end` + `assistant/message.usage`），监听 `session/event` 实时折叠；通过 `webServer` 服务注册数据路由：
-  - `GET /api/all-usage` — 统计快照
+  - `GET /api/all-usage` — 兼容统计快照
+  - `GET /api/all-usage/status` — 轻量 revision 与同步健康状态
+  - `GET /api/all-usage/query` — 按 scope 返回聚合、daily/hourly 趋势和 heatmap 数据；单日 scope 填充 `hourly`，跨日 scope 的 `hourly` 为空
+  - `GET /api/all-usage/records` — 按 scope 分页返回脱敏 canonical usage rows
   - `GET /api/all-usage/balance?force=1` — 账户余额（复用 `llm-deepseek` 的 API Key 配置）
   - `POST /api/all-usage/alias` — 设置工作区别名
 - **Client 端**（`lib/client.js`）：`window.__ModuleLoader__` 工厂格式的浏览器 bundle，注册侧边栏「用量统计」入口（`sidebar.footer.action` 槽位）。所有 API 仅接受本机 loopback 请求并拒绝显式跨域请求；余额读取与别名写入还要求插件启动时生成、仅在当前进程有效的令牌（余额 GET 兼容浏览器省略 Origin）。英文模式的日期分桶、范围筛选、连续使用、热力图和导出时间统一按 UTC；中文模式按本地时区。
@@ -83,6 +102,8 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - 同一会话的同一 `turn / step` 只保留一份最终 usage；重试或替换消息会替换旧贡献，不重复累计
 - 输入 Token 按「未含缓存命中」计（缓存命中 / 写入独立成桶）；全 0 用量的重放事件不会覆盖已记录的真实用量，纯缓存命中的请求仍会计入
 - 轻量状态接口只公开 Host 实例、统计 revision、扫描进度与同步计数，不公开会话 ID、工作区路径、提示词或回复正文；完整快照仅在状态变化或手动刷新时获取
+- scope query 将回合（turns）、模型调用（calls）和去重会话（sessions）分开统计；Provider/模型筛选缺少路由信息时明确归为 Unknown，不从展示字符串猜测
+- records 接口只返回短 hash、时间、工作区 ID、结构化模型身份、turn/step、Token buckets 和当前物化来源，不返回原始 session ID、路径、提示词、回复或凭据
 - 看板中的总处理量 = 输入 + 输出 + 缓存读写 + 推理；缓存命中表示复用的上下文 Token，不等于新生成 Token 或实际费用
 - 余额查询走 DeepSeek 官方 `/user/balance` 接口；未配置 API Key 时卡片显示引导文案
 - 仅统计能归属到已注册工作区（按会话 cwd 匹配）的会话
@@ -108,14 +129,20 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, acc
 - **Full history & incremental rebuild**: the baseline scans every readable historical session; the durable usage ledger doubles as a per-session cursor, so unchanged sessions are reused straight from the ledger and only newly appended events are folded — long histories restart without a full rebuild
 - **Restart with no re-read**: the persisted log revision (a header-line + stat via `sessionPersistence.listSnapshots()`) acts as a per-session change signal — sessions whose log is unchanged are applied from the ledger on restart without reading their events at all; only changed/new sessions are read incrementally
 - **Data health and on-demand refresh**: after a scan completes, the browser polls only a lightweight status revision and fetches full history only after usage, alias, or sync state changes; it shows the latest full-data update, historical scan health, revision skips, rereads, ledger recovery, and failures while preserving last-good data on network errors
+- **Performance**: Host reuses canonical identities, local/UTC date keys, and the current-revision records ordering; Client memoizes scope aggregates and detail rows and renders only the active detail tab
+- **Trend line chart**: show input, cache read/write, output, reasoning, and total processed tokens for the active range, timezone, workspace, provider, and model scope; use hourly buckets for a single-day scope and daily buckets for cross-day scopes, with smooth monotone curves, staged entrance animation, hover for exact values, and click a point to inspect that day
+- **Unified filters and audit**: workspace, provider, model, and date filters apply to the summary, heatmap, trend, tables, and CSV; workspace, provider, and model filters remain independent and can be combined freely, while workspace, provider, and model options are limited to values used in the selected date range and stale selections clear automatically; request logs stay visible as a compact paginated table with grouped Token details for the selected row
 - **Token accounting semantics**: input tokens are fresh (exclude cache hits/writes, which sit in separate buckets along with reasoning); all-zero usage replays never overwrite recorded usage, while cache-only requests still count
 
 ### Latest Update
 
-**v1.0.9**
+**v1.1.0**
 
-- On-demand refresh: after the scan completes, the dashboard polls lightweight status and fetches full history only when the Host instance or stats revision changes
-- Data health: latest full-data update, historical scan health, revision skips, rereads, ledger recovery, failures, and optimization availability are visible; failed refreshes keep last-good data and expose retry
+- Structured model identity with backward-compatible ledger v2 migration
+- Unified scope queries for time, timezone, workspace, provider, and model filters
+- Token trend line chart with hourly single-day data, selectable series, exact hover values, and point-to-audit drill-down
+- Model and workspace analytics with Token-share donut charts, center totals, ranked legends, animated arc reveals, and cursor-following hover details
+- Paginated turn/step audit records with redacted provenance and scoped detail CSV export
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 
@@ -152,7 +179,10 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 ### Architecture
 
 - **Host** (`lib/index.js`): aggregates persisted session logs (`turn/end` and `assistant/message.usage`), folds live `session/event` updates, and exposes data routes through `webServer`:
-  - `GET /api/all-usage` — usage snapshot
+  - `GET /api/all-usage` — compatible usage snapshot
+  - `GET /api/all-usage/status` — lightweight revision and sync health
+  - `GET /api/all-usage/query` — scoped aggregate, daily/hourly trend, and heatmap data; single-day scopes populate `hourly`, while cross-day scopes return an empty `hourly` array
+  - `GET /api/all-usage/records` — paginated privacy-safe canonical usage rows
   - `GET /api/all-usage/balance?force=1` — account balance using the configured `llm-deepseek` API key
   - `POST /api/all-usage/alias` — update workspace aliases
 - **Client** (`lib/client.js`): a `window.__ModuleLoader__` browser bundle that registers the “Usage statistics” sidebar entry through the `sidebar.footer.action` slot. All API routes accept loopback requests and reject an explicit cross-origin Origin; balance reads and alias writes also require a process-scoped token generated when the plugin starts (the balance GET tolerates browsers omitting Origin).
@@ -165,6 +195,8 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 - For each session and logical `turn / step`, only the final usage contribution is kept; retries or replaced messages do not double-count
 - Input tokens are fresh (exclude cache hits/writes, which sit in their own buckets); all-zero usage replays do not overwrite recorded usage and pure cache-read requests still count
 - The lightweight status endpoint exposes only Host instance, stats revision, scan progress, and sync counters. It does not expose session IDs, workspace paths, prompts, or reply bodies; full snapshots are fetched only after status changes or a manual refresh
+- Scoped results keep turns, model calls, and distinct sessions as separate metrics; missing route identity is explicitly Unknown rather than inferred from a display label
+- The records endpoint returns only a short hash, time, workspace ID, structured model identity, turn/step, token buckets, and current materialization source. It omits raw session IDs, paths, prompts, replies, and credentials
 - Processed tokens = input + output + cache read/write + reasoning; a cache hit means reused context, not newly generated tokens or actual cost
 - Balance data comes from DeepSeek’s official `/user/balance` endpoint; the card shows guidance when no API key is configured
 - English mode uses UTC for date buckets, range filters, streaks, heatmap dates, and export timestamps; Chinese mode uses local time

@@ -2,6 +2,32 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [1.1.0] - 2026-08-28
+
+### Added
+
+- Added structured Provider, requested-model, actual-model, and display-model identity fields while preserving the legacy `model` field.
+- Added a backward-compatible ledger v2 adapter; v1 rows are read once, canonicalized, and upgraded before revision skipping resumes.
+- Added shared scoped usage and privacy-safe paginated records APIs: `/api/all-usage/query` and `/api/all-usage/records`; query responses now add hourly trend rows for single-day scopes while preserving the existing daily rows.
+- Kept workspace, provider, and model filters independent so users can combine all three dimensions in one scope.
+- Limited workspace, provider, and model filter options to values used in the selected date range and clear selections that become unavailable after a range change.
+- Added unified Workspace, Provider, model, date, and timezone filtering for dashboard aggregates, the fixed 53-week heatmap, trend data, and exports.
+- Added a responsive Token trend chart with smooth monotone cubic curves, staged draw animation, selectable input, cache-read, cache-write, output, reasoning, and total series; single-day scopes use hourly buckets while cross-day scopes use daily buckets.
+- Added Token-share donut charts with ranked legends to the model and workspace detail panels, including high-contrast remainder segments, animated arc reveals, and cursor-following hover details.
+- Added a persistent Request Logs tab with a compact paginated table, selected-row Token detail, opaque row IDs, materialization-source labels, and scoped detail CSV export.
+- Optimized Host records pagination with revision-scoped ordering and precomputed identity/date values; optimized Client derived aggregates with memoization and active-tab rendering.
+
+### Fixed
+
+- Prevented model identity collisions caused by parsing display labels containing ` / `.
+- Detects truncated or replaced session logs instead of overlaying a newer full rebuild with a stale ledger row.
+- Keeps turn counts, call counts, and distinct session counts separately defined in scoped results.
+- Keeps complete trend paths visible while per-series reveal animation restarts during live refreshes, preventing the final chart segment from disappearing.
+- Reserves the trend chart height during query loading and replaces floating loading text/legend controls with a centered spinner.
+- Keeps hover intersection markers static so they do not jump from the SVG origin into position on every hover.
+- Reuses one anchored trend tooltip with short position and opacity transitions, avoiding abrupt remounts while switching dates.
+- Isolates dashboard render failures behind the sidebar entry so a bad range response cannot remove the usage entry itself.
+
 ## [1.0.9] - 2026-08-26
 
 ### Added
@@ -74,6 +100,7 @@ All notable changes to `dsh-all-usage` are documented here.
 - Allowed same-origin browser balance GET requests that omit `Origin` while retaining token protection.
 - Standardized English date buckets, range filters, streaks, heatmap dates, and export timestamps on UTC.
 
+[1.1.0]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.0
 [1.0.9]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.9
 [1.0.8]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.8
 [1.0.7]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.7
