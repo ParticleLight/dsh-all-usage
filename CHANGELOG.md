@@ -2,6 +2,12 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [1.1.1] - 2026-08-29
+
+### Fixed
+
+- Reissued the v1.1 dashboard package under a new patch version for registry compatibility.
+
 ## [1.1.0] - 2026-08-28
 
 ### Added
