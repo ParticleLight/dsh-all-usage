@@ -25,8 +25,8 @@ jobs:
           registry-url: https://registry.npmjs.org
       - name: Publish npm package
         run: |
-          name="$(node -p \"require('./package.json').name\")"
-          version="$(node -p \"require('./package.json').version\")"
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
           if npm view "${name}@${version}" version --json >/dev/null 2>&1; then
             echo "::notice::${name}@${version} is already published; skipping duplicate publication."
             exit 0
