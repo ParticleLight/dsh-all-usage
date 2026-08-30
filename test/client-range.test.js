@@ -72,6 +72,7 @@ test('aggregates custom ranges inclusively across summary, workspace, and model 
   }
   const aggregate = rangeAgg(stats, 'custom', false, { start: '2026-05-02', end: '2026-05-03' })
   assert.equal(aggregate.totals.turns, 5)
+  assert.equal(aggregate.totals.calls, 5)
   assert.equal(aggregate.totals.input, 50)
   assert.equal(aggregate.totals.cacheRead, 150)
   assert.equal(aggregate.perWs.length, 1)
@@ -83,6 +84,20 @@ test('aggregates custom ranges inclusively across summary, workspace, and model 
 })
 
 
+
+test('groups model view by normalized model ID instead of provider labels', () => {
+  const rows = [
+    { provider: 'opencode-go', model: 'opencode-go / deepseek-v4-flash', calls: 47, input: 1, output: 2, cacheRead: 3, cacheWrite: 0, reasoning: 0 },
+    { provider: 'siliconflow', model: 'siliconflow / deepseek-ai/DeepSeek-V4-Flash', calls: 15, input: 4, output: 5, cacheRead: 6, cacheWrite: 0, reasoning: 0 },
+    { provider: 'deepseek-official', actualModel: 'deepseek-v4-flash', model: 'deepseek-official / deepseek-v4-flash', calls: 12, input: 7, output: 8, cacheRead: 9, cacheWrite: 0, reasoning: 0 },
+  ]
+  const grouped = aggregateModelRows(rows, 'model', '未知供应商', '未知模型')
+  assert.equal(grouped.length, 1)
+  assert.equal(grouped[0].model, 'deepseek-v4-flash')
+  assert.equal(aggregateModelRows([{ provider: 'p', actualModel: 'm / alpha', model: 'p / m / alpha', calls: 1, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }], 'model', 'Unknown provider', 'Unknown model')[0].model, 'm / alpha')
+  assert.equal(grouped[0].provider, 'opencode-go')
+  assert.equal(grouped[0].calls, 74)
+})
 
 test('builds a stable scope and zero-fills daily trend rows', () => {
   const stats = { byDay: [day('2026-08-01', 1, 10), day('2026-08-03', 2, 20)], byDayUtc: [] }
@@ -151,6 +166,18 @@ test('builds donut segments with normalized percentages and remainder', () => {
   assert.match(donutArcPath(130, 130, 94, 61, single.segments[0].startAngle, single.segments[0].endAngle), /A94 94 0 1 1/)
 })
 
+test('carries segment costs into the other bucket', () => {
+  const cost = (total) => ({ currency: 'USD', input: total, output: '0', cacheRead: '0', cacheWrite: '0', baseTotal: total, total, pricedCalls: 1, unpricedCalls: 0, ambiguousCalls: 0, unsupportedCalls: 0 })
+  const donut = buildDonutSegments([
+    { label: 'A', value: 70, cost: cost('1') },
+    { label: 'B', value: 20, cost: cost('2') },
+    { label: 'C', value: 10, cost: cost('3') },
+  ], '其他', 2)
+  assert.equal(donut.segments[0].cost.total, '1')
+  assert.equal(donut.segments[2].cost.total, '3')
+  assert.equal(donut.segments[2].cost.pricedCalls, 1)
+})
+
 test('builds safe single-point and large-value trend geometry', () => {
   const rows = buildTrendRows([day('2026-08-01', 1, 1000000)], { start: '2026-08-01', end: '2026-08-01' }, false)
   const geometry = buildTrendGeometry(rows, ['total', 'input'], 900, 250)
@@ -201,4 +228,28 @@ test('uses the selected language calendar bucket for custom ranges', () => {
   const range = { start: '2026-05-01', end: '2026-05-01' }
   assert.equal(rangeAgg(stats, 'custom', false, range).totals.turns, 0)
   assert.equal(rangeAgg(stats, 'custom', true, range).totals.turns, 7)
+})
+
+test('aggregates persisted decimal costs without floating point drift', () => {
+  const first = day('2026-05-01', 1, 10)
+  first.cost = { currency: 'USD', input: '0.1', output: '0.2', cacheRead: '0', cacheWrite: '0', baseTotal: '0.3', total: '0.3', pricedCalls: 1, unpricedCalls: 0, ambiguousCalls: 0, unsupportedCalls: 0 }
+  const second = day('2026-05-02', 1, 10)
+  second.cost = { currency: 'USD', input: '0.2', output: '0.4', cacheRead: '0', cacheWrite: '0', baseTotal: '0.6', total: '0.6', pricedCalls: 1, unpricedCalls: 0, ambiguousCalls: 0, unsupportedCalls: 0 }
+  second.byWorkspace[0].cost = second.cost
+  second.byModel[0].cost = second.cost
+  const aggregate = rangeAgg({ byDay: [first, second], byDayUtc: [] }, 'custom', false, { start: '2026-05-01', end: '2026-05-02' })
+  assert.equal(aggregate.totals.cost.input, '0.3')
+  assert.equal(aggregate.totals.cost.total, '0.9')
+  assert.equal(aggregate.totals.cost.pricedCalls, 2)
+  assert.equal(aggregate.perWs[0].cost.total, '0.6')
+  assert.equal(aggregate.perModel[0].cost.total, '0.6')
+})
+
+test('carries cost through zero-filled trend rows', () => {
+  const priced = day('2026-08-01', 1, 10)
+  priced.cost = { currency: 'USD', input: '1', output: '2', cacheRead: '0', cacheWrite: '0', baseTotal: '3', total: '3', pricedCalls: 1, unpricedCalls: 0, ambiguousCalls: 0, unsupportedCalls: 0 }
+  const rows = buildTrendRows([priced], { start: '2026-08-01', end: '2026-08-02' }, false)
+  assert.equal(rows[0].cost.total, '3')
+  assert.equal(rows[1].cost.total, '0')
+  assert.equal(rows[1].cost.pricedCalls, 0)
 })

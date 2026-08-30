@@ -30,7 +30,7 @@ function makeRequest(method, headers = {}, body = '') {
   }
 }
 
-async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride, ledgerSeed = {}, storage: storageUnitOverride, timeout: timeoutOverride } = {}) {
+async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride, readSession: readSessionOverride, ledgerSeed = {}, storage: storageUnitOverride, timeout: timeoutOverride } = {}) {
   const routes = new Map()
   const cleanups = []
   const listeners = {}
@@ -70,6 +70,7 @@ async function createApp({ key = 'test-key', workspaces = [], withStorage = fals
         return sessions
       },
       async readSession(sid) {
+        if (typeof readSessionOverride === 'function') return readSessionOverride(sid)
         return { events: events instanceof Map ? (events.get(sid) || []) : [] }
       },
     },
@@ -481,6 +482,81 @@ test('requires the capability for alias writes and persists trusted updates', as
   assert.deepEqual(app.storageUnit.saved, [{ 'ws-1': 'Main repo' }])
 })
 
+test('rejects oversized state updates and malformed aliases', async () => {
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-1', path: 'C:\repo', title: 'Repo' }],
+  })
+  const stats = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  const token = stats.json().requestToken
+  const headers = { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': token }
+  const oversizedPricing = JSON.stringify({ sync: { autoEnabled: false } }) + ' '.repeat(256 * 1024)
+  assert.equal((await call(app, '/api/all-usage/pricing', makeRequest('POST', headers, oversizedPricing))).status, 413)
+  const seed = await call(app, '/api/all-usage/alias', makeRequest('POST', headers, JSON.stringify({ workspaceId: 'ws-1', alias: 'Keep' })))
+  assert.equal(seed.status, 200)
+  const invalidAlias = await call(app, '/api/all-usage/alias', makeRequest('POST', headers, JSON.stringify({ workspaceId: 'ws-1', alias: 42 })))
+  assert.equal(invalidAlias.status, 400)
+  assert.deepEqual(invalidAlias.json().aliases, { 'ws-1': 'Keep' })
+  const invalidWorkspace = await call(app, '/api/all-usage/alias', makeRequest('POST', headers, JSON.stringify({ workspaceId: 'x'.repeat(257), alias: 'Ignored' })))
+  assert.equal(invalidWorkspace.status, 400)
+  const oversizedAlias = JSON.stringify({ workspaceId: 'ws-1', alias: 'Ignored' }) + ' '.repeat(16 * 1024)
+  assert.equal((await call(app, '/api/all-usage/alias', makeRequest('POST', headers, oversizedAlias))).status, 413)
+})
+
+test('drains alias writes before closing storage', async () => {
+  let blockWrites = false
+  let writeStarted = false
+  let closed = false
+  let release
+  const writeGate = new Promise((resolve) => { release = resolve })
+  const storage = {
+    records: { sessions: {} },
+    async loadAll() { return { global: {}, tables: this.records } },
+    async putRecord(table, key, value) { this.records[table][key] = value },
+    async deleteRecord(table, key) { delete this.records[table][key] },
+    async setGlobal(value) {
+      if (blockWrites) { writeStarted = true; await writeGate }
+    },
+    async close() { closed = true },
+  }
+  const app = await createApp({
+    withStorage: true,
+    storage,
+    workspaces: [{ id: 'ws-1', path: 'C:\repo', title: 'Repo' }],
+  })
+  const stats = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  const headers = { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': stats.json().requestToken }
+  blockWrites = true
+  const aliasRequest = call(app, '/api/all-usage/alias', makeRequest('POST', headers, JSON.stringify({ workspaceId: 'ws-1', alias: 'Queued' })))
+  for (let i = 0; i < 50 && !writeStarted; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(writeStarted, true)
+  const cleanups = app.cleanups.map((cleanup) => cleanup()).filter((value) => value && typeof value.then === 'function')
+  assert.equal(closed, false)
+  release()
+  await aliasRequest
+  await Promise.all(cleanups)
+  assert.equal(closed, true)
+})
+
+test('reports session read failures in the completed scan status', async () => {
+  const app = await createApp({
+    workspaces: [{ id: 'ws-fail', path: 'C:\fail', title: 'Fail' }],
+    sessions: [{ header: { id: 's-fail', cwd: 'C:\fail' } }],
+    readSession: async () => { throw new Error('read failed') },
+  })
+  let snapshot = null
+  for (let i = 0; i < 100; i += 1) {
+    snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (snapshot.json().scan.done) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  const body = snapshot.json()
+  assert.equal(body.scan.done, true)
+  assert.equal(body.scan.failed, 1)
+  assert.equal(body.sync.sessionsFailed, 1)
+  assert.equal(body.sync.lastErrorCode, 'session-read-failed')
+})
+
 test('stops folding events after disposal', async () => {
   const eventTime = Date.now() - 60 * 1000
   const app = await createApp({
@@ -630,4 +706,22 @@ test('enforces route methods', async () => {
   assert.equal((await call(app, '/api/all-usage/records', makeRequest('POST', { host: '127.0.0.1:3080' }))).status, 405)
   assert.equal((await call(app, '/api/all-usage/balance', makeRequest('POST', { host: '127.0.0.1:3080' }))).status, 405)
   assert.equal((await call(app, '/api/all-usage/alias', makeRequest('GET', { host: '127.0.0.1:3080' }))).status, 405)
+  assert.equal((await call(app, '/api/all-usage/pricing', makeRequest('PUT', { host: '127.0.0.1:3080' }))).status, 405)
+  assert.equal((await call(app, '/api/all-usage/pricing/models', makeRequest('POST', { host: '127.0.0.1:3080' }))).status, 405)
+  assert.equal((await call(app, '/api/all-usage/pricing/sync', makeRequest('GET', { host: '127.0.0.1:3080' }))).status, 405)
+})
+
+test('protects pricing configuration writes with loopback, origin, and process capability', async () => {
+  const app = await createApp({ workspaces: [{ id: 'ws-1', path: 'C:\repo', title: 'Repo' }] })
+  const stats = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  const token = stats.json().requestToken
+  assert.equal((await call(app, '/api/all-usage/pricing', makeRequest('GET', { host: '127.0.0.1:3080' }))).status, 200)
+  const noToken = await call(app, '/api/all-usage/pricing', makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' }, JSON.stringify({ sync: { autoEnabled: false } })))
+  assert.equal(noToken.status, 403)
+  const crossSite = await call(app, '/api/all-usage/pricing', makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'sec-fetch-site': 'cross-site', 'x-all-usage-request-token': token }, JSON.stringify({ sync: { autoEnabled: false } })))
+  assert.equal(crossSite.status, 403)
+  const allowed = await call(app, '/api/all-usage/pricing', makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': token }, JSON.stringify({ sync: { autoEnabled: false } })))
+  assert.equal(allowed.status, 200)
+  assert.equal(allowed.json().ok, true)
+  assert.equal(allowed.json().pricing.sync.autoEnabled, false)
 })

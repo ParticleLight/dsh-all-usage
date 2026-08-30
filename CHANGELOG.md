@@ -2,6 +2,27 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [Unreleased]
+
+## [1.1.2] - 2026-08-30
+
+### Added
+
+- Added models.dev price catalog synchronization with a persisted last-good cache, optional 6-hour automatic sync, model-only official-vendor matching, explicit model mappings, and manual overrides for authoritative special pricing.
+- Added cc-switch-compatible four-bucket cost snapshots: input, output, cache read, and cache write; cost multipliers apply only to the final total.
+- Added ledger v3 cost snapshots, zero-cost/unpriced coverage counters, cost fields in scoped query and privacy-safe records responses, cost columns in exports, and a dashboard pricing settings panel.
+- Added searchable current-model selectors for mappings and overrides, automatic official model lookup, compact price-field labels, and persisted mapping display recovery.
+- Added Token and cost details to model and workspace donut legends and hover menus, including aggregated values for the other bucket.
+- Added date-indexed usage and turn queries, revision-scoped snapshot and records caching, debounced official model search, and complete write-chain draining during disposal.
+
+### Fixed
+
+- Preserved DSH's already-normalized fresh input semantics and avoided charging reasoning tokens twice when provider output counts already include completion/thoughts.
+- Kept positive historical cost snapshots stable across pricing catalog updates; only unpriced usage is eligible for explicit backfill.
+- Fixed saved model mappings reopening with an empty current-model field by deriving the display from the persisted model identity.
+- Prevented first live events from being lost during session bootstrap or read failures, and added generation-scoped recovery for baseline/live races.
+- Rejected oversized state bodies and malformed alias parameters, reported failed session reads accurately, ignored invalid event timestamps, and kept daily session counts correct after replacements.
+
 ## [1.1.1] - 2026-08-29
 
 ### Fixed

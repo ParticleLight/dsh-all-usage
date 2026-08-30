@@ -12,7 +12,8 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 
 - **热力图**：53 周使用热力图；按工作区筛选并查看每日回合与 Token 明细
 - **模型统计**：支持混合查看、按模型合并、按供应商汇总三种维度，展示调用次数、各类 Token 与缓存命中率
-- **摘要与工作区**：Token 用量、缓存命中、账户余额、连续使用、工作区 Token 分布和明细
+- **摘要与工作区**：Token 用量、缓存命中、估算成本、账户余额、连续使用、工作区 Token 分布和明细
+- **成本统计**：从 models.dev 同步模型价格；按输入、输出、缓存读取和缓存写入四个桶计算，保存价格快照，明确区分已计价、免费模型和未计价调用
 - **导出**：按当前时间范围和模型聚合方式导出 CSV
 - **时间范围**：今日、近 30 天、近 90 天、全部，或在全部可扫描历史日数据中自定义起止日期；热力图始终展示最近 53 周
 - **工作区别名**：在侧栏入口打开看板后管理，持久化保存到 $DSH_HOME/storages 的 KV 单元 `all_usage_aliases`
@@ -20,19 +21,27 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **完整历史与增量重建**：基线扫描全部可读历史会话；独立用量账本同时作为每会话游标——未变化的会话直接复用账本，新增事件只增量回填，长历史重启不再全量重建
 - **重启免读**：用持久化日志的 revision 作为每会话的变更信号（只读头部行 + stat，不读全量）——日志未变的会话重启时连事件都不读，直接从账本复用；仅日志变化（新增/修改）的会话才做增量读取
 - **数据健康与按需刷新**：扫描完成后浏览器只检查轻量状态版本，只有用量、别名或同步状态变化时才拉完整历史；显示本次数据更新时间、历史扫描健康、revision 免读、实际读取、账本恢复和失败，网络异常保留上次成功数据并可重试
-- **性能优化**：Host 复用 canonical identity、local/UTC 日期键和当前 revision 的 records 排序；Client memo 化 scope 聚合与统计行，并只渲染当前明细页签
+- **性能优化**：Host 使用 local/UTC 日期索引、revision-scoped snapshot/records 缓存和可回收的实时事件队列；Client 对 scope 聚合、统计行和官方模型检索做防抖/缓存，并只渲染当前明细页签
 - **趋势折线图**：按当前范围、时区、工作区、供应商和模型显示输入、缓存读写、输出、推理及总处理量；单日范围按小时聚合并显示小时轴，跨日范围按日聚合；使用平滑单调曲线与入场动画，悬停查看精确值，图例可切换曲线，点击点位进入当日明细
 - **统一筛选与审计**：工作区、供应商、模型和日期筛选贯穿摘要、热力图、趋势、表格与 CSV；工作区、供应商、模型三个筛选维度可独立自由组合，工作区、供应商和模型选项只展示当前日期范围内实际使用过的值；切换范围后失效筛选会自动清除；请求日志以紧凑分页表常驻显示，选择单条后查看分组 Token 详情
 - **Token 口径**：输入按「未含缓存命中」计，缓存命中 / 写入与推理独立成桶；全 0 用量的重放事件不会覆盖已记录的真实用量，仅缓存命中的请求也会计入
+- **成本口径**：模型价格来自 models.dev 的 USD / 1M Token 目录；成本快照按 DSH 已归一化的 fresh input 和四类价格桶计算，倍率只作用于最终总价，已有正成本历史不会因价格更新重算；只按模型选择官方厂商条目，未找到官方价格时显示为未计价
 
 ### 最近更新
+
+**v1.1.2**
+
+- 模型与工作区环图及右侧列表新增 Token 数、成本和占比展示，其他分组同步合并成本
+- Host 增加日期索引、快照/日志查询缓存、实时事件恢复和写入生命周期保护
+- 成本设置官方模型检索增加防抖，新增 body、别名、时间戳和扫描失败边界校验
+- 更新插件自有截图清单，使用全量看板、成本设置和请求日志截图
 
 **v1.1.1**
 
 - 结构化模型身份与兼容 ledger v2：区分 Provider、请求模型和实际模型，旧账本自动升级
 - 统一 scope 查询：时间、时区、工作区、Provider、模型筛选同时作用于摘要、热力图、趋势、表格和 CSV
 - Token 趋势折线图：单日范围按小时、跨日范围按日；平滑单调曲线、分层入场动画、多桶图例切换、悬停精确值和点位审计钻取
-- 模型与工作区统计：在明细表上方提供 Token 占比环形图、中心总量、Top 项目图例和 hover 明细；环段带绘制动画，tooltip 会跟随鼠标位置
+- **模型与工作区统计**：在明细表上方提供 Token 占比环形图、中心总量、Top 项目图例和 hover 明细；环段与右侧列表同时展示 Token、成本和占比，tooltip 会跟随鼠标位置
 - turn / step 审计明细：常驻请求日志标签、紧凑分页表、选中行分组详情、脱敏来源标记和当前筛选范围明细 CSV
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
@@ -41,17 +50,9 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 
 ![dsh-all-usage 看板总览 / Dashboard overview](assets/screenshot-1.png)
 
-![dsh-all-usage Token 使用趋势 / Token usage trend](assets/screenshot-2.png)
+![dsh-all-usage 成本统计设置 / Cost statistics settings](assets/screenshot-2.png)
 
-![dsh-all-usage 使用热力图 / Usage heatmap](assets/screenshot-3.png)
-
-![dsh-all-usage 请求日志 / Request logs](assets/screenshot-4.png)
-
-![dsh-all-usage 模型占比环图 / Model usage donut chart](assets/screenshot-5.png)
-
-![dsh-all-usage 模型明细表 / Model details table](assets/screenshot-6.png)
-
-![dsh-all-usage 工作区占比环图与明细 / Workspace donut chart and details](assets/screenshot-7.png)
+![dsh-all-usage 请求日志与审计 / Request logs and audit](assets/screenshot-3.png)
 
 ### 安装
 
@@ -92,6 +93,10 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
   - `GET /api/all-usage/records` — 按 scope 分页返回脱敏 canonical usage rows
   - `GET /api/all-usage/balance?force=1` — 账户余额（复用 `llm-deepseek` 的 API Key 配置）
   - `POST /api/all-usage/alias` — 设置工作区别名
+  - `GET /api/all-usage/pricing` — 查看 models.dev 同步状态、已用模型匹配和显式覆盖
+  - `GET /api/all-usage/pricing/models?q=...` — 检索官方模型 ID 与名称匹配结果
+  - `POST /api/all-usage/pricing` — 保存同步、mapping 和显式价格覆盖
+  - `POST /api/all-usage/pricing/sync` — 手动同步 models.dev 并回填未计价调用
 - **Client 端**（`lib/client.js`）：`window.__ModuleLoader__` 工厂格式的浏览器 bundle，注册侧边栏「用量统计」入口（`sidebar.footer.action` 槽位）。所有 API 仅接受本机 loopback 请求并拒绝显式跨域请求；余额读取与别名写入还要求插件启动时生成、仅在当前进程有效的令牌（余额 GET 兼容浏览器省略 Origin）。英文模式的日期分桶、范围筛选、连续使用、热力图和导出时间统一按 UTC；中文模式按本地时区。
 
 ### 数据说明
@@ -105,6 +110,8 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - scope query 将回合（turns）、模型调用（calls）和去重会话（sessions）分开统计；Provider/模型筛选缺少路由信息时明确归为 Unknown，不从展示字符串猜测
 - records 接口只返回短 hash、时间、工作区 ID、结构化模型身份、turn/step、Token buckets 和当前物化来源，不返回原始 session ID、路径、提示词、回复或凭据
 - 看板中的总处理量 = 输入 + 输出 + 缓存读写 + 推理；缓存命中表示复用的上下文 Token，不等于新生成 Token 或实际费用
+- 成本计算沿用 cc-switch 的四桶公式：输入、输出、缓存读取和缓存写入分别乘每百万价格，四项相加后再乘倍率；DSH 的 reasoning 字段不再次加到 output，避免底层 completion/thoughts 已含推理时重复计费
+- 价格同步默认关闭；models.dev 不可用时保留最近一次成功目录，未匹配模型不会套用默认价格；手工 mapping/override 仅用于模型别名、官方目录缺失或有权威官方价格；看板范围与明细视图保存在浏览器本地，6 小时自动同步开关会立即写入受保护的 pricing API
 - 余额查询走 DeepSeek 官方 `/user/balance` 接口；未配置 API Key 时卡片显示引导文案
 - 仅统计能归属到已注册工作区（按会话 cwd 匹配）的会话
 
@@ -115,13 +122,14 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 ## English
 
-A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, account balance, and activity by model, provider, workspace, and time range.
+A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, estimated cost, account balance, and activity by model, provider, workspace, and time range.
 
 ### Features
 
 - **Heatmap**: a 53-week activity heatmap with workspace filters and daily turn/token details
 - **Model analytics**: mixed view, model-merged view, and provider summary with calls, token categories, and cache hit rate
-- **Summary and workspaces**: processed tokens, cache hits, account balance, usage streaks, workspace distribution, and details
+- **Summary and workspaces**: processed tokens, cache hits, estimated cost, account balance, usage streaks, workspace distribution, and details
+- **Cost statistics**: sync model prices from models.dev, calculate four cost buckets, persist price snapshots, and distinguish priced, free, ambiguous, and unpriced calls
 - **CSV export**: export data using the selected time range and aggregation mode
 - **Time ranges**: today, last 30 days, last 90 days, all time, or a custom start/end date across all available historical daily data; the heatmap always shows the latest 53 weeks
 - **Workspace aliases**: manage aliases from the sidebar dashboard; values persist in the $DSH_HOME/storages KV cell `all_usage_aliases`
@@ -133,6 +141,7 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, acc
 - **Trend line chart**: show input, cache read/write, output, reasoning, and total processed tokens for the active range, timezone, workspace, provider, and model scope; use hourly buckets for a single-day scope and daily buckets for cross-day scopes, with smooth monotone curves, staged entrance animation, hover for exact values, and click a point to inspect that day
 - **Unified filters and audit**: workspace, provider, model, and date filters apply to the summary, heatmap, trend, tables, and CSV; workspace, provider, and model filters remain independent and can be combined freely, while workspace, provider, and model options are limited to values used in the selected date range and stale selections clear automatically; request logs stay visible as a compact paginated table with grouped Token details for the selected row
 - **Token accounting semantics**: input tokens are fresh (exclude cache hits/writes, which sit in separate buckets along with reasoning); all-zero usage replays never overwrite recorded usage, while cache-only requests still count
+- **Cost semantics**: prices come from the models.dev USD per 1M token catalog; DSH-normalized fresh input and the four cost buckets are snapshotted at calculation time, the multiplier applies only to final total, and existing positive historical costs are not recalculated; matching uses the model's official vendor entry and ignores the DSH provider, while missing official prices stay unpriced
 
 ### Latest Update
 
@@ -185,6 +194,10 @@ The profile patch layer hot-reloads; save the file and refresh the page.
   - `GET /api/all-usage/records` — paginated privacy-safe canonical usage rows
   - `GET /api/all-usage/balance?force=1` — account balance using the configured `llm-deepseek` API key
   - `POST /api/all-usage/alias` — update workspace aliases
+  - `GET /api/all-usage/pricing` — inspect models.dev sync status, used-model matches, and explicit overrides
+  - `GET /api/all-usage/pricing/models?q=...` — search official model IDs and display-name matches
+  - `POST /api/all-usage/pricing` — save sync, mappings, and explicit price overrides
+  - `POST /api/all-usage/pricing/sync` — sync models.dev and backfill unpriced calls
 - **Client** (`lib/client.js`): a `window.__ModuleLoader__` browser bundle that registers the “Usage statistics” sidebar entry through the `sidebar.footer.action` slot. All API routes accept loopback requests and reject an explicit cross-origin Origin; balance reads and alias writes also require a process-scoped token generated when the plugin starts (the balance GET tolerates browsers omitting Origin).
 
 ### Data semantics
@@ -198,6 +211,8 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 - Scoped results keep turns, model calls, and distinct sessions as separate metrics; missing route identity is explicitly Unknown rather than inferred from a display label
 - The records endpoint returns only a short hash, time, workspace ID, structured model identity, turn/step, token buckets, and current materialization source. It omits raw session IDs, paths, prompts, replies, and credentials
 - Processed tokens = input + output + cache read/write + reasoning; a cache hit means reused context, not newly generated tokens or actual cost
+- Cost follows the cc-switch four-bucket formula: input, output, cache-read, and cache-write tokens are priced independently, summed, then multiplied by the final multiplier; DSH reasoning is not added to output a second time
+- Pricing sync is off by default; when models.dev is unavailable the last good catalog remains in use, and unmatched models never receive a guessed default price; explicit model mappings/overrides are for aliases, missing official catalog entries, or authoritative special pricing; dashboard range and detail-view preferences are stored in browser storage, while the 6-hour sync toggle is immediately saved through the protected pricing API
 - Balance data comes from DeepSeek’s official `/user/balance` endpoint; the card shows guidance when no API key is configured
 - English mode uses UTC for date buckets, range filters, streaks, heatmap dates, and export timestamps; Chinese mode uses local time
 - Only sessions that can be mapped to a registered workspace by their working directory are included

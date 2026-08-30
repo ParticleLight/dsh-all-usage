@@ -30,7 +30,7 @@ function makeRequest(method, headers = {}, body = '') {
   }
 }
 
-async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride, ledgerSeed = {}, storage: storageUnitOverride, timeout: timeoutOverride, snapshots = [] } = {}) {
+async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride, readSession: readSessionOverride, ledgerSeed = {}, storage: storageUnitOverride, timeout: timeoutOverride, snapshots = [] } = {}) {
   const routes = new Map()
   const cleanups = []
   const listeners = {}
@@ -72,6 +72,7 @@ async function createApp({ key = 'test-key', workspaces = [], withStorage = fals
       },
       async readSession(sid) {
         readCalls.set(sid, (readCalls.get(sid) || 0) + 1)
+        if (typeof readSessionOverride === 'function') return readSessionOverride(sid)
         return { events: events instanceof Map ? (events.get(sid) || []) : [] }
       },
     },
@@ -128,7 +129,7 @@ async function call(app, path, request) {
   }
 }
 
-function usageEvent(time, turn, step, usage, seq) {
+function usageEvent(time, turn, step, usage, seq, provider = 'deepseek', model = 'deepseek-chat') {
   return {
     seq,
     time,
@@ -136,7 +137,7 @@ function usageEvent(time, turn, step, usage, seq) {
     data: {
       turn,
       step,
-      message: { source: { provider: 'deepseek', model: 'deepseek-chat' } },
+      message: { source: { provider, model } },
       usage,
     },
   }
@@ -192,6 +193,88 @@ test('seeds unchanged sessions from the ledger and replaces retried steps withou
   assert.equal(snapshot.json().totals.turns, 1)
   assert.equal(snapshot.json().totals.input, 50)
   assert.equal(snapshot.json().totals.output, 60)
+})
+
+test('keeps the first live event when the bootstrap snapshot misses it', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    workspaces: [{ id: 'ws-live', path: 'C:\live', title: 'Live' }],
+    sessions: [],
+    readSession: async () => ({ events: [] }),
+  })
+  const handler = app.listeners['session/event'][0]
+  handler({ id: 's-live', header: { cwd: 'C:\live' } }, usageEvent(eventTime, 1, 1, { inputTokens: 13, outputTokens: 17 }, 0))
+  for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  const snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  assert.equal(snapshot.json().totals.input, 13)
+  assert.equal(snapshot.json().totals.output, 17)
+})
+
+test('keeps the first live event when bootstrap reading fails', async () => {
+  let attempts = 0
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    workspaces: [{ id: 'ws-live', path: 'C:\live', title: 'Live' }],
+    sessions: [],
+    readSession: async () => { attempts += 1; throw new Error('temporary read failure') },
+  })
+  const handler = app.listeners['session/event'][0]
+  handler({ id: 's-live', header: { cwd: 'C:\live' } }, usageEvent(eventTime, 1, 1, { inputTokens: 19, outputTokens: 23 }, 1))
+  for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  const snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  assert.equal(snapshot.json().totals.input, 19)
+  assert.equal(snapshot.json().totals.output, 23)
+  assert.ok(attempts >= 1)
+  const cleanups = app.cleanups.map((cleanup) => cleanup()).filter((value) => value && typeof value.then === 'function')
+  await Promise.all(cleanups)
+})
+
+test('updates date indexes when a live usage is replaced', async () => {
+  const firstTime = new Date()
+  firstTime.setHours(12, 0, 0, 0)
+  firstTime.setDate(firstTime.getDate() - 2)
+  const secondTime = new Date(firstTime)
+  secondTime.setDate(secondTime.getDate() + 1)
+  const dateText = (date) => date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0')
+  const app = await createApp({
+    workspaces: [{ id: 'ws-index', path: 'C:\index', title: 'Index' }],
+    sessions: [],
+    readSession: async () => ({ events: [] }),
+  })
+  const handler = app.listeners['session/event'][0]
+  handler({ id: 's-index', header: { cwd: 'C:\index' } }, usageEvent(firstTime.getTime(), 1, 1, { inputTokens: 10, outputTokens: 11 }, 1))
+  for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  handler({ id: 's-index', header: { cwd: 'C:\index' } }, usageEvent(secondTime.getTime(), 1, 1, { inputTokens: 20, outputTokens: 21 }, 2))
+  for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  const firstRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  firstRequest.url = '/api/all-usage/query?start=' + dateText(firstTime) + '&end=' + dateText(firstTime) + '&utc=0'
+  const secondRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  secondRequest.url = '/api/all-usage/query?start=' + dateText(secondTime) + '&end=' + dateText(secondTime) + '&utc=0'
+  assert.equal((await call(app, '/api/all-usage/query', firstRequest)).json().totals.input, 0)
+  assert.equal((await call(app, '/api/all-usage/query', secondRequest)).json().totals.input, 20)
+  const full = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.equal(full.byDay.find((day) => day.date === dateText(firstTime)).sessions, 0)
+  assert.equal(full.byDay.find((day) => day.date === dateText(secondTime)).sessions, 1)
+})
+
+test('ignores invalid event timestamps during baseline folding', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    workspaces: [{ id: 'ws-time', path: 'C:\time', title: 'Time' }],
+    sessions: [{ header: { id: 's-time', cwd: 'C:\time' } }],
+    events: new Map([['s-time', [
+      usageEvent(Number.NaN, 1, 1, { inputTokens: 101, outputTokens: 103 }, 1),
+      usageEvent(eventTime, 2, 1, { inputTokens: 7, outputTokens: 11 }, 2),
+    ]]]),
+  })
+  let snapshot = null
+  for (let i = 0; i < 100; i += 1) {
+    snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (snapshot.json().scan.done) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  assert.equal(snapshot.json().totals.input, 7)
+  assert.equal(snapshot.json().totals.output, 11)
 })
 
 test('folds only the new tail for a session that gained events (incremental seed)', async () => {
@@ -466,7 +549,7 @@ test('serves structured scoped aggregates and privacy-safe paginated records', a
     await new Promise((resolve) => setImmediate(resolve))
   }
   const full = snapshot.json()
-  assert.equal(full.usageSchemaVersion, 2)
+  assert.equal(full.usageSchemaVersion, 3)
   const modelA = full.perModel.find((row) => row.provider === 'deepseek')
   assert.ok(modelA)
   assert.equal(modelA.requestedModel, 'requested-a')
@@ -478,7 +561,7 @@ test('serves structured scoped aggregates and privacy-safe paginated records', a
   const scoped = await call(app, '/api/all-usage/query', request)
   assert.equal(scoped.status, 200)
   const query = scoped.json()
-  assert.equal(query.usageSchemaVersion, 2)
+  assert.equal(query.usageSchemaVersion, 3)
   assert.equal(query.scope.workspaceId, 'ws-a')
   assert.equal(query.scope.provider, 'deepseek')
   assert.equal(query.totals.calls, 1)
@@ -525,7 +608,7 @@ test('serves structured scoped aggregates and privacy-safe paginated records', a
   const page = await call(app, '/api/all-usage/records', recordsRequest)
   assert.equal(page.status, 200)
   const pageBody = page.json()
-  assert.equal(pageBody.usageSchemaVersion, 2)
+  assert.equal(pageBody.usageSchemaVersion, 3)
   assert.equal(pageBody.items.length, 1)
   assert.equal(typeof pageBody.items[0].id, 'string')
   assert.equal(Object.hasOwn(pageBody.items[0], 'sid'), false)
@@ -631,7 +714,7 @@ test('upgrades a legacy ledger row whose canonical usage key changed', async () 
   assert.equal(snap.json().totals.input, 3)
   assert.equal(snap.json().totals.output, 4)
   assert.equal(app.readCalls.get('s-1'), 1)
-  assert.equal(app.storageUnit.records.sessions['s-1'].version, 2)
+  assert.equal(app.storageUnit.records.sessions['s-1'].version, 3)
   assert.equal(app.storageUnit.records.sessions['s-1'].usage.length, 1)
 })
 
@@ -708,7 +791,147 @@ test('backfills the revision on the first read after upgrading (old ledger rows)
   assert.equal(body.sync.sessionsRead, 1)
   assert.equal(body.sync.sessionsSkippedByRevision, 0)
   assert.equal(app.readCalls.get('s-1'), 1, 'rows without a stored revision must be read once')
-  assert.equal(app.storageUnit.records.sessions['s-1'].version, 2)
+  assert.equal(app.storageUnit.records.sessions['s-1'].version, 3)
   assert.ok(body.perModel.some((row) => row.provider === 'deepseek'), 'upgraded ledger should expose structured identity')
   assert.equal(app.storageUnit.records.sessions['s-1'].lastRevision, 'rev-9')
+})
+
+test('syncs models.dev pricing, backfills unpriced rows, and keeps cost consistent across APIs', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-cost', path: 'C:/cost', title: 'Cost' }],
+    sessions: [{ header: { id: 's-cost', cwd: 'C:/cost' } }],
+    events: new Map([['s-cost', [
+      { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'sudocode', model: 'gpt-5.5' } },
+      usageEvent(eventTime, 1, 1, { inputTokens: 1000000, outputTokens: 2000000, cacheReadTokens: 100000, cacheWriteTokens: 200000, reasoningTokens: 400000 }, 2, 'sudocode', 'gpt-5.5'),
+      { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    ]]]),
+  })
+  let full = null
+  for (let i = 0; i < 200; i += 1) {
+    full = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (full.json().scan.done && full.json().totals.cost.unpricedCalls === 1) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  const initial = full.json()
+  assert.equal(initial.totals.cost.pricedCalls, 0)
+  assert.equal(initial.totals.cost.unpricedCalls, 1)
+  const token = initial.requestToken
+  const pricing = await call(app, '/api/all-usage/pricing', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  assert.equal(pricing.status, 200)
+  assert.equal(pricing.json().catalogModelCount, 0)
+  const modelSearch = makeRequest('GET', { host: '127.0.0.1:3080' })
+  modelSearch.url = '/api/all-usage/pricing/models?q=gpt-5.5'
+  const modelSearchResult = await call(app, '/api/all-usage/pricing/models', modelSearch)
+  assert.deepEqual(modelSearchResult.json().items, [])
+
+  const saveRequest = makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': token }, JSON.stringify({
+    pricing: { catalogEntries: [{ providerId: 'openai', modelId: 'gpt-5.5', displayName: 'GPT-5.5', input: '5', output: '30', cacheRead: '0.5', cacheWrite: '6.25' }] },
+    backfill: true,
+  }))
+  const saved = await call(app, '/api/all-usage/pricing', saveRequest)
+  assert.equal(saved.status, 200)
+  assert.equal(saved.json().backfill.priced, 1)
+  const pricedModelSearch = makeRequest('GET', { host: '127.0.0.1:3080' })
+  pricedModelSearch.url = '/api/all-usage/pricing/models?q=gpt-5.5'
+  const pricedModelSearchResult = await call(app, '/api/all-usage/pricing/models', pricedModelSearch)
+  assert.equal(pricedModelSearchResult.status, 200)
+  assert.equal(pricedModelSearchResult.json().items[0].value, 'gpt-5.5')
+  assert.equal(pricedModelSearchResult.json().items[0].providerId, 'openai')
+
+  full = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  const body = full.json()
+  assert.equal(body.usageSchemaVersion, 3)
+  assert.equal(body.costSchemaVersion, 1)
+  assert.equal(body.totals.cost.input, '5')
+  assert.equal(body.totals.cost.output, '60')
+  assert.equal(body.totals.cost.cacheRead, '0.05')
+  assert.equal(body.totals.cost.cacheWrite, '1.25')
+  assert.equal(body.totals.cost.baseTotal, '66.3')
+  assert.equal(body.totals.cost.total, '66.3')
+  assert.equal(body.totals.cost.pricedCalls, 1)
+  assert.equal(body.totals.cost.unpricedCalls, 0)
+  assert.equal(body.perModel[0].cost.total, '66.3')
+  assert.equal(body.byDay[0].cost.total, '66.3')
+  assert.equal(body.byDay[0].byWorkspace[0].cost.total, '66.3')
+  assert.equal(app.storageUnit.records.sessions['s-cost'].version, 3)
+  assert.equal(app.storageUnit.records.sessions['s-cost'].usage[0].cost.total, '66.3')
+
+  const date = body.byDay[0].date
+  const queryRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  queryRequest.url = '/api/all-usage/query?start=' + date + '&end=' + date + '&utc=0&workspaceId=ws-cost&provider=sudocode'
+  const query = await call(app, '/api/all-usage/query', queryRequest)
+  assert.equal(query.json().totals.cost.total, '66.3')
+  assert.equal(query.json().daily[0].cost.total, '66.3')
+  const hourly = query.json().hourly.find((row) => eventTime >= row.time && eventTime < row.time + 60 * 60 * 1000)
+  assert.equal(hourly.cost.total, '66.3')
+
+  const recordsRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  recordsRequest.url = '/api/all-usage/records?start=' + date + '&end=' + date + '&utc=0&workspaceId=ws-cost&provider=sudocode&limit=10'
+  const records = await call(app, '/api/all-usage/records', recordsRequest)
+  assert.equal(records.json().items[0].cost.total, '66.3')
+  assert.equal(Object.hasOwn(records.json().items[0], 'sessionId'), false)
+
+  const changeRequest = makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': token }, JSON.stringify({
+    pricing: { catalogEntries: [{ providerId: 'openai', modelId: 'gpt-5.5', input: '50', output: '300', cacheRead: '5', cacheWrite: '62.5' }] },
+    backfill: true,
+  }))
+  const changed = await call(app, '/api/all-usage/pricing', changeRequest)
+  assert.equal(changed.status, 200)
+  full = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  assert.equal(full.json().totals.cost.total, '66.3', 'positive historical cost must remain stable after price changes')
+})
+
+test('migrates legacy provider-aware cost snapshots to official model pricing once', async () => {
+  const storage = {
+    global: { pricing: { catalogEntries: [{ providerId: 'openai', modelId: 'gpt-5.5', input: '5', output: '30', cacheRead: '0.5', cacheWrite: '6.25' }] } },
+    records: { sessions: { 's-legacy-cost': {
+      version: 3, sessionId: 's-legacy-cost', workspaceId: 'ws-legacy-cost', lastSeq: 2,
+      turns: [{ key: '1', seq: 1, time: Date.now() - 60000, workspaceId: 'ws-legacy-cost', turn: 1 }],
+      usage: [{ key: 's-legacy-cost:step:1:1', seq: 2, time: Date.now() - 60000, workspaceId: 'ws-legacy-cost', identity: { provider: 'sudocode', requestedModel: 'gpt-5.5', actualModel: 'gpt-5.5', label: 'sudocode / gpt-5.5', legacy: false }, modelId: 'sudocode / gpt-5.5', values: { input: 1000000, output: 1000000, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: { status: 'priced', currency: 'USD', source: 'models.dev', pricingModel: 'gpt-5.5', providerId: 'sudocode', inputTokenSemantics: 'fresh', multiplier: '1', rates: { input: '50', output: '300', cacheRead: '5', cacheWrite: '0' }, breakdown: { input: '50', output: '300', cacheRead: '0', cacheWrite: '0' }, baseTotal: '350', total: '350' } }],
+    } } },
+    async loadAll() { return { global: this.global, tables: this.records } },
+    async putRecord(table, key, value) { if (!this.records[table]) this.records[table] = {}; this.records[table][key] = value },
+    async deleteRecord(table, key) { if (this.records[table]) delete this.records[table][key] },
+    async setGlobal(value) { this.global = value },
+    async close() {},
+  }
+  const app = await createApp({ withStorage: true, storage, workspaces: [{ id: 'ws-legacy-cost', path: 'C:/legacy-cost', title: 'Legacy Cost' }], sessions: [] })
+  let full = null
+  for (let i = 0; i < 100; i += 1) {
+    full = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (full.json().scan.done) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  assert.equal(full.json().totals.cost.total, '35')
+  assert.equal(full.json().totals.cost.pricedCalls, 1)
+  assert.equal(storage.records.sessions['s-legacy-cost'].usage[0].cost.pricingMode, 'official-model')
+  assert.equal(storage.records.sessions['s-legacy-cost'].usage[0].cost.providerId, 'openai')
+})
+
+test('persists pricing mappings and overrides through the DSH storage unit', async () => {
+  const storage = {
+    global: {},
+    records: { sessions: {} },
+    async loadAll() { return { global: this.global, tables: this.records } },
+    async putRecord(table, key, value) { if (!this.records[table]) this.records[table] = {}; this.records[table][key] = value },
+    async deleteRecord(table, key) { if (this.records[table]) delete this.records[table][key] },
+    async setGlobal(value) { this.global = value },
+    async close() {},
+  }
+  const first = await createApp({ withStorage: true, storage: storage })
+  const full = await call(first, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  const saved = await call(first, '/api/all-usage/pricing', makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': full.json().requestToken }, JSON.stringify({
+    pricing: { overrides: [{ providerId: 'relay', modelId: 'gpt-5.5', input: '9', output: '18', cacheRead: '0.9', cacheWrite: '0' }] },
+  })))
+  assert.equal(saved.status, 200)
+  const toggle = await call(first, '/api/all-usage/pricing', makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': full.json().requestToken }, JSON.stringify({ pricing: { sync: { autoEnabled: true } } })))
+  assert.equal(toggle.status, 200)
+  assert.equal(toggle.json().pricing.sync.autoEnabled, true)
+  assert.equal(toggle.json().pricing.sync.intervalMs, 21600000)
+  const second = await createApp({ withStorage: true, storage: storage })
+  const pricing = await call(second, '/api/all-usage/pricing', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  assert.equal(pricing.json().overrideCount, 1)
+  assert.equal(pricing.json().config.overrides[0].input, '9')
 })
