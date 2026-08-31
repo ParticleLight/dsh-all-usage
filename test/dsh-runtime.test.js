@@ -196,6 +196,9 @@ async function runRuntimeSmoke(runtime) {
     assert.equal(measured.body.totals.reasoning, 2)
     assert.equal(measured.body.perModel.length, 1)
     assert.equal(measured.body.perModel[0].actualModel, 'deepseek-chat')
+    const storageFiles = await readdir(join(scratch, 'storages'))
+    assert.equal(storageFiles.includes('all_usage_ledger.json'), false)
+    assert.ok(storageFiles.some((file) => /^all_usage_ledger_\d{2}\.json$/.test(file)))
 
     const exactBeforeDispose = webServer.exact.size
     assert.ok(exactBeforeDispose >= 9)

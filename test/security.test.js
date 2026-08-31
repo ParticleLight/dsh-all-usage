@@ -417,8 +417,10 @@ test('drains queued ledger writes before disposal closes storage', async () => {
   })
   for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve))
   blockWrites = true
+  const eventListener = (app.listeners['session/event'] || [])[0]
+  eventListener({ id: 's-1', header: { id: 's-1', cwd: 'C:\\repo' }, events }, events[0])
   const flush = (app.listeners['session/flush'] || [])[0]({ id: 's-1', header: { id: 's-1', cwd: 'C:\\repo' }, events })
-  for (let i = 0; i < 20 && !putStarted; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  await new Promise((resolve) => setTimeout(resolve, 40))
   assert.equal(putStarted, true)
   const cleanups = app.cleanups.map((cleanup) => cleanup()).filter((value) => value && typeof value.then === 'function')
   resolvePut()

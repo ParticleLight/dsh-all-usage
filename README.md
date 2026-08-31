@@ -182,7 +182,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 ### 数据说明
 
-- 使用次数与 Token 来自 DSH 会话日志，并在 `session/flush` 时写入独立用量账本；插件激活时会回填日志与账本历史，插件卸载/重启后已成功持久化的数据不丢
+- 使用次数与 Token 来自 DSH 会话日志；`session/flush` 只在存在新的相关事件时重建并将派生账本写入异步队列，同一 session 的 pending record 会合并，插件退出时 drain；插件激活时会回填日志与账本历史，插件卸载/重启后已成功持久化的数据不丢
 - 按日范围统计会保留全部可读取历史会话的有使用记录日期；热力图仅作为最近 53 周的固定视图窗口
 - 会话删除后，已成功 flush 的用量仍从独立账本恢复；会话销毁提示和周期对账只负责触发重建，不会删除账本记录
 - 同一会话的同一 `turn / step` 只保留一份最终 usage；重试或替换消息会替换旧贡献，不重复累计
@@ -196,6 +196,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - 价格同步默认关闭；models.dev 不可用时保留最近一次成功目录，未匹配模型不会套用默认价格；手工 mapping/override 仅用于模型别名、官方目录缺失或有权威官方价格；看板范围与明细视图保存在浏览器本地，6 小时自动同步开关会立即写入受保护的 pricing API
 - Mapping 语义：带 `identityKey` 的 mapping 只对精确路由身份生效；不带身份键的 mapping 才按模型做全局回退；旧配置中的 `usageIdentityKey` 会在加载时归一化。
 - 余额查询走 DeepSeek 官方 `/user/balance` 接口；未配置 API Key 时卡片显示引导文案
+- 账本按 session ID 稳定 hash 到 32 个 JSON shard，单次 flush 只重写对应 shard；旧的 `all_usage_ledger.json` 会在首次加载时迁移，异步写失败或退出前未落盘不会丢失内存统计，只会让下次启动重新扫描
 - 仅统计能归属到已注册工作区（按会话 cwd 匹配）的会话
 
 ### 开发
@@ -369,7 +370,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 
 ### Data semantics
 
-- Calls and tokens come from DSH session logs and a separate usage ledger written at `session/flush`; readable logs and ledger history are backfilled when the plugin activates, so successfully persisted data survives reloads or session deletion
+- Calls and tokens come from DSH session logs; `session/flush` rebuilds and queues the derived ledger only when related events are dirty, coalescing the latest pending record per session and draining on plugin disposal. Readable logs and ledger history are backfilled when the plugin activates, so successfully persisted data survives reloads or session deletion
 - Day-level range data retains every readable historical session date with tracked usage; the heatmap is only a fixed latest-53-week view
 - After a session is deleted, successfully flushed usage is restored from the separate ledger; disposal hints and periodic reconciliation trigger rebuilds without deleting ledger rows
 - For each session and logical `turn / step`, only the final usage contribution is kept; retries or replaced messages do not double-count
@@ -384,6 +385,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 - Mapping semantics: a mapping with `identityKey` applies only to that exact route identity; a mapping without an identity key is the model-wide fallback. Legacy `usageIdentityKey` values are normalized when loaded.
 - Balance data comes from DeepSeek’s official `/user/balance` endpoint; the card shows guidance when no API key is configured
 - English mode uses UTC for date buckets, range filters, streaks, heatmap dates, and export timestamps; Chinese mode uses local time
+- The ledger assigns each session ID to one of 32 stable-hash JSON shards, so a flush rewrites only its shard; the old `all_usage_ledger.json` is migrated on first load. An async write failure or an unflushed shutdown does not lose in-memory statistics; the next startup simply scans that session again
 - Only sessions that can be mapped to a registered workspace by their working directory are included
 
 ### Development

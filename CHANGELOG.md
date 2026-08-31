@@ -4,6 +4,15 @@ All notable changes to `dsh-all-usage` are documented here.
 
 ## [Unreleased]
 
+### Performance
+
+- Avoid rebuilding and writing a clean session's derived ledger at `session/flush`; queue and coalesce dirty records, then drain pending writes during disposal.
+- Store derived ledger records in 32 stable-hash JSON units so a session update rewrites only its shard; retain the legacy single-unit migration path.
+
+### Correctness
+
+- Use the previous ledger cursor for safe append-only tail folding and fall back to a full rebuild when sequence continuity or turn replacement is uncertain.
+
 ## [1.1.3] - 2026-08-31
 
 ### Added

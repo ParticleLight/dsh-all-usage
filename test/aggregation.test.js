@@ -163,6 +163,10 @@ async function waitForScan(app, predicate = (body) => body.scan.done) {
   return snapshot
 }
 
+async function waitForLedgerWrite() {
+  await new Promise((resolve) => setTimeout(resolve, 40))
+}
+
 test('seeds unchanged sessions from the ledger and replaces retried steps without double-counting', async () => {
   const eventTime = Date.now() - 60 * 1000
   const events = [
@@ -408,6 +412,7 @@ test('ignores all-zero usage replays when persisting the durable ledger', async 
     usageEvent(eventTime, 1, 1, { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, 3),
     usageEvent(eventTime, 2, 1, { inputTokens: 7, outputTokens: 8 }, 4),
   ] })
+  await waitForLedgerWrite()
   const row = app.storageUnit.records.sessions['s-1']
   assert.ok(row)
   assert.equal(Number.isFinite(row.updatedAt), true)
@@ -416,6 +421,88 @@ test('ignores all-zero usage replays when persisting the durable ledger', async 
   const step2 = row.usage.find((item) => item.key === 's-1:step:2:1')
   assert.equal(step1 && step1.values.input, 10)
   assert.equal(step2 && step2.values.input, 7)
+})
+
+
+test('skips a clean session flush and writes only after a dirty event', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const events = [
+    { seq: 1, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 20 }, 2),
+  ]
+  const storage = {
+    records: { sessions: {} },
+    ledgerWrites: [],
+    async loadAll() { return { global: {}, tables: this.records } },
+    async putRecord(table, key, value) {
+      if (key !== '__all_usage_ledger_meta__') this.ledgerWrites.push({ table, key, value })
+      if (!this.records[table]) this.records[table] = {}
+      this.records[table][key] = value
+    },
+    async deleteRecord(table, key) { if (this.records[table]) delete this.records[table][key] },
+    async setGlobal() {},
+    async close() {},
+  }
+  const app = await createApp({
+    withStorage: true,
+    storage,
+    workspaces: [{ id: 'ws-dirty', path: 'C:\\dirty', title: 'Dirty' }],
+    sessions: [{ header: { id: 's-dirty', cwd: 'C:\\dirty' } }],
+    events: new Map([['s-dirty', events]]),
+  })
+  await waitForScan(app)
+  await new Promise((resolve) => setImmediate(resolve))
+  const before = storage.ledgerWrites.length
+  const flush = app.listeners['session/flush'][0]
+  await flush({ id: 's-dirty', header: { id: 's-dirty', cwd: 'C:\\dirty' }, events })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(storage.ledgerWrites.length, before)
+  const next = usageEvent(eventTime, 2, 1, { inputTokens: 7, outputTokens: 8 }, 3)
+  app.listeners['session/event'][0]({ id: 's-dirty', header: { id: 's-dirty', cwd: 'C:\\dirty' } }, next)
+  await flush({ id: 's-dirty', header: { id: 's-dirty', cwd: 'C:\\dirty' }, events: events.concat([next]) })
+  await waitForLedgerWrite()
+  assert.equal(storage.ledgerWrites.length, before + 1)
+})
+
+
+test('retries a failed ledger write on the next dirty flush', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const events = [usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 20 }, 1)]
+  const storage = {
+    records: { sessions: {} },
+    ledgerWrites: [],
+    failNext: true,
+    async loadAll() { return { global: {}, tables: this.records } },
+    async putRecord(table, key, value) {
+      if (key === '__all_usage_ledger_meta__') {
+        this.records[table][key] = value
+        return
+      }
+      this.ledgerWrites.push({ table, key, value })
+      if (this.failNext) {
+        this.failNext = false
+        throw new Error('transient shard failure')
+      }
+      this.records[table][key] = value
+    },
+    async deleteRecord(table, key) { if (this.records[table]) delete this.records[table][key] },
+    async setGlobal() {},
+    async close() {},
+  }
+  const app = await createApp({
+    withStorage: true,
+    storage,
+    workspaces: [{ id: 'ws-retry', path: 'C:\\retry', title: 'Retry' }],
+    sessions: [{ header: { id: 's-retry', cwd: 'C:\\retry' } }],
+    events: new Map([['s-retry', events]]),
+  })
+  await waitForScan(app)
+  await waitForLedgerWrite()
+  assert.equal(storage.ledgerWrites.length, 1)
+  await app.listeners['session/flush'][0]({ id: 's-retry', header: { id: 's-retry', cwd: 'C:\\retry' }, events })
+  await waitForLedgerWrite()
+  assert.equal(storage.ledgerWrites.length, 2)
+  assert.ok(storage.records.sessions['s-retry'])
 })
 
 test('exposes structured token semantics in the API snapshot', async () => {
@@ -1106,6 +1193,7 @@ test('restores the final replacement after flush and restart', async () => {
   await waitForScan(first)
   const flush = first.listeners['session/flush'][0]
   await flush({ id: 's-restart', header: { id: 's-restart', cwd: 'C:\\restart' }, events })
+  await waitForLedgerWrite()
   assert.equal(first.storageUnit.records.sessions['s-restart'].usage.length, 1)
   assert.equal(first.storageUnit.records.sessions['s-restart'].usage[0].values.input, 25)
 

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createLedger } from '../lib/ledger.js'
+import { createLedger, LEDGER_SHARD_COUNT, ledgerShardIndex } from '../lib/ledger.js'
 
-function makeLedger() {
+function makeLedger(storage = undefined) {
   const identity = { identityKey: 'identity', provider: null, requestedModel: null, actualModel: null, label: 'unknown', legacy: true }
   const host = {
-    services: { storage: undefined },
+    services: { storage },
     state: {
       ledgerRevision: Number.NaN,
       ledgerRecords: new Map(),
@@ -27,13 +27,120 @@ function makeLedger() {
       resolveCurrentPricing() { return {} },
       dateKeys() { return { local: '2024-01-01', utc: '2024-01-01' } },
       validEventTime(value) { return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 8640000000000000 },
-      upsertUsageSample() {},
+      upsertUsageSample(target, sample) {
+        const previous = target.get(sample.key)
+        target.set(sample.key, sample)
+        return { accepted: true, replaced: previous !== undefined, previous, next: sample }
+      },
     },
-    sessionSync: { lastSeqOf() { return -1 } },
+    sessionSync: {
+      lastSeqOf(events) {
+        let last = -1
+        for (const event of events || []) if (event && typeof event.seq === 'number' && event.seq > last) last = event.seq
+        return last
+      },
+    },
     markStatsChanged() {},
   }
   return { host, ledger: createLedger(host), identity }
 }
+
+test('opens 32 stable ledger shards and migrates legacy rows', async () => {
+  const opened = []
+  const writes = []
+  const units = new Map()
+  const legacy = { version: 3, sessionId: 's-legacy', workspaceId: 'w', updatedAt: Date.now(), turns: [], usage: [] }
+  const backend = {
+    kv: {
+      async open(descriptor) {
+        opened.push(descriptor)
+        let unit = units.get(descriptor.name)
+        if (unit !== undefined) return unit
+        const rows = descriptor.name === 'all_usage_ledger' ? { 's-legacy': legacy } : {}
+        unit = {
+          async loadAll() { return { global: {}, tables: { sessions: rows } } },
+          async putRecord(table, key, value) { writes.push({ name: descriptor.name, key }); rows[key] = value },
+          async close() {},
+        }
+        units.set(descriptor.name, unit)
+        return unit
+      },
+    },
+  }
+  const { host, ledger } = makeLedger({ backend: { get() { return backend } } })
+  await ledger.loadLedger()
+  assert.equal(opened.length, LEDGER_SHARD_COUNT + 1)
+  assert.deepEqual(opened.map((item) => item.name), Array.from({ length: LEDGER_SHARD_COUNT }, (_, index) => 'all_usage_ledger_' + String(index).padStart(2, '0')).concat(['all_usage_ledger']))
+  assert.equal(host.state.ledgerRecords.has('s-legacy'), true)
+  assert.equal(writes.some((item) => item.key === 's-legacy' && item.name === 'all_usage_ledger_' + String(ledgerShardIndex('s-legacy')).padStart(2, '0')), true)
+  assert.equal(writes.some((item) => item.key === '__all_usage_ledger_meta__' && item.name === 'all_usage_ledger_00'), true)
+  await host.state.ledgerUnit.close()
+  const openedBeforeSecondLoad = opened.length
+  const second = makeLedger({ backend: { get() { return backend } } })
+  await second.ledger.loadLedger()
+  assert.equal(opened.length, openedBeforeSecondLoad + LEDGER_SHARD_COUNT)
+  await second.host.state.ledgerUnit.close()
+})
+
+test('coalesces pending ledger records and drains the latest value', async () => {
+  const writes = []
+  const { host, ledger } = makeLedger()
+  host.state.ledgerUnit = {
+    async putRecord(table, key, value) { writes.push({ table, key, value }) },
+  }
+  const first = { version: 3, sessionId: 's', lastSeq: 1, source: 'scan', updatedAt: 1, turns: [], usage: [] }
+  const latest = { version: 3, sessionId: 's', lastSeq: 2, source: 'flush', updatedAt: 2, turns: [], usage: [] }
+  ledger.storeLedgerRecord(first)
+  const firstWait = ledger.persistLedgerRecord(first)
+  ledger.storeLedgerRecord(latest)
+  const latestWait = ledger.persistLedgerRecord(latest)
+  assert.equal(writes.length, 0)
+  await ledger.drainLedgerWrites()
+  await Promise.all([firstWait, latestWait])
+  assert.equal(writes.length, 1)
+  assert.equal(writes[0].key, 's')
+  assert.strictEqual(writes[0].value, latest)
+})
+
+test('keeps the in-memory ledger when an async write fails', async () => {
+  const { host, ledger } = makeLedger()
+  const writes = []
+  host.state.ledgerUnit = {
+    async putRecord(table, key, value) { writes.push({ table, key, value }); throw new Error('simulated shard failure') },
+  }
+  const record = { version: 3, sessionId: 's-failure', lastSeq: 1, source: 'flush', updatedAt: 1, turns: [], usage: [] }
+  ledger.storeLedgerRecord(record)
+  await ledger.persistLedgerRecord(record)
+  assert.equal(writes.length, 1)
+  assert.strictEqual(host.state.ledgerRecords.get('s-failure'), record)
+  assert.equal(host.state.ledgerPending.size, 0)
+})
+
+test('builds an appended ledger tail from the previous record', () => {
+  const { ledger, identity } = makeLedger()
+  const time = Date.now()
+  const previous = {
+    version: 3,
+    sessionId: 's-tail',
+    workspaceId: 'w',
+    lastSeq: 1,
+    source: 'flush',
+    updatedAt: 1,
+    lastIdentity: identity,
+    turns: [],
+    usage: [{ key: 's-tail:step:1:1', seq: 1, time, workspaceId: 'w', identity, modelId: 'unknown', turn: 1, step: 1, values: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, reasoning: 0 } }],
+  }
+  const events = [
+    { seq: 0, time, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    { seq: 1, time, type: 'assistant/message', data: { turn: 1, step: 1, usage: { inputTokens: 10, outputTokens: 20 } } },
+    { seq: 2, time, type: 'assistant/message', data: { turn: 2, step: 1, usage: { inputTokens: 7, outputTokens: 8 } } },
+  ]
+  const record = ledger.buildLedgerRecord({ id: 's-tail', events }, 'w', 'flush', undefined, previous)
+  assert.equal(record.lastSeq, 2)
+  assert.equal(record.usage.length, 2)
+  assert.equal(record.usage.find((item) => item.key === 's-tail:step:1:1').values.input, 10)
+  assert.equal(record.usage.find((item) => item.key === 's-tail:step:2:1').values.input, 7)
+})
 
 test('migrates legacy tiered priced costs to unsupported', () => {
   const { host, ledger, identity } = makeLedger()
