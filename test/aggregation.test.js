@@ -503,6 +503,9 @@ test('retries a failed ledger write on the next dirty flush', async () => {
   await waitForLedgerWrite()
   assert.equal(storage.ledgerWrites.length, 2)
   assert.ok(storage.records.sessions['s-retry'])
+  await app.listeners['session/flush'][0]({ id: 's-retry', header: { id: 's-retry', cwd: 'C:\\retry' }, events })
+  await waitForLedgerWrite()
+  assert.equal(storage.ledgerWrites.length, 2)
 })
 
 test('exposes structured token semantics in the API snapshot', async () => {
