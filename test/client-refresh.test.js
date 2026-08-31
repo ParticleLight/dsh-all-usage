@@ -10,8 +10,8 @@ assert.notEqual(start, -1, 'refresh helper start must exist')
 assert.notEqual(end, -1, 'refresh helper end must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__refreshHelpers = { createRequestGate, snapshotVersion, statusRequiresFullSnapshot, retryDelayFor }', context)
-const { createRequestGate, snapshotVersion, statusRequiresFullSnapshot, retryDelayFor } = context.__refreshHelpers
+vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__refreshHelpers = { createRequestGate, snapshotVersion, queryVersion, metadataVersion, statusRefreshKind, statusRequiresFullSnapshot, statusRequiresQueryRefresh, retryDelayFor }', context)
+const { createRequestGate, snapshotVersion, queryVersion, metadataVersion, statusRefreshKind, statusRequiresFullSnapshot, statusRequiresQueryRefresh, retryDelayFor } = context.__refreshHelpers
 
 test('compares full snapshot and status by instance plus revision', () => {
   const snapshot = { instanceId: 'host-a', revision: 7, scan: { done: true } }
@@ -24,6 +24,17 @@ test('compares full snapshot and status by instance plus revision', () => {
   assert.equal(statusRequiresFullSnapshot({ instanceId: 'host-a', revision: 7, scan: { done: false } }, snapshot), true)
   assert.equal(statusRequiresFullSnapshot({ instanceId: 'host-a', revision: 7, scan: { done: true } }, null), true)
   assert.equal(statusRequiresFullSnapshot({ scan: { done: true } }, snapshot), true)
+})
+
+test('classifies split revisions without promoting data changes to full snapshots', () => {
+  const base = { instanceId: 'host-a', revision: 10, dataRevision: 4, metadataRevision: 2, scanRevision: 8, pricingRevision: 1, queryRevision: '4:1', scan: { done: true } }
+  assert.equal(queryVersion(base), 'host-a:4:1')
+  assert.equal(metadataVersion(base), 'host-a:2')
+  assert.equal(statusRefreshKind({ ...base, revision: 11, dataRevision: 5, queryRevision: '5:1' }, base), 'query')
+  assert.equal(statusRequiresQueryRefresh({ ...base, dataRevision: 5, queryRevision: '5:1' }, base), true)
+  assert.equal(statusRefreshKind({ ...base, revision: 11, scanRevision: 9 }, base), 'status')
+  assert.equal(statusRefreshKind({ ...base, revision: 11, metadataRevision: 3 }, base), 'full')
+  assert.equal(statusRequiresFullSnapshot({ ...base, revision: 11, dataRevision: 5, queryRevision: '5:1' }, base), false)
 })
 
 test('uses bounded exponential refresh retry delays', () => {
@@ -69,6 +80,9 @@ test('uses scoped query and records endpoints with stale-cursor recovery', () =>
   assert.match(source, /reason && reason\.status === 409/)
   assert.match(source, /tabIndex: 0, role: 'button'/)
   assert.match(source, /setAuditReload\(\(value\) => value \+ 1\)/)
+  assert.ok(source.includes("const recordsVisible = detailView === 'logs'"))
+  assert.ok(source.includes("}, [detailKey, detailView, liveQueryVersion, auditReload])"))
+  assert.doesNotMatch(source, /setAuditRows\(\[\]\)/)
 })
 
 test('uses language-style custom menus for unified filters', () => {
@@ -100,7 +114,7 @@ test('keeps provider and model filters independent', () => {
 })
 
 test('memoizes expensive scope derivations and active detail panels', () => {
-  assert.ok(source.includes('const agg = React.useMemo(() => queryReady'))
+  assert.ok(source.includes('const agg = React.useMemo(() => queryUsable'))
   assert.ok(source.includes('const rows = React.useMemo(() =>'))
   assert.ok(source.includes('const modelRows = React.useMemo(() =>'))
   assert.ok(source.includes("detailView === 'model' ? React.createElement('div', { className: 'uh-panel uh-ios-list-panel' },"))
@@ -126,7 +140,7 @@ test('uses a centered spinner without idle chart controls while trend data loads
 test('keeps the base path visible beneath a replayable draw overlay', () => {
   assert.ok(source.includes('.uh-trend-line { fill:none; stroke-width:2.2; vector-effect:non-scaling-stroke; stroke-linecap:round; stroke-linejoin:round; opacity:.22; }'))
   assert.ok(source.includes('.uh-trend-line-draw { fill:none; stroke-width:2.2;'))
-  assert.ok(source.includes("const trendAnimationKey = queryReady && queryResult ? queryKey + ':' + queryResult.revision : queryKey"))
+  assert.ok(source.includes("const trendAnimationKey = queryUsable && queryResult ? queryKey + ':' + (queryVersion(queryResult) || 'query') : queryKey"))
   assert.ok(source.includes('key: trendAnimationKey'))
 })
 
@@ -149,8 +163,8 @@ test('adds donut charts to model and workspace detail panels', () => {
   assert.match(source, /animation:uh-donut-draw/)
   assert.match(source, /tooltipPosition/)
   assert.match(source, /onMouseMove: updatePointer/)
-  assert.ok(source.includes("key: 'model-donut-' + detailView + ':' + queryKey + ':' + stats.revision + ':' + modelView"))
-  assert.ok(source.includes("key: 'workspace-donut-' + detailView + ':' + queryKey + ':' + stats.revision"))
+  assert.ok(source.includes("key: 'model-donut-' + detailView + ':' + queryKey + ':' + (liveQueryVersion || 'query') + ':' + modelView"))
+  assert.ok(source.includes("key: 'workspace-donut-' + detailView + ':' + queryKey + ':' + (liveQueryVersion || 'query')"))
   assert.match(source, /modelDonutChart,/ )
   assert.match(source, /workspaceDonutChart,/)
 })

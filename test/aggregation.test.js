@@ -525,7 +525,49 @@ test('exposes structured token semantics in the API snapshot', async () => {
   assert.ok(Array.isArray(semantics.buckets))
   assert.ok(semantics.buckets.includes('cacheRead'))
   assert.equal(body.tokenSemantics.processedTotal, 'input + output + cacheRead + cacheWrite + reasoning')
+  for (const key of ['revision', 'dataRevision', 'metadataRevision', 'scanRevision', 'pricingRevision', 'queryRevision']) assert.ok(Object.hasOwn(body, key), key + ' must be present')
+  assert.equal(body.queryRevision, body.dataRevision + ':' + body.pricingRevision)
 })
+
+test('separates data, metadata, and query revisions across live changes', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const events = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 20 }, 2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+  ]
+  const app = await createApp({
+    workspaces: [{ id: 'ws-revisions', path: 'C:/revisions', title: 'Revisions' }],
+    sessions: [{ header: { id: 's-revisions', cwd: 'C:/revisions' } }],
+    events: new Map([['s-revisions', events]]),
+  })
+  await waitForScan(app)
+  const before = (await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  const live = usageEvent(eventTime, 2, 1, { inputTokens: 7, outputTokens: 8 }, 4)
+  events.push(live)
+  app.listeners['session/event'][0]({ id: 's-revisions', header: { cwd: 'C:/revisions' } }, live)
+  for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  const afterData = (await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.ok(afterData.dataRevision > before.dataRevision)
+  assert.equal(afterData.metadataRevision, before.metadataRevision)
+  assert.equal(afterData.pricingRevision, before.pricingRevision)
+  assert.notEqual(afterData.queryRevision, before.queryRevision)
+
+  const token = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json().requestToken
+  const alias = await call(app, '/api/all-usage/alias', makeRequest('POST', {
+    host: '127.0.0.1:3080',
+    origin: 'http://127.0.0.1:3080',
+    'x-all-usage-request-token': token,
+  }, JSON.stringify({ workspaceId: 'ws-revisions', alias: 'Renamed' })))
+  assert.equal(alias.status, 200)
+  await new Promise((resolve) => setImmediate(resolve))
+  const afterMetadata = (await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.ok(afterMetadata.metadataRevision > afterData.metadataRevision)
+  assert.equal(afterMetadata.dataRevision, afterData.dataRevision)
+  assert.equal(afterMetadata.pricingRevision, afterData.pricingRevision)
+  assert.equal(afterMetadata.queryRevision, afterData.queryRevision)
+})
+
 test('skips re-reading unchanged sessions after restart using persistence revisions', async () => {
   const eventTime = Date.now() - 60 * 1000
   const events = [
@@ -681,6 +723,9 @@ test('serves structured scoped aggregates and privacy-safe paginated records', a
   assert.equal(scoped.status, 200)
   const query = scoped.json()
   assert.equal(query.usageSchemaVersion, 3)
+  assert.equal(query.queryRevision, query.dataRevision + ':' + query.pricingRevision)
+  assert.equal(query.dataRevision, full.dataRevision)
+  assert.equal(query.metadataRevision, full.metadataRevision)
   assert.equal(query.scope.workspaceId, 'ws-a')
   assert.equal(query.scope.provider, 'deepseek')
   assert.equal(query.totals.calls, 1)
@@ -733,6 +778,7 @@ test('serves structured scoped aggregates and privacy-safe paginated records', a
   assert.equal(page.status, 200)
   const pageBody = page.json()
   assert.equal(pageBody.usageSchemaVersion, 3)
+  assert.equal(pageBody.queryRevision, query.queryRevision)
   assert.equal(pageBody.items.length, 1)
   assert.equal(typeof pageBody.items[0].id, 'string')
   assert.equal(Object.hasOwn(pageBody.items[0], 'sid'), false)
