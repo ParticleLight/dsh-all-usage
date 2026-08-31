@@ -36,7 +36,7 @@ function makeLedger() {
 }
 
 test('migrates legacy tiered priced costs to unsupported', () => {
-  const { ledger, identity } = makeLedger()
+  const { host, ledger, identity } = makeLedger()
   const oldCost = {
     schemaVersion: 1,
     pricingMode: 'official-model',
@@ -71,6 +71,12 @@ test('migrates legacy tiered priced costs to unsupported', () => {
   assert.equal(record.usage[0].cost.status, 'unsupported')
   assert.equal(record.usage[0].cost.reason, 'tiered-pricing-not-modeled')
   assert.equal(record.usage[0].cost.total, '0')
+  const migratedRevision = record.updatedAt
+  const roundTrip = ledger.normalizeLedgerRecord(JSON.parse(JSON.stringify(record)), 's-tiered')
+  assert.equal(roundTrip.needsUpgrade, false)
+  assert.equal(roundTrip.usage[0].cost.status, 'unsupported')
+  assert.equal(roundTrip.usage[0].cost.reason, 'tiered-pricing-not-modeled')
+  assert.equal(host.state.ledgerRevision, migratedRevision)
 })
 
 test('keeps ledger revisions and persisted timestamps finite', () => {

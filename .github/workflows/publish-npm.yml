@@ -26,6 +26,8 @@ concurrency:
 jobs:
   verify:
     uses: ./.github/workflows/ci.yml
+    with:
+      checkout_ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.target_tag }}
 
   publish:
     needs: verify

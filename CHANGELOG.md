@@ -4,6 +4,8 @@ All notable changes to `dsh-all-usage` are documented here.
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-08-31
+
 ### Added
 
 - Added deterministic usage invariants and a redacted fixture replay command covering failed requests, orphan usage chunks, cache buckets, replacement semantics, and exact expected totals.
