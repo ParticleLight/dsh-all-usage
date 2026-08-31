@@ -4,6 +4,24 @@ All notable changes to `dsh-all-usage` are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Added deterministic usage invariants and a redacted fixture replay command covering failed requests, orphan usage chunks, cache buckets, replacement semantics, and exact expected totals.
+- Added a Node 22/24 CI matrix with package-content checks and required real DSH runtime smoke coverage for DSH 0.1.1-rc.1 and 0.1.1-rc.2.
+- Added community issue templates for data inconsistencies, plugin startup failures, and cost calculation issues.
+
+### Fixed
+
+- Initialized the durable ledger revision clock and reject persisted ledger records whose `updatedAt` is not finite.
+- Require HTTP socket peers to be loopback before accepting a request, including IPv4-mapped loopback addresses.
+- Preserve route-specific pricing mappings through the `identityKey` field, while accepting legacy `usageIdentityKey` data.
+- Mark tiered model prices as unsupported until tier-aware calculation is implemented instead of reporting a flat estimate as priced.
+- Require `webServer` before Host activation so the dashboard routes cannot silently disappear when the service mounts late.
+
+### Documentation
+
+- Documented the DSH compatibility matrix, the difference between local replayable statistics and provider billing, cache/token examples, and the fixture workflow.
+
 ## [1.1.2] - 2026-08-30
 
 ### Added
@@ -127,6 +145,8 @@ All notable changes to `dsh-all-usage` are documented here.
 - Allowed same-origin browser balance GET requests that omit `Origin` while retaining token protection.
 - Standardized English date buckets, range filters, streaks, heatmap dates, and export timestamps on UTC.
 
+[1.1.3]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.3
+[1.1.2]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.2
 [1.1.0]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.0
 [1.0.9]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.9
 [1.0.8]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.8

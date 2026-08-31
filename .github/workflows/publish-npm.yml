@@ -15,14 +15,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
   publish:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+      - name: Validate release identity
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          test "$RELEASE_TAG" = "v$version"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse refs/tags/$RELEASE_TAG^{commit})"
+          echo "Release tag $RELEASE_TAG matches $name@$version"
+
       - name: Publish npm package
         run: |
           name="$(node -p "require('./package.json').name")"
@@ -32,3 +50,11 @@ jobs:
             exit 0
           fi
           npm publish --access public --provenance
+
+      - name: Verify npm publication
+        run: |
+          set -euo pipefail
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          published="$(npm view "${name}@${version}" version --json)"
+          node -e 'const expected = process.argv[1]; const actual = JSON.parse(process.argv[2]); if (actual !== expected) throw new Error(`npm returned ${actual}, expected ${expected}`)' "$version" "$published"

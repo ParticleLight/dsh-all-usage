@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Fixture reproduction guide
+    url: https://github.com/ParticleLight/dsh-all-usage#reproducible-event-examples
+    about: 先使用脱敏 fixture 和 replay 命令确认是否能复现

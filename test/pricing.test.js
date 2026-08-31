@@ -13,6 +13,7 @@ import {
   normalizePricingState,
   parseModelsDevCatalog,
   resolvePricing,
+  serializePricingState,
 } from '../lib/pricing.js'
 
 const catalogFixture = {
@@ -89,7 +90,7 @@ test('parses models.dev nested providers and keeps capability flags', () => {
 
 test('ignores DSH provider and selects the official model price', () => {
   const parsed = parseModelsDevCatalog(catalogFixture, 123)
-  const state = normalizePricingState({ catalogEntries: parsed.catalog.entries })
+  const state = normalizePricingState({ catalogEntries: parsed.catalog.entries.map((entry) => entry.modelId === 'gpt-5.5' ? { ...entry, tiered: false } : entry) })
   const direct = resolvePricing({ provider: 'openai', actualModel: 'gpt-5.5' }, state)
   const relay = resolvePricing({ provider: 'sudocode', actualModel: 'gpt-5.5' }, state)
   assert.equal(direct.status, 'priced')
@@ -129,7 +130,7 @@ test('model-only manual override wins regardless of DSH provider', () => {
 
 test('calculates fresh four-bucket cost and applies multiplier only to final total', () => {
   const parsed = parseModelsDevCatalog(catalogFixture, 123)
-  const state = normalizePricingState({ catalogEntries: parsed.catalog.entries })
+  const state = normalizePricingState({ catalogEntries: parsed.catalog.entries.map((entry) => entry.modelId === 'gpt-5.5' ? { ...entry, tiered: false } : entry) })
   const resolved = resolvePricing({ provider: 'openai', actualModel: 'gpt-5.5' }, state)
   resolved.multiplier = '1.5'
   const cost = calculateCost({ input: 1000000, output: 2000000, cacheRead: 100000, cacheWrite: 200000, reasoning: 900000 }, resolved)
@@ -208,4 +209,72 @@ test('fetches and rejects malformed models.dev responses without credentials', a
   const malformed = await fetchModelsDevCatalog(async () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => '{' }))
   assert.equal(malformed.ok, false)
   assert.equal(malformed.error, 'catalog-invalid-json')
+})
+
+
+test('uses exact identity mappings before model-only mappings', () => {
+  const state = normalizePricingState({
+    catalogEntries: [{ providerId: 'openai', modelId: 'gpt-5.5', input: '5', output: '30', cacheRead: '0.5', cacheWrite: '6.25' }],
+    overrides: [
+      { providerId: 'global-price', modelId: 'gpt-5.5', input: '4', output: '8', cacheRead: '0.4', cacheWrite: '0.8' },
+      { providerId: 'route-a-price', modelId: 'gpt-5.5', input: '9', output: '18', cacheRead: '0.9', cacheWrite: '1.8' },
+      { providerId: 'route-b-price', modelId: 'gpt-5.5', input: '11', output: '22', cacheRead: '1.1', cacheWrite: '2.2' },
+    ],
+    mappings: [
+      { model: 'gpt-5.5', catalogProviderId: 'global-price', catalogModelId: 'gpt-5.5' },
+      { identityKey: 'route-a-key', model: 'gpt-5.5', catalogProviderId: 'route-a-price', catalogModelId: 'gpt-5.5' },
+      { identityKey: 'route-b-key', model: 'gpt-5.5', catalogProviderId: 'route-b-price', catalogModelId: 'gpt-5.5' },
+    ],
+  })
+  const routeA = resolvePricing({ identityKey: 'route-a-key', provider: 'relay-a', actualModel: 'gpt-5.5' }, state)
+  const routeB = resolvePricing({ identityKey: 'route-b-key', provider: 'relay-b', actualModel: 'gpt-5.5' }, state)
+  const otherRoute = resolvePricing({ identityKey: 'other-route', provider: 'relay-c', actualModel: 'gpt-5.5' }, state)
+  assert.equal(routeA.status, 'priced')
+  assert.equal(routeA.rates.input, '9')
+  assert.equal(routeB.status, 'priced')
+  assert.equal(routeB.rates.input, '11')
+  assert.equal(otherRoute.status, 'priced')
+  assert.equal(otherRoute.rates.input, '4')
+  assert.equal(serializePricingState(state).mappings[1].identityKey, 'route-a-key')
+})
+
+test('accepts legacy usageIdentityKey mappings and canonicalizes them', () => {
+  const state = normalizePricingState({
+    overrides: [{ providerId: 'legacy-price', modelId: 'gpt-5.5', input: '13', output: '26', cacheRead: '1.3', cacheWrite: '2.6' }],
+    mappings: [{ usageIdentityKey: 'legacy-route', model: 'gpt-5.5', catalogProviderId: 'legacy-price', catalogModelId: 'gpt-5.5' }],
+  })
+  assert.equal(state.mappings.length, 1)
+  assert.equal(state.mappings[0].identityKey, 'legacy-route')
+  const resolved = resolvePricing({ identityKey: 'legacy-route', actualModel: 'gpt-5.5' }, state)
+  const emptyCanonical = resolvePricing({ identityKey: '', usageIdentityKey: 'legacy-route', actualModel: 'gpt-5.5' }, state)
+  assert.equal(resolved.status, 'priced')
+  assert.equal(emptyCanonical.status, 'priced')
+  assert.equal(resolved.rates.input, '13')
+})
+
+
+
+test('does not apply provider-scoped model mappings to another route', () => {
+  const state = normalizePricingState({
+    catalogEntries: [{ providerId: 'openai', modelId: 'gpt-5.5', input: '5', output: '30', cacheRead: '0.5', cacheWrite: '6.25' }],
+    overrides: [{ providerId: 'openai', modelId: 'gpt-5.5-special', input: '9', output: '18', cacheRead: '0.9', cacheWrite: '1.8' }],
+    mappings: [{ provider: 'relay-a', model: 'gpt-5.5', catalogProviderId: 'openai', catalogModelId: 'gpt-5.5-special' }],
+  })
+  const matching = resolvePricing({ provider: 'relay-a', actualModel: 'gpt-5.5' }, state)
+  const other = resolvePricing({ provider: 'relay-b', actualModel: 'gpt-5.5' }, state)
+  assert.equal(matching.rates.input, '9')
+  assert.equal(other.rates.input, '5')
+})
+
+test('does not report tiered catalog pricing as flat priced', () => {
+  const state = normalizePricingState({
+    catalogEntries: [{ providerId: 'openai', modelId: 'gpt-5.5', input: '5', output: '30', cacheRead: '0.5', cacheWrite: '6.25', tiers: [{ input: 10 }] }],
+  })
+  const resolved = resolvePricing({ provider: 'relay', actualModel: 'gpt-5.5' }, state)
+  assert.equal(resolved.status, 'unsupported')
+  assert.equal(resolved.reason, 'tiered-pricing-not-modeled')
+  assert.equal(resolved.tiered, true)
+  const cost = calculateCost({ input: 1000000, output: 1000000 }, resolved)
+  assert.equal(cost.status, 'unsupported')
+  assert.equal(cost.total, '0')
 })

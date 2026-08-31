@@ -27,7 +27,88 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **Token 口径**：输入按「未含缓存命中」计，缓存命中 / 写入与推理独立成桶；全 0 用量的重放事件不会覆盖已记录的真实用量，仅缓存命中的请求也会计入
 - **成本口径**：模型价格来自 models.dev 的 USD / 1M Token 目录；成本快照按 DSH 已归一化的 fresh input 和四类价格桶计算，倍率只作用于最终总价，已有正成本历史不会因价格更新重算；只按模型选择官方厂商条目，未找到官方价格时显示为未计价
 
+### 兼容性与已知限制
+
+- **运行环境**：需要 Node.js `>=22 <25`；CI 会在 Node 22 和 Node 24 上运行测试、语法检查和 npm 包内容检查。
+- **DSH 兼容**：`package.json` 声明 DSH runtime `>=0.1.1-rc.1 <0.1.2`，已使用 `0.1.1-rc.2` 和 `0.1.1-rc.1` 的真实 Cordis 服务链验证。
+- **Web 服务依赖**：Host 将 `webServer` 声明为必需依赖，确保服务晚挂载时由 DSH 等待后再执行插件；该包面向 DSH Web profile，不提供无 WebServer 的 headless 路由。HTTP 守卫还会检查真实 socket peer，反向代理只有在连接本身来自 loopback 时才会被接受。
+
+| DSH runtime | Node.js 支持 | 真实 Cordis smoke | 结论 |
+| --- | --- | --- | --- |
+| `0.1.1-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（当前 Node 24） | 已声明、已验证 |
+| `0.1.1-rc.1` | `>=22 <25`，CI 覆盖 22/24 | 通过（当前 Node 24） | 已声明、已验证 |
+| 其他版本 | `>=22 <25` | 未测试 | 不在已验证矩阵内 |
+
+未列出的 DSH 版本不代表一定不兼容；提交问题时请附 DSH、Node.js 和插件版本。
+
+- **中断请求**：上游请求被中断时可能只有 `assistant/chunk` 的 usage，没有最终 `assistant/message`；本插件会保留该 chunk 用量。同一 `turn / step` 后续出现最终 message 时，message 会替换 chunk。若上游完全没有 usage 事件，则无法从响应内容精确恢复 Token。
+- **估算成本**：成本是基于 models.dev 价格和 DSH usage 桶的估算，不是供应商账单；目录不可用或模型没有官方匹配时不会猜测价格，而是显示未计价。缓存读取、缓存写入和 reasoning 的口径取决于 DSH 上游事件。
+- **分层价格**：models.dev 标记为 tiered/context-dependent 的价格暂不参与本插件的 flat-rate 计算，会显示为 unsupported，直到实现按上下文长度的分层计价。
+- **历史边界**：只有能按 cwd 映射到已注册工作区的会话会进入统计；会话尚未成功 flush 前删除或损坏的日志无法由独立账本恢复。
+
+### 本地统计与官方账单
+
+本插件展示的是 DSH 本地事件日志上的可重放统计，不是供应商账单的镜像：
+
+- 本地统计读取 DSH 的 `assistant/chunk`、最终 `assistant/message` 和其他会话事件，按同一 `turn / step` 去重和替换；官方账单可能按供应商自己的请求、分词器、舍入、折扣、免费额度和结算周期计算。
+- 失败请求只要留下 usage chunk，就会进入本地统计；供应商是否对该失败请求收费，应以官方账单为准。
+- 价格来自 models.dev 的公开模型目录和本地显式覆盖；目录价格、供应商实际价格、区域费率和账单折扣可能不同。成本字段应理解为估算值。
+- 本地统计只包含能映射到已注册工作区的会话，并可能因日志损坏、清理或上游没有发出 usage 而少于官方账单。
+
+### 可复现事件示例
+
+下面的事件是脱敏的最小示例；完整可运行数据见 [`fixtures/usage-events.json`](fixtures/usage-events.json)。
+
+#### 失败请求仍保留 usage chunk
+
+~~~json
+[
+  {"type": "assistant/chunk", "data": {"turn": 1, "step": 1, "chunk": {"type": "usage", "usage": {"inputTokens": 100, "outputTokens": 20}}}},
+  {"type": "request/error", "data": {"code": "upstream-failed"}}
+]
+~~~
+
+没有最终 `assistant/message` 时，chunk 仍计为一个本地调用；这不等于官方一定收费。
+
+#### 孤立 usage chunk
+
+~~~json
+{"type": "assistant/chunk", "data": {"turn": 1, "step": 1, "chunk": {"type": "usage", "usage": {"inputTokens": 7, "cacheReadTokens": 8}}}}
+~~~
+
+缺少 request/context 或 request/header 时，Token 仍可统计，但模型身份显示为 Unknown；插件不会从 Provider 名称或展示字符串猜测模型。
+
+#### 缓存 Token 的四桶含义
+
+~~~json
+{"inputTokens": 100, "outputTokens": 20, "cacheReadTokens": 40, "cacheWriteTokens": 5, "reasoningTokens": 3}
+~~~
+
+本地 processed total 为 `100 + 20 + 40 + 5 + 3 = 168`；成本只对 input、output、cacheRead、cacheWrite 四个桶定价，reasoning 不会再次加到 output。
+
+使用仓库中的 fixture 复现：
+
+~~~bash
+node scripts/replay-fixture.mjs fixtures/usage-events.json
+~~~
+
+该命令会加载真实插件 Host、调用兼容 API、校验预期 Token/records，并输出不含敏感信息的摘要。
+
+### 报告问题
+
+- [数据不一致 / Data inconsistency](.github/ISSUE_TEMPLATE/data-inconsistency.md)
+- [插件启动失败 / Plugin startup failure](.github/ISSUE_TEMPLATE/startup-failure.md)
+- [成本计算问题 / Cost calculation issue](.github/ISSUE_TEMPLATE/cost-calculation.md)
+
 ### 最近更新
+
+**v1.1.3**
+
+- 修复 durable ledger revision 初始化、有限值校验和 HTTP socket peer loopback 守卫
+- route-specific pricing mapping 统一使用 `identityKey`，legacy `usageIdentityKey` 自动兼容
+- tiered models.dev 价格在未实现分层计算前显示为 unsupported，不误报为 flat priced
+- 增加 Node 22/24 与 DSH rc.1/rc.2 的发布和真实 runtime smoke 门禁
+- 增加脱敏 fixture replay、统计示例和社区 Issue 模板
 
 **v1.1.2**
 
@@ -86,7 +167,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 ### 架构
 
-- **Host 端**（`lib/index.js`）：扫描持久化会话日志聚合用量（`turn/end` + `assistant/message.usage`），监听 `session/event` 实时折叠；通过 `webServer` 服务注册数据路由：
+- **Host 端**（入口 `lib/index.js`，组装 `lib/plugin.js`）：按职责拆分为 `aggregation.js`（聚合与查询）、`ledger.js`（持久账本）、`session-sync.js`（历史/实时同步）、`pricing-runtime.js`（运行时定价）、`balance.js`（余额）、`http.js`（安全路由）；扫描 `turn/end`、`assistant/chunk` usage 和最终 `assistant/message.usage`，监听 `session/event` 实时折叠，并通过 `webServer` 服务注册数据路由：
   - `GET /api/all-usage` — 兼容统计快照
   - `GET /api/all-usage/status` — 轻量 revision 与同步健康状态
   - `GET /api/all-usage/query` — 按 scope 返回聚合、daily/hourly 趋势和 heatmap 数据；单日 scope 填充 `hourly`，跨日 scope 的 `hourly` 为空
@@ -112,12 +193,13 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - 看板中的总处理量 = 输入 + 输出 + 缓存读写 + 推理；缓存命中表示复用的上下文 Token，不等于新生成 Token 或实际费用
 - 成本计算沿用 cc-switch 的四桶公式：输入、输出、缓存读取和缓存写入分别乘每百万价格，四项相加后再乘倍率；DSH 的 reasoning 字段不再次加到 output，避免底层 completion/thoughts 已含推理时重复计费
 - 价格同步默认关闭；models.dev 不可用时保留最近一次成功目录，未匹配模型不会套用默认价格；手工 mapping/override 仅用于模型别名、官方目录缺失或有权威官方价格；看板范围与明细视图保存在浏览器本地，6 小时自动同步开关会立即写入受保护的 pricing API
+- Mapping 语义：带 `identityKey` 的 mapping 只对精确路由身份生效；不带身份键的 mapping 才按模型做全局回退；旧配置中的 `usageIdentityKey` 会在加载时归一化。
 - 余额查询走 DeepSeek 官方 `/user/balance` 接口；未配置 API Key 时卡片显示引导文案
 - 仅统计能归属到已注册工作区（按会话 cwd 匹配）的会话
 
 ### 开发
 
-- 修改 `lib/client.js` 后刷新页面即可；修改 `lib/index.js` 后，需由 DSH 重载该包或重启进程，单纯刷新页面不会替换已运行的 Host 代码
+- 修改 `lib/client.js` 后刷新页面即可；修改 `lib/plugin.js` 或其他 Host 模块后，需由 DSH 重载该包或重启进程，单纯刷新页面不会替换已运行的 Host 代码
 - 插件包无第三方依赖：Host 端只使用 Cordis 服务，Client 端只使用 runtime 提供的 React 模块
 
 ## English
@@ -143,10 +225,93 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, est
 - **Token accounting semantics**: input tokens are fresh (exclude cache hits/writes, which sit in separate buckets along with reasoning); all-zero usage replays never overwrite recorded usage, while cache-only requests still count
 - **Cost semantics**: prices come from the models.dev USD per 1M token catalog; DSH-normalized fresh input and the four cost buckets are snapshotted at calculation time, the multiplier applies only to final total, and existing positive historical costs are not recalculated; matching uses the model's official vendor entry and ignores the DSH provider, while missing official prices stay unpriced
 
+### Compatibility and Known Limitations
+
+- **Runtime**: Node.js `>=22 <25` is required. CI runs the test suite, syntax checks, and package-content checks on Node 22 and Node 24.
+- **DSH compatibility**: `package.json` declares DSH runtime `>=0.1.1-rc.1 <0.1.2`; the real Cordis service chain is verified on `0.1.1-rc.2` and `0.1.1-rc.1`.
+- **Web service dependency**: the Host declares `webServer` as a required dependency, so DSH waits for a late-mounted service before applying the plugin; this package targets the DSH Web profile and does not expose routes without WebServer. The HTTP guard also checks the actual socket peer, so a reverse proxy is accepted only when the connection itself is loopback.
+
+| DSH runtime | Node.js support | Real Cordis smoke | Conclusion |
+| --- | --- | --- | --- |
+| `0.1.1-rc.2` | `>=22 <25`, CI covers 22/24 | Passed (current Node 24) | Declared and verified |
+| `0.1.1-rc.1` | `>=22 <25`, CI covers 22/24 | Passed (current Node 24) | Declared and verified |
+| Other versions | `>=22 <25` | Not tested | Outside the verified matrix |
+
+An unlisted DSH version is not necessarily incompatible. Include the DSH, Node.js, and plugin versions when reporting an issue.
+
+- **Interrupted requests**: an interrupted upstream request may emit only `assistant/chunk` usage and never produce a final `assistant/message`; that chunk is retained. A later final message for the same turn/step replaces it. If the upstream emits no usage event at all, exact token usage cannot be reconstructed from response text.
+- **Estimated cost**: cost is an estimate based on models.dev rates and DSH usage buckets, not a provider invoice. Unavailable catalogs and unmatched models remain unpriced instead of receiving guessed rates. Cache reads, cache writes, and reasoning follow the buckets reported by the upstream DSH event.
+- **Tiered prices**: models.dev entries marked tiered/context-dependent are currently reported as unsupported rather than being treated as flat-rate priced until context-length tier calculation is implemented.
+- **History boundary**: only sessions whose cwd maps to a registered workspace are included; data deleted or corrupted before a successful session flush cannot be recovered from the separate ledger.
+
+### Local Statistics vs Official Billing
+
+This plugin reports replayable statistics from local DSH event logs; it is not a mirror of a provider invoice:
+
+- Local statistics read DSH `assistant/chunk`, final `assistant/message`, and related session events, then deduplicate and replace samples by logical `turn / step`. Official billing may use a provider tokenizer, rounding rules, discounts, free quotas, and billing periods.
+- A failed request is included locally whenever it leaves a usage chunk; whether the provider charged for that failed request must be checked against the official bill.
+- Prices come from the public models.dev catalog and local explicit overrides. Catalog prices can differ from provider prices, regional rates, and invoice discounts, so the cost field is an estimate.
+- Local statistics include only sessions mapped to registered workspaces and can be lower than the official bill when logs are damaged, cleaned up, or the upstream emits no usage event.
+
+### Reproducible Event Examples
+
+The following are redacted minimal examples; the complete runnable data is in [`fixtures/usage-events.json`](fixtures/usage-events.json).
+
+#### Retaining a failed request chunk
+
+~~~json
+[
+  {"type": "assistant/chunk", "data": {"turn": 1, "step": 1, "chunk": {"type": "usage", "usage": {"inputTokens": 100, "outputTokens": 20}}}},
+  {"type": "request/error", "data": {"code": "upstream-failed"}}
+]
+~~~
+
+Without a final `assistant/message`, the chunk remains one local call; this does not mean the provider necessarily charged for it.
+
+#### Orphan usage chunk
+
+~~~json
+{"type": "assistant/chunk", "data": {"turn": 1, "step": 1, "chunk": {"type": "usage", "usage": {"inputTokens": 7, "cacheReadTokens": 8}}}}
+~~~
+
+Without request/context or request/header, tokens are still counted, but the model identity is shown as Unknown; the plugin does not guess a model from a provider name or display string.
+
+#### Cache token buckets
+
+~~~json
+{"inputTokens": 100, "outputTokens": 20, "cacheReadTokens": 40, "cacheWriteTokens": 5, "reasoningTokens": 3}
+~~~
+
+The local processed total is `100 + 20 + 40 + 5 + 3 = 168`; cost uses the input, output, cacheRead, and cacheWrite buckets, and reasoning is not added to output again.
+
+Replay the repository fixture:
+
+~~~bash
+node scripts/replay-fixture.mjs fixtures/usage-events.json
+~~~
+
+The command loads the real plugin Host, calls its compatible APIs, checks the documented token/record totals, and prints a non-sensitive summary.
+
+### Report An Issue
+
+- [Data inconsistency / 数据不一致](.github/ISSUE_TEMPLATE/data-inconsistency.md)
+- [Plugin startup failure / 插件启动失败](.github/ISSUE_TEMPLATE/startup-failure.md)
+- [Cost calculation issue / 成本计算问题](.github/ISSUE_TEMPLATE/cost-calculation.md)
+
 ### Latest Update
 
-**v1.1.0**
+**v1.1.3**
 
+- Fixed durable ledger revision initialization, finite-value validation, and HTTP socket peer loopback enforcement
+- Unified route-specific pricing mappings on `identityKey` with legacy `usageIdentityKey` compatibility
+- Reported tiered models.dev prices as unsupported until tier-aware calculation is implemented instead of treating them as flat priced
+- Added release and real runtime smoke gates for Node 22/24 and DSH rc.1/rc.2
+- Added redacted fixture replay, accounting examples, and community issue templates
+
+**v1.1.2**
+
+- Official models.dev pricing, cache/reasoning token buckets, and persisted pricing configuration
+- Assistant chunk usage is retained and replaced by the final message for the same turn/step
 - Structured model identity with backward-compatible ledger v2 migration
 - Unified scope queries for time, timezone, workspace, provider, and model filters
 - Token trend line chart with hourly single-day data, selectable series, exact hover values, and point-to-audit drill-down
@@ -187,7 +352,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 
 ### Architecture
 
-- **Host** (`lib/index.js`): aggregates persisted session logs (`turn/end` and `assistant/message.usage`), folds live `session/event` updates, and exposes data routes through `webServer`:
+- **Host** (entry `lib/index.js`, assembled by `lib/plugin.js`): split by responsibility across `aggregation.js` (aggregation/query), `ledger.js` (durable ledger), `session-sync.js` (history/live sync), `pricing-runtime.js` (runtime pricing), `balance.js` (balance), and `http.js` (protected routes); aggregates `turn/end`, `assistant/chunk` usage, and final `assistant/message.usage`, folds live `session/event` updates, and exposes data routes through `webServer`:
   - `GET /api/all-usage` — compatible usage snapshot
   - `GET /api/all-usage/status` — lightweight revision and sync health
   - `GET /api/all-usage/query` — scoped aggregate, daily/hourly trend, and heatmap data; single-day scopes populate `hourly`, while cross-day scopes return an empty `hourly` array
@@ -213,13 +378,14 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 - Processed tokens = input + output + cache read/write + reasoning; a cache hit means reused context, not newly generated tokens or actual cost
 - Cost follows the cc-switch four-bucket formula: input, output, cache-read, and cache-write tokens are priced independently, summed, then multiplied by the final multiplier; DSH reasoning is not added to output a second time
 - Pricing sync is off by default; when models.dev is unavailable the last good catalog remains in use, and unmatched models never receive a guessed default price; explicit model mappings/overrides are for aliases, missing official catalog entries, or authoritative special pricing; dashboard range and detail-view preferences are stored in browser storage, while the 6-hour sync toggle is immediately saved through the protected pricing API
+- Mapping semantics: a mapping with `identityKey` applies only to that exact route identity; a mapping without an identity key is the model-wide fallback. Legacy `usageIdentityKey` values are normalized when loaded.
 - Balance data comes from DeepSeek’s official `/user/balance` endpoint; the card shows guidance when no API key is configured
 - English mode uses UTC for date buckets, range filters, streaks, heatmap dates, and export timestamps; Chinese mode uses local time
 - Only sessions that can be mapped to a registered workspace by their working directory are included
 
 ### Development
 
-- After editing `lib/client.js`, refresh the page. After editing `lib/index.js`, reload the package through DSH or restart the process; a page refresh alone cannot replace running host code
+- After editing `lib/client.js`, refresh the page. After editing `lib/plugin.js` or another Host module, reload the package through DSH or restart the process; a page refresh alone cannot replace running host code
 - The plugin has no third-party package dependencies: the Host uses Cordis services and the Client uses the runtime-provided React module
 
 ## License / 许可证

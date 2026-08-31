@@ -22,6 +22,7 @@ function makeRequest(method, headers = {}, body = '') {
     method,
     url: '/',
     headers,
+    socket: { remoteAddress: '127.0.0.1' },
     on(event, callback) {
       if (event === 'data' && body !== '') callback(Buffer.from(body))
       if (event === 'end') callback()
@@ -133,6 +134,26 @@ test('restricts API routes to loopback and rotates the process token', async () 
 
   const remote = await call(first, '/api/all-usage', makeRequest('GET', { host: '192.0.2.10:3080' }))
   assert.equal(remote.status, 403)
+
+  const noPeer = makeRequest('GET', { host: '127.0.0.1:3080' })
+  noPeer.socket = undefined
+  const missingPeer = await call(first, '/api/all-usage', noPeer)
+  assert.equal(missingPeer.status, 403)
+
+  const spoofedPeer = makeRequest('GET', { host: '127.0.0.1:3080' })
+  spoofedPeer.socket = { remoteAddress: '203.0.113.7' }
+  const spoofedHost = await call(first, '/api/all-usage', spoofedPeer)
+  assert.equal(spoofedHost.status, 403)
+
+  const mappedPeer = makeRequest('GET', { host: '127.0.0.1:3080' })
+  mappedPeer.socket = { remoteAddress: '::ffff:127.0.0.1' }
+  const mappedLoopback = await call(first, '/api/all-usage', mappedPeer)
+  assert.equal(mappedLoopback.status, 200)
+
+  const ipv6Peer = makeRequest('GET', { host: '[::1]:3080' })
+  ipv6Peer.socket = { remoteAddress: '::1' }
+  const ipv6Loopback = await call(first, '/api/all-usage', ipv6Peer)
+  assert.equal(ipv6Loopback.status, 200)
 
   const crossOrigin = await call(first, '/api/all-usage/balance', makeRequest('GET', {
     host: '127.0.0.1:3080',

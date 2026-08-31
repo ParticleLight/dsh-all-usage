@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "name": "redacted-usage-fixture",
+  "description": "Synthetic DSH session events covering a failed request, an orphan usage chunk, and a chunk replaced by a final message.",
+  "timezone": "UTC",
+  "query": { "start": "2024-01-01", "end": "2024-01-01", "utc": "1" },
+  "workspaces": [
+    {
+      "id": "workspace-example",
+      "path": "/redacted/example-workspace",
+      "title": "Example Workspace"
+    }
+  ],
+  "sessions": [
+    { "header": { "id": "session-failed", "cwd": "/redacted/example-workspace" } },
+    { "header": { "id": "session-complete", "cwd": "/redacted/example-workspace" } },
+    { "header": { "id": "session-orphan", "cwd": "/redacted/example-workspace" } }
+  ],
+  "events": {
+    "session-failed": [
+      {
+        "seq": 1,
+        "time": 1704110400000,
+        "type": "request/context",
+        "data": { "provider": "deepseek", "model": "deepseek-chat" }
+      },
+      {
+        "seq": 2,
+        "time": 1704110400000,
+        "type": "assistant/chunk",
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "usage",
+            "usage": {
+              "inputTokens": 100,
+              "outputTokens": 20,
+              "cacheReadTokens": 50,
+              "cacheWriteTokens": 5,
+              "reasoningTokens": 7
+            }
+          }
+        }
+      },
+      {
+        "seq": 3,
+        "time": 1704110400000,
+        "type": "request/error",
+        "data": { "code": "upstream-failed" }
+      }
+    ],
+    "session-complete": [
+      {
+        "seq": 1,
+        "time": 1704110400000,
+        "type": "request/context",
+        "data": { "provider": "deepseek", "model": "deepseek-chat" }
+      },
+      {
+        "seq": 2,
+        "time": 1704110400000,
+        "type": "assistant/chunk",
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "usage",
+            "usage": {
+              "inputTokens": 10,
+              "outputTokens": 15,
+              "cacheReadTokens": 3,
+              "cacheWriteTokens": 2,
+              "reasoningTokens": 1
+            }
+          }
+        }
+      },
+      {
+        "seq": 3,
+        "time": 1704110400000,
+        "type": "assistant/message",
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "message": { "source": { "provider": "deepseek", "model": "deepseek-chat" } },
+          "usage": {
+            "inputTokens": 12,
+            "outputTokens": 18,
+            "cacheReadTokens": 4,
+            "cacheWriteTokens": 2,
+            "reasoningTokens": 2
+          }
+        }
+      },
+      {
+        "seq": 4,
+        "time": 1704110400000,
+        "type": "turn/end",
+        "data": { "turn": 1, "reason": { "kind": "completed" } }
+      }
+    ],
+    "session-orphan": [
+      {
+        "seq": 1,
+        "time": 1704110400000,
+        "type": "assistant/chunk",
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "usage",
+            "usage": {
+              "inputTokens": 7,
+              "outputTokens": 4,
+              "cacheReadTokens": 8,
+              "cacheWriteTokens": 1,
+              "reasoningTokens": 0
+            }
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "totals": {
+      "turns": 1,
+      "sessions": 3,
+      "input": 119,
+      "output": 42,
+      "cacheRead": 62,
+      "cacheWrite": 8,
+      "reasoning": 9
+    },
+    "records": 3,
+    "models": [
+      {
+        "provider": "deepseek",
+        "requestedModel": "deepseek-chat",
+        "actualModel": null,
+        "calls": 1,
+        "input": 100,
+        "output": 20,
+        "cacheRead": 50,
+        "cacheWrite": 5,
+        "reasoning": 7
+      },
+      {
+        "provider": "deepseek",
+        "requestedModel": "deepseek-chat",
+        "actualModel": "deepseek-chat",
+        "calls": 1,
+        "input": 12,
+        "output": 18,
+        "cacheRead": 4,
+        "cacheWrite": 2,
+        "reasoning": 2
+      },
+      {
+        "provider": null,
+        "requestedModel": null,
+        "actualModel": null,
+        "calls": 1,
+        "input": 7,
+        "output": 4,
+        "cacheRead": 8,
+        "cacheWrite": 1,
+        "reasoning": 0
+      }
+    ]
+  }
+}

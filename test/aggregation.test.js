@@ -22,6 +22,7 @@ function makeRequest(method, headers = {}, body = '') {
     method,
     url: '/',
     headers,
+    socket: { remoteAddress: '127.0.0.1' },
     on(event, callback) {
       if (event === 'data' && body !== '') callback(Buffer.from(body))
       if (event === 'end') callback()
@@ -141,6 +142,25 @@ function usageEvent(time, turn, step, usage, seq, provider = 'deepseek', model =
       usage,
     },
   }
+}
+
+function usageChunkEvent(time, turn, step, usage, seq) {
+  return {
+    seq,
+    time,
+    type: 'assistant/chunk',
+    data: { turn, step, chunk: { type: 'usage', usage } },
+  }
+}
+
+async function waitForScan(app, predicate = (body) => body.scan.done) {
+  let snapshot = null
+  for (let i = 0; i < 200; i += 1) {
+    snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    if (predicate(snapshot.json())) return snapshot
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  return snapshot
 }
 
 test('seeds unchanged sessions from the ledger and replaces retried steps without double-counting', async () => {
@@ -387,6 +407,7 @@ test('ignores all-zero usage replays when persisting the durable ledger', async 
   ] })
   const row = app.storageUnit.records.sessions['s-1']
   assert.ok(row)
+  assert.equal(Number.isFinite(row.updatedAt), true)
   assert.equal(row.usage.length, 2)
   const step1 = row.usage.find((item) => item.key === 's-1:step:1:1')
   const step2 = row.usage.find((item) => item.key === 's-1:step:2:1')
@@ -624,7 +645,7 @@ test('serves structured scoped aggregates and privacy-safe paginated records', a
   assert.notEqual(next.json().items[0].id, pageBody.items[0].id)
   const liveHandlers = app.listeners['session/event'] || []
   liveHandlers[0]({ id: 's-a', header: { cwd: 'C:\\a' } }, usageEvent(Date.now(), 2, 1, { inputTokens: 1, outputTokens: 1 }, 4))
-  await new Promise((resolve) => setImmediate(resolve))
+  for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve))
   const staleRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
   staleRequest.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText + '&utc=0&limit=1&cursor=' + encodeURIComponent(pageBody.nextCursor)
   assert.equal((await call(app, '/api/all-usage/records', staleRequest)).status, 409)
@@ -934,4 +955,190 @@ test('persists pricing mappings and overrides through the DSH storage unit', asy
   const pricing = await call(second, '/api/all-usage/pricing', makeRequest('GET', { host: '127.0.0.1:3080' }))
   assert.equal(pricing.json().overrideCount, 1)
   assert.equal(pricing.json().config.overrides[0].input, '9')
+})
+
+
+
+test('round-trips route-specific pricing mapping identity through the API', async () => {
+  const storage = {
+    global: {},
+    records: { sessions: {} },
+    async loadAll() { return { global: this.global, tables: this.records } },
+    async putRecord(table, key, value) { if (!this.records[table]) this.records[table] = {}; this.records[table][key] = value },
+    async deleteRecord(table, key) { if (this.records[table]) delete this.records[table][key] },
+    async setGlobal(value) { this.global = value },
+    async close() {},
+  }
+  const first = await createApp({ withStorage: true, storage })
+  const snapshot = await call(first, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  const identityKey = '["relay-a","gpt-5.5","gpt-5.5",null]'
+  const saved = await call(first, '/api/all-usage/pricing', makeRequest('POST', {
+    host: '127.0.0.1:3080',
+    origin: 'http://127.0.0.1:3080',
+    'x-all-usage-request-token': snapshot.json().requestToken,
+  }, JSON.stringify({ pricing: { mappings: [{ identityKey, model: 'gpt-5.5', catalogProviderId: 'openai', catalogModelId: 'gpt-5.5' }] } })))
+  assert.equal(saved.status, 200)
+  assert.equal(saved.json().pricing.config.mappings[0].identityKey, identityKey)
+  assert.equal(Object.hasOwn(saved.json().pricing.config.mappings[0], 'usageIdentityKey'), false)
+  const second = await createApp({ withStorage: true, storage })
+  const loaded = await call(second, '/api/all-usage/pricing', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  assert.equal(loaded.json().config.mappings[0].identityKey, identityKey)
+})
+
+test('counts an assistant usage chunk when the request later fails', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    workspaces: [{ id: 'ws-chunk', path: 'C:\\chunk', title: 'Chunk' }],
+    sessions: [{ header: { id: 's-chunk', cwd: 'C:\\chunk' } }],
+    events: new Map([['s-chunk', [
+      { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+      usageChunkEvent(eventTime, 1, 1, { inputTokens: 11, outputTokens: 13, cacheReadTokens: 17, cacheWriteTokens: 19, reasoningTokens: 23 }, 2),
+      { seq: 3, time: eventTime, type: 'request/error', data: { code: 'upstream-failed' } },
+    ]]]),
+  })
+  const body = (await waitForScan(app)).json()
+  assert.equal(body.scan.done, true)
+  assert.equal(body.perModel[0].calls, 1)
+  assert.equal(body.totals.input, 11)
+  assert.equal(body.totals.output, 13)
+  assert.equal(body.totals.cacheRead, 17)
+  assert.equal(body.totals.cacheWrite, 19)
+  assert.equal(body.totals.reasoning, 23)
+  assert.equal(body.perModel.length, 1)
+  assert.equal(body.perModel[0].model, 'deepseek / deepseek-chat')
+})
+
+test('folds a live usage chunk through the shared upsert path', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    workspaces: [{ id: 'ws-live-chunk', path: 'C:\\live-chunk', title: 'Live Chunk' }],
+    sessions: [],
+    readSession: async () => ({ events: [] }),
+  })
+  const handler = app.listeners['session/event'][0]
+  const session = { id: 's-live-chunk', header: { cwd: 'C:\\live-chunk' } }
+  handler(session, { seq: 0, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } })
+  handler(session, usageChunkEvent(eventTime, 1, 1, { inputTokens: 21, outputTokens: 22, cacheReadTokens: 23 }, 1))
+  for (let i = 0; i < 30; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  const body = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.equal(body.totals.input, 21)
+  assert.equal(body.totals.output, 22)
+  assert.equal(body.totals.cacheRead, 23)
+  assert.equal(body.perModel.length, 1)
+  assert.equal(body.perModel[0].model, 'deepseek / deepseek-chat')
+})
+
+test('replaces one usage chunk with the final assistant message', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-chunk-replace', path: 'C:\\chunk-replace', title: 'Chunk Replace' }],
+    sessions: [{ header: { id: 's-chunk-replace', cwd: 'C:\\chunk-replace' } }],
+    events: new Map([['s-chunk-replace', [
+      { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+      usageChunkEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 20, cacheReadTokens: 30 }, 2),
+      usageEvent(eventTime, 1, 1, { inputTokens: 40, outputTokens: 50, cacheReadTokens: 60, cacheWriteTokens: 70, reasoningTokens: 80 }, 3),
+      { seq: 4, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    ]]]),
+  })
+  const body = (await waitForScan(app)).json()
+  assert.equal(body.perModel[0].calls, 1)
+  assert.equal(body.totals.input, 40)
+  assert.equal(body.totals.output, 50)
+  assert.equal(body.totals.cacheRead, 60)
+  assert.equal(body.totals.cacheWrite, 70)
+  assert.equal(body.totals.reasoning, 80)
+  assert.equal(app.storageUnit.records.sessions['s-chunk-replace'].usage.length, 1)
+  assert.equal(app.storageUnit.records.sessions['s-chunk-replace'].usage[0].values.input, 40)
+  assert.equal(app.storageUnit.records.sessions['s-chunk-replace'].usage[0].seq, 3)
+})
+
+test('does not duplicate a chunk when its final message crosses an incremental scan boundary', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const firstEvents = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageChunkEvent(eventTime, 1, 1, { inputTokens: 12, outputTokens: 14, cacheReadTokens: 16 }, 2),
+  ]
+  const secondEvents = firstEvents.concat([
+    usageEvent(eventTime, 1, 1, { inputTokens: 32, outputTokens: 34, cacheReadTokens: 36, cacheWriteTokens: 38 }, 3),
+  ])
+  const opts = {
+    withStorage: true,
+    workspaces: [{ id: 'ws-boundary', path: 'C:\\boundary', title: 'Boundary' }],
+    sessions: [{ header: { id: 's-boundary', cwd: 'C:\\boundary' } }],
+    snapshots: [{ header: { id: 's-boundary' }, revision: 'chunk-r1' }],
+  }
+  const first = await createApp({ ...opts, events: new Map([['s-boundary', firstEvents]]) })
+  await waitForScan(first)
+  const second = await createApp({
+    ...opts,
+    storage: first.storageUnit,
+    events: new Map([['s-boundary', secondEvents]]),
+    snapshots: [{ header: { id: 's-boundary' }, revision: 'chunk-r2' }],
+  })
+  const body = (await waitForScan(second)).json()
+  assert.equal(body.scan.done, true)
+  assert.equal(body.perModel[0].calls, 1)
+  assert.equal(body.totals.input, 32)
+  assert.equal(body.totals.output, 34)
+  assert.equal(body.totals.cacheRead, 36)
+  assert.equal(body.totals.cacheWrite, 38)
+  assert.equal(second.storageUnit.records.sessions['s-boundary'].usage.length, 1)
+  assert.equal(second.storageUnit.records.sessions['s-boundary'].usage[0].seq, 3)
+})
+
+test('restores the final replacement after flush and restart', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const events = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageChunkEvent(eventTime, 1, 1, { inputTokens: 15, outputTokens: 16 }, 2),
+    usageEvent(eventTime, 1, 1, { inputTokens: 25, outputTokens: 26, cacheReadTokens: 27, cacheWriteTokens: 28 }, 3),
+  ]
+  const first = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-restart', path: 'C:\\restart', title: 'Restart' }],
+    sessions: [],
+    events: new Map(),
+  })
+  await waitForScan(first)
+  const flush = first.listeners['session/flush'][0]
+  await flush({ id: 's-restart', header: { id: 's-restart', cwd: 'C:\\restart' }, events })
+  assert.equal(first.storageUnit.records.sessions['s-restart'].usage.length, 1)
+  assert.equal(first.storageUnit.records.sessions['s-restart'].usage[0].values.input, 25)
+
+  const second = await createApp({
+    withStorage: true,
+    storage: first.storageUnit,
+    workspaces: [{ id: 'ws-restart', path: 'C:\\restart', title: 'Restart' }],
+    sessions: [],
+    events: new Map(),
+  })
+  const body = (await waitForScan(second)).json()
+  assert.equal(body.perModel[0].calls, 1)
+  assert.equal(body.totals.input, 25)
+  assert.equal(body.totals.output, 26)
+  assert.equal(body.totals.cacheRead, 27)
+  assert.equal(body.totals.cacheWrite, 28)
+  assert.equal(second.storageUnit.records.sessions['s-restart'].usage.length, 1)
+})
+
+test('ignores incomplete usage events without invalid dates or fabricated models', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    workspaces: [{ id: 'ws-invalid', path: 'C:\\invalid', title: 'Invalid' }],
+    sessions: [{ header: { id: 's-invalid', cwd: 'C:\\invalid' } }],
+    events: new Map([['s-invalid', [
+      { seq: 1, time: Number.NaN, type: 'assistant/chunk', data: { turn: 1, step: 1, chunk: { type: 'usage', usage: { inputTokens: 9 } } } },
+      { seq: 2, time: eventTime, type: 'assistant/chunk', data: { turn: 1, chunk: { type: 'usage', usage: { inputTokens: 10 } } } },
+      { seq: 3, time: eventTime, type: 'assistant/message', data: { step: 1, usage: { inputTokens: 11 } } },
+      { seq: 4, time: eventTime, type: 'assistant/chunk', data: { turn: 1, step: 1, chunk: { type: 'delta', usage: { inputTokens: 12 } } } },
+      { seq: 5, time: eventTime, type: 'assistant/message', data: { turn: 1, step: 1, usage: null } },
+      { seq: 6, time: eventTime, type: 'assistant/message', data: { turn: 1, step: 1, usage: { inputTokens: Number.NaN } } },
+    ]]]),
+  })
+  const body = (await waitForScan(app)).json()
+  assert.equal(body.perModel.length, 0)
+  assert.deepEqual(body.perModel, [])
+  assert.equal(JSON.stringify(body).includes('Invalid Date'), false)
+  assert.equal(JSON.stringify(body).includes('undefined'), false)
 })
