@@ -274,8 +274,13 @@ test('updates date indexes when a live usage is replaced', async () => {
   firstRequest.url = '/api/all-usage/query?start=' + dateText(firstTime) + '&end=' + dateText(firstTime) + '&utc=0'
   const secondRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
   secondRequest.url = '/api/all-usage/query?start=' + dateText(secondTime) + '&end=' + dateText(secondTime) + '&utc=0'
-  assert.equal((await call(app, '/api/all-usage/query', firstRequest)).json().totals.input, 0)
-  assert.equal((await call(app, '/api/all-usage/query', secondRequest)).json().totals.input, 20)
+  const firstQuery = (await call(app, '/api/all-usage/query', firstRequest)).json()
+  const secondQuery = (await call(app, '/api/all-usage/query', secondRequest)).json()
+  assert.equal(firstQuery.totals.input, 0)
+  assert.equal(firstQuery.hourly.reduce((sum, row) => sum + row.calls, 0), 0)
+  assert.equal(firstQuery.heatmap.some((row) => row.date === dateText(firstTime)), false)
+  assert.equal(secondQuery.totals.input, 20)
+  assert.equal(secondQuery.hourly.reduce((sum, row) => sum + row.calls, 0), 1)
   const full = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
   assert.equal(full.byDay.find((day) => day.date === dateText(firstTime)).sessions, 0)
   assert.equal(full.byDay.find((day) => day.date === dateText(secondTime)).sessions, 1)
@@ -684,6 +689,11 @@ test('serves structured scoped aggregates and privacy-safe paginated records', a
   assert.equal(query.totals.cacheRead, 30)
   assert.equal(query.daily.length, 1)
   assert.equal(query.daily[0].tokens.output, 20)
+  const scopedHeatmap = query.heatmap.find((row) => row.date === dateText)
+  assert.ok(scopedHeatmap)
+  assert.equal(scopedHeatmap.turns, 1)
+  assert.deepEqual(scopedHeatmap.tokens, { input: 10, output: 20, cacheRead: 30, cacheWrite: 0, reasoning: 0 })
+  assert.deepEqual(scopedHeatmap.perWorkspace, [{ workspaceId: 'ws-a', turns: 1 }])
   assert.ok(Array.isArray(query.hourly))
   assert.ok(query.hourly.length >= 1 && query.hourly.length <= 24)
   const currentHour = query.hourly.find((row) => eventTime >= row.time && eventTime < row.time + 60 * 60 * 1000)
@@ -862,7 +872,10 @@ test('includes historical turn-only records outside the heatmap window', async (
   const app = await createApp({
     workspaces: [{ id: 'ws-old', path: 'C:\\old', title: 'Old' }],
     sessions: [{ header: { id: 's-old', cwd: 'C:\\old' } }],
-    events: new Map([['s-old', [{ seq: 1, time: eventTime, type: 'turn/end', data: { turn: 1 } }]]]),
+    events: new Map([['s-old', [
+      { seq: 1, time: eventTime - 1, type: 'request/context', data: { provider: 'provider-old', model: 'model-old' } },
+      { seq: 2, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    ]]]),
   })
   let snapshot = null
   for (let i = 0; i < 200; i += 1) {
@@ -871,7 +884,7 @@ test('includes historical turn-only records outside the heatmap window', async (
     await new Promise((resolve) => setImmediate(resolve))
   }
   const request = makeRequest('GET', { host: '127.0.0.1:3080' })
-  request.url = '/api/all-usage/query?start=2024-01-15&end=2024-01-15&utc=1&workspaceId=ws-old'
+  request.url = '/api/all-usage/query?start=2024-01-15&end=2024-01-15&utc=1&workspaceId=ws-old&provider=provider-old&modelKey=model-old'
   const result = await call(app, '/api/all-usage/query', request)
   assert.equal(result.status, 200)
   assert.equal(result.json().totals.turns, 1)
@@ -1235,4 +1248,43 @@ test('ignores incomplete usage events without invalid dates or fabricated models
   assert.deepEqual(body.perModel, [])
   assert.equal(JSON.stringify(body).includes('Invalid Date'), false)
   assert.equal(JSON.stringify(body).includes('undefined'), false)
+})
+
+test('aggregates exact multi-call costs from query cubes and keeps heatmap rows minimal', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-query-cube', path: 'C:\\query-cube', title: 'Query Cube' }],
+    sessions: [{ header: { id: 's-query-cube', cwd: 'C:\\query-cube' } }],
+    events: new Map([['s-query-cube', [
+      { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'sudocode', model: 'gpt-5.5' } },
+      usageEvent(eventTime, 1, 1, { inputTokens: 1000000, outputTokens: 2000000, cacheReadTokens: 100000, cacheWriteTokens: 200000 }, 2, 'sudocode', 'gpt-5.5'),
+      { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+      usageEvent(eventTime + 1, 2, 1, { inputTokens: 2000000, outputTokens: 1000000, cacheReadTokens: 300000, cacheWriteTokens: 400000 }, 4, 'sudocode', 'gpt-5.5'),
+      { seq: 5, time: eventTime + 1, type: 'turn/end', data: { turn: 2 } },
+    ]]]),
+  })
+  const initial = await waitForScan(app)
+  const token = initial.json().requestToken
+  const pricing = await call(app, '/api/all-usage/pricing', makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': token }, JSON.stringify({
+    pricing: { catalogEntries: [{ providerId: 'openai', modelId: 'gpt-5.5', input: '5', output: '30', cacheRead: '0.5', cacheWrite: '6.25' }] },
+    backfill: true,
+  })))
+  assert.equal(pricing.status, 200)
+  const date = new Date(eventTime)
+  const dateText = date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0')
+  const request = makeRequest('GET', { host: '127.0.0.1:3080' })
+  request.url = '/api/all-usage/query?start=' + dateText + '&end=' + dateText + '&utc=0&workspaceId=ws-query-cube&provider=sudocode'
+  const query = (await call(app, '/api/all-usage/query', request)).json()
+  assert.equal(query.totals.calls, 2)
+  assert.equal(query.totals.turns, 2)
+  assert.deepEqual(query.totals.cost, { currency: 'USD', input: '15', output: '90', cacheRead: '0.2', cacheWrite: '3.75', baseTotal: '108.95', total: '108.95', pricedCalls: 2, unpricedCalls: 0, ambiguousCalls: 0, unsupportedCalls: 0 })
+  assert.deepEqual(query.daily[0].cost, query.totals.cost)
+  const hourly = query.hourly.find((row) => eventTime >= row.time && eventTime < row.time + 60 * 60 * 1000)
+  assert.deepEqual(hourly.cost, query.totals.cost)
+  const heatmap = query.heatmap.find((row) => row.date === dateText)
+  assert.ok(heatmap)
+  assert.deepEqual(Object.keys(heatmap).sort(), ['date', 'perWorkspace', 'tokens', 'turns'])
+  assert.deepEqual(heatmap.tokens, { input: 3000000, output: 3000000, cacheRead: 400000, cacheWrite: 600000, reasoning: 0 })
+  assert.deepEqual(heatmap.perWorkspace, [{ workspaceId: 'ws-query-cube', turns: 2 }])
 })

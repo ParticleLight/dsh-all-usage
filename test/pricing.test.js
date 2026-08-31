@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   addCostAggregate,
+  addCostAccumulator,
   calculateCost,
   decimalAdd,
   decimalMultiply,
   decimalText,
+  createCostAccumulator,
   emptyCostAggregate,
   fetchModelsDevCatalog,
   modelPricingCandidates,
@@ -13,6 +15,7 @@ import {
   normalizePricingState,
   parseModelsDevCatalog,
   resolvePricing,
+  serializeCostAggregate,
   serializePricingState,
 } from '../lib/pricing.js'
 
@@ -185,6 +188,18 @@ test('adds exact decimal aggregates without binary floating point drift', () => 
   assert.equal(aggregate.total, '0.45')
   assert.equal(aggregate.pricedCalls, 1)
   assert.equal(aggregate.unpricedCalls, 1)
+})
+
+test('adds, merges, and subtracts exact internal cost accumulators', () => {
+  const first = { status: 'priced', breakdown: { input: '0.1', output: '0.2', cacheRead: '0.03', cacheWrite: '0.004' }, baseTotal: '0.334', total: '0.501' }
+  const second = { status: 'priced', breakdown: { input: '0.2', output: '0.4', cacheRead: '0.07', cacheWrite: '0.006' }, baseTotal: '0.676', total: '1.014' }
+  const left = createCostAccumulator()
+  const right = createCostAccumulator()
+  addCostAccumulator(left, first)
+  addCostAccumulator(right, second)
+  addCostAccumulator(left, right)
+  addCostAccumulator(left, first, -1)
+  assert.deepEqual(serializeCostAggregate(left), { currency: 'USD', input: '0.2', output: '0.4', cacheRead: '0.07', cacheWrite: '0.006', baseTotal: '0.676', total: '1.014', pricedCalls: 1, unpricedCalls: 0, ambiguousCalls: 0, unsupportedCalls: 0 })
 })
 
 test('normalizes and validates persisted cost snapshots', () => {

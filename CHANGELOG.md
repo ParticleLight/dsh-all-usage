@@ -8,6 +8,7 @@ All notable changes to `dsh-all-usage` are documented here.
 
 - Avoid rebuilding and writing a clean session's derived ledger at `session/flush`; queue and coalesce dirty records, then drain pending writes during disposal.
 - Store derived ledger records in 32 stable-hash JSON units so a session update rewrites only its shard; retain the legacy single-unit migration path.
+- Build scoped query and fixed 53-week heatmap results from ingest-time date/workspace/model cubes; use exact BigInt decimal accumulators and a minimal heatmap projection instead of rescanning usage rows or parsing cost strings on cold reads.
 
 ### Correctness
 
