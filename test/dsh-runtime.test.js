@@ -86,7 +86,7 @@ function requestJson(url) {
   })
 }
 
-async function waitForSnapshot(webServer) {
+async function waitForSnapshot(webServer, predicate = (body) => body && body.scan && body.scan.done === true) {
   const address = webServer.server && webServer.server.address()
   const port = address && typeof address === 'object' ? address.port : webServer.port
   if (!Number.isInteger(port) || port < 1) throw new Error('real webServer did not expose a listening port')
@@ -102,7 +102,7 @@ async function waitForSnapshot(webServer) {
       continue
     }
     last = response.body
-    if (response.status === 200 && last.scan && last.scan.done === true) return { response, body: last }
+    if (response.status === 200 && predicate(last)) return { response, body: last }
     await new Promise((resolve) => setImmediate(resolve))
   }
   return { response: null, body: last }
@@ -121,7 +121,8 @@ async function runRuntimeSmoke(runtime) {
     await root.plugin(modules.loader.default || modules.loader)
     allUsageId = await root.loader.create({ id: 'all-usage', name: allUsageName })
 
-    // all-usage is created before its required services; the real loader must wait.
+    // all-usage is created before its required services; load the real services
+    // on the ancestor Context, matching the DSH Web profile's service topology.
     await root.plugin(modules.timer.default || modules.timer)
     await root.plugin(modules.session.SessionStore)
     await root.plugin(modules.storage.default || modules.storage)
@@ -132,9 +133,10 @@ async function runRuntimeSmoke(runtime) {
       compression: 'none',
       packChunks: false,
     })
-    await root.plugin(modules.webServer.default || modules.webServer, { host: '127.0.0.1', port: 0 })
     await root.plugin(modules.workspace.default || modules.workspace)
+    const workspace = await root.get('workspaceRegistry').create(scratch, 'Runtime Smoke')
     await root.plugin(modules.sessionQuery.default || modules.sessionQuery)
+    await root.plugin(modules.webServer.default || modules.webServer, { host: '127.0.0.1', port: 0 })
     await root.loader.await()
 
     const webServer = root.get('webServer')
@@ -167,6 +169,33 @@ async function runRuntimeSmoke(runtime) {
     assert.equal(fetched.response.status, 200)
     assert.equal(fetched.body.scan.done, true)
     assert.equal(fetched.body.totals.input, 0)
+
+    const sessions = root.get('sessions')
+    const session = sessions.create('runtime-smoke-session', { meta: { cwd: workspace.path } })
+    await root.loader.await()
+    await workspace.attachSession(session.id)
+    assert.equal(workspace.sessionIds.includes(session.id), true)
+    session.append('request/context', { provider: 'deepseek', model: 'deepseek-chat' })
+    session.append('assistant/chunk', { turn: 1, step: 1, chunk: { type: 'usage', usage: { inputTokens: 10, outputTokens: 15, cacheReadTokens: 3, cacheWriteTokens: 2, reasoningTokens: 1 } } })
+    session.append('assistant/message', {
+      turn: 1,
+      step: 1,
+      message: { id: 'runtime-smoke-message', role: 'assistant', source: { kind: 'model', provider: 'deepseek', model: 'deepseek-chat' }, content: [{ type: 'text', text: 'runtime smoke' }] },
+      usage: { inputTokens: 12, outputTokens: 18, cacheReadTokens: 4, cacheWriteTokens: 2, reasoningTokens: 2 },
+    }, { surfaceOp: 'append' })
+    session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    assert.deepEqual(session.events.map((event) => event.type), ['request/context', 'assistant/chunk', 'assistant/message', 'turn/end'])
+    assert.equal(await sessions.flush(session), true)
+    const measured = await waitForSnapshot(webServer, (body) => body.scan && body.scan.done === true && body.totals.input === 12 && body.totals.output === 18 && body.totals.cacheRead === 4 && body.totals.cacheWrite === 2 && body.totals.reasoning === 2)
+    const diagnostic = { snapshot: measured.body === null ? null : { scan: measured.body.scan, sync: measured.body.sync, totals: measured.body.totals, perModel: measured.body.perModel }, sessionHeader: session.header, eventTypes: session.events.map((event) => ({ type: event.type, seq: event.seq })), workspaces: root.get('workspaceRegistry').list().map((item) => ({ id: item.id, path: item.path, sessionIds: item.sessionIds })) }
+    if (!measured.response) throw new Error('real firehose did not reach expected totals: ' + JSON.stringify(diagnostic))
+    assert.equal(measured.body.totals.input, 12)
+    assert.equal(measured.body.totals.output, 18)
+    assert.equal(measured.body.totals.cacheRead, 4)
+    assert.equal(measured.body.totals.cacheWrite, 2)
+    assert.equal(measured.body.totals.reasoning, 2)
+    assert.equal(measured.body.perModel.length, 1)
+    assert.equal(measured.body.perModel[0].actualModel, 'deepseek-chat')
 
     const exactBeforeDispose = webServer.exact.size
     assert.ok(exactBeforeDispose >= 9)

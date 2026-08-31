@@ -284,7 +284,9 @@ test('ignores invalid event timestamps during baseline folding', async () => {
     sessions: [{ header: { id: 's-time', cwd: 'C:\time' } }],
     events: new Map([['s-time', [
       usageEvent(Number.NaN, 1, 1, { inputTokens: 101, outputTokens: 103 }, 1),
-      usageEvent(eventTime, 2, 1, { inputTokens: 7, outputTokens: 11 }, 2),
+      usageEvent(1e20, 1, 2, { inputTokens: 107, outputTokens: 109 }, 2),
+      usageEvent(Number.MAX_SAFE_INTEGER, 1, 3, { inputTokens: 113, outputTokens: 127 }, 3),
+      usageEvent(eventTime, 2, 1, { inputTokens: 7, outputTokens: 11 }, 4),
     ]]]),
   })
   let snapshot = null
@@ -295,6 +297,7 @@ test('ignores invalid event timestamps during baseline folding', async () => {
   }
   assert.equal(snapshot.json().totals.input, 7)
   assert.equal(snapshot.json().totals.output, 11)
+  assert.equal(JSON.stringify(snapshot.json()).includes('NaN-NaN-NaN'), false)
 })
 
 test('folds only the new tail for a session that gained events (incremental seed)', async () => {

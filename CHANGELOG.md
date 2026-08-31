@@ -17,6 +17,8 @@ All notable changes to `dsh-all-usage` are documented here.
 - Preserve route-specific pricing mappings through the `identityKey` field, while accepting legacy `usageIdentityKey` data.
 - Mark tiered model prices as unsupported until tier-aware calculation is implemented instead of reporting a flat estimate as priced.
 - Require `webServer` before Host activation so the dashboard routes cannot silently disappear when the service mounts late.
+- Migrate legacy tiered flat cost snapshots to `unsupported`, reject timestamps outside JavaScript's TimeClip range, and exercise the real SessionStore append/flush firehose in runtime smoke tests.
+- Require manual npm recovery dispatches to provide and verify the target release tag and full commit SHA.
 
 ### Documentation
 

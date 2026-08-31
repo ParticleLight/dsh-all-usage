@@ -2,6 +2,15 @@ name: Publish npm package
 
 on:
   workflow_dispatch:
+    inputs:
+      target_tag:
+        description: Release tag to verify, for example v1.1.3
+        required: true
+        type: string
+      target_sha:
+        description: Full commit SHA referenced by target_tag
+        required: true
+        type: string
   release:
     types: [published]
 
@@ -24,22 +33,28 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.target_tag }}
           fetch-depth: 0
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
       - name: Validate release identity
-        if: github.event_name == 'release'
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.target_tag }}
+          TARGET_SHA: ${{ github.event_name == 'release' && github.sha || inputs.target_sha }}
         run: |
           set -euo pipefail
           name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
+          test -n "$RELEASE_TAG"
+          test -n "$TARGET_SHA"
           test "$RELEASE_TAG" = "v$version"
-          test "$(git rev-parse HEAD)" = "$(git rev-parse refs/tags/$RELEASE_TAG^{commit})"
-          echo "Release tag $RELEASE_TAG matches $name@$version"
+          actual_sha="$(git rev-parse HEAD)"
+          tag_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          test "$actual_sha" = "$tag_sha"
+          test "$actual_sha" = "$TARGET_SHA"
+          echo "Release tag $RELEASE_TAG at $actual_sha matches $name@$version"
 
       - name: Publish npm package
         run: |
