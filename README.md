@@ -43,7 +43,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 
 - **中断请求**：上游请求被中断时可能只有 `assistant/chunk` 的 usage，没有最终 `assistant/message`；本插件会保留该 chunk 用量。同一 `turn / step` 后续出现最终 message 时，message 会替换 chunk。若上游完全没有 usage 事件，则无法从响应内容精确恢复 Token。
 - **估算成本**：成本是基于 models.dev 价格和 DSH usage 桶的估算，不是供应商账单；目录不可用或模型没有官方匹配时不会猜测价格，而是显示未计价。缓存读取、缓存写入和 reasoning 的口径取决于 DSH 上游事件。
-- **分层价格**：models.dev 标记为 tiered/context-dependent 的价格暂不参与本插件的 flat-rate 计算，会显示为 unsupported，直到实现按上下文长度的分层计价。
+- **分层价格**：models.dev 的 tiered/context-dependent 价格按本次请求的输入上下文（fresh input + cache read + cache write）选择对应档位；阈值边界遵循目录定义，无法验证的异常 tier 仍显示为 unsupported。
 - **历史边界**：只有能按 cwd 映射到已注册工作区的会话会进入统计；会话尚未成功 flush 前删除或损坏的日志无法由独立账本恢复。
 
 ### 本地统计与官方账单
@@ -106,7 +106,7 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 - 修复 durable ledger revision 初始化、有限值校验和 HTTP socket peer loopback 守卫
 - route-specific pricing mapping 统一使用 `identityKey`，legacy `usageIdentityKey` 自动兼容
-- tiered models.dev 价格在未实现分层计算前显示为 unsupported，不误报为 flat priced
+- 支持 models.dev context-tiered 价格，按输入上下文选择档位；无法验证的异常 tier 仍 fail closed
 - 增加 Node 22/24 与 DSH rc.1/rc.2 的发布和真实 runtime smoke 门禁
 - 增加脱敏 fixture replay、统计示例和社区 Issue 模板
 
@@ -244,7 +244,7 @@ An unlisted DSH version is not necessarily incompatible. Include the DSH, Node.j
 
 - **Interrupted requests**: an interrupted upstream request may emit only `assistant/chunk` usage and never produce a final `assistant/message`; that chunk is retained. A later final message for the same turn/step replaces it. If the upstream emits no usage event at all, exact token usage cannot be reconstructed from response text.
 - **Estimated cost**: cost is an estimate based on models.dev rates and DSH usage buckets, not a provider invoice. Unavailable catalogs and unmatched models remain unpriced instead of receiving guessed rates. Cache reads, cache writes, and reasoning follow the buckets reported by the upstream DSH event.
-- **Tiered prices**: models.dev entries marked tiered/context-dependent are currently reported as unsupported rather than being treated as flat-rate priced until context-length tier calculation is implemented.
+- **Tiered prices**: models.dev context-tiered entries select the applicable rate from the request input context (fresh input plus cache read/write tokens); malformed schedules remain unsupported.
 - **History boundary**: only sessions whose cwd maps to a registered workspace are included; data deleted or corrupted before a successful session flush cannot be recovered from the separate ledger.
 
 ### Local Statistics vs Official Billing
@@ -307,7 +307,7 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 
 - Fixed durable ledger revision initialization, finite-value validation, and HTTP socket peer loopback enforcement
 - Unified route-specific pricing mappings on `identityKey` with legacy `usageIdentityKey` compatibility
-- Reported tiered models.dev prices as unsupported until tier-aware calculation is implemented instead of treating them as flat priced
+- Added context-tiered models.dev pricing with validated thresholds and fail-closed handling for malformed schedules
 - Added release and real runtime smoke gates for Node 22/24 and DSH rc.1/rc.2
 - Added redacted fixture replay, accounting examples, and community issue templates
 
@@ -379,7 +379,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 - Scoped results keep turns, model calls, and distinct sessions as separate metrics; missing route identity is explicitly Unknown rather than inferred from a display label
 - The records endpoint returns only a short hash, time, workspace ID, structured model identity, turn/step, token buckets, and current materialization source. It omits raw session IDs, paths, prompts, replies, and credentials
 - Processed tokens = input + output + cache read/write + reasoning; a cache hit means reused context, not newly generated tokens or actual cost
-- Cost follows the cc-switch four-bucket formula: input, output, cache-read, and cache-write tokens are priced independently, summed, then multiplied by the final multiplier; DSH reasoning is not added to output a second time
+- Cost follows the cc-switch four-bucket formula: input, output, cache-read, and cache-write tokens are priced independently, summed, then multiplied by the final multiplier; context-tiered models choose all four rates from the request context, and DSH reasoning is not added to output a second time
 - Legacy ledger costs carrying `tiered` are migrated to `unsupported` (`tiered-pricing-not-modeled`) on load instead of remaining falsely marked as current flat priced estimates; token statistics are unchanged.
 - Pricing sync is off by default; when models.dev is unavailable the last good catalog remains in use, and unmatched models never receive a guessed default price; explicit model mappings/overrides are for aliases, missing official catalog entries, or authoritative special pricing; dashboard range and detail-view preferences are stored in browser storage, while the 6-hour sync toggle is immediately saved through the protected pricing API
 - Mapping semantics: a mapping with `identityKey` applies only to that exact route identity; a mapping without an identity key is the model-wide fallback. Legacy `usageIdentityKey` values are normalized when loaded.

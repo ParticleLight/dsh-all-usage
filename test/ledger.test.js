@@ -186,6 +186,44 @@ test('migrates legacy tiered priced costs to unsupported', () => {
   assert.equal(host.state.ledgerRevision, migratedRevision)
 })
 
+test('preserves a newly tier-resolved priced snapshot during ledger normalization', () => {
+  const { ledger, identity } = makeLedger()
+  const cost = {
+    schemaVersion: 1,
+    pricingMode: 'official-model',
+    status: 'priced',
+    currency: 'USD',
+    source: 'models.dev',
+    pricingModel: 'gpt-5.5',
+    providerId: 'openai',
+    inputTokenSemantics: 'fresh',
+    multiplier: '1',
+    billableInputTokens: 100,
+    billableOutputTokens: 20,
+    contextTokens: 200001,
+    selectedTier: { type: 'context', size: 200000 },
+    rates: { input: '10', output: '40', cacheRead: '1', cacheWrite: '2' },
+    breakdown: { input: '0.001', output: '0.0008', cacheRead: '0', cacheWrite: '0' },
+    baseTotal: '0.0018',
+    total: '0.0018',
+    reason: '',
+    tiered: true,
+    reasoningRateAvailable: false,
+  }
+  const record = ledger.normalizeLedgerRecord({
+    version: 3,
+    sessionId: 's-new-tier',
+    workspaceId: 'w',
+    updatedAt: Date.now(),
+    turns: [],
+    usage: [{ key: 's-new-tier:step:1:1', seq: 1, time: Date.now(), workspaceId: 'w', identity, modelId: 'gpt-5.5', turn: 1, step: 1, values: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost }],
+  }, 's-new-tier')
+  assert.equal(record.needsUpgrade, false)
+  ledger.prepareLedgerRecord(record)
+  assert.equal(record.usage[0].cost.status, 'priced')
+  assert.deepEqual(record.usage[0].cost.selectedTier, { type: 'context', size: 200000 })
+})
+
 test('keeps ledger revisions and persisted timestamps finite', () => {
   const { host, ledger, identity } = makeLedger()
   const revision = ledger.nextLedgerRevision()

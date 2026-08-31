@@ -27,7 +27,7 @@ const catalogFixture = {
       'openai/gpt-5.5': {
         id: 'openai/gpt-5.5',
         name: 'GPT-5.5',
-        cost: { input: 5, output: 30, cache_read: 0.5, cache_write: 6.25, tiers: [{ input: 10 }] },
+        cost: { input: 5, output: 30, cache_read: 0.5, cache_write: 6.25, tiers: [{ input: 10, output: 40, cache_read: 1, cache_write: 12.5, tier: { type: 'context', size: 200000 } }] },
       },
     },
   },
@@ -85,6 +85,9 @@ test('parses models.dev nested providers and keeps capability flags', () => {
   assert.equal(gpt.cacheRead, '0.5')
   assert.equal(gpt.cacheWrite, '6.25')
   assert.equal(gpt.tiered, true)
+  assert.deepEqual(gpt.tiers, [{ type: 'context', size: 200000, input: '10', output: '40', cacheRead: '1', cacheWrite: '12.5' }])
+  const serialized = serializePricingState(normalizePricingState({ catalogEntries: parsed.catalog.entries }))
+  assert.deepEqual(serialized.catalogEntries.find((entry) => entry.modelId === 'gpt-5.5').tiers, gpt.tiers)
   const free = parsed.catalog.entries.find((entry) => entry.modelId === 'free-model')
   assert.ok(free)
   assert.equal(free.input, '0')
@@ -158,6 +161,18 @@ test('supports total and legacy input semantics without changing DSH fresh defau
   assert.equal(total.breakdown.cacheWrite, '0.2')
   const legacy = calculateCost({ input: 1000000, output: 0, cacheRead: 200000, cacheWrite: 100000 }, { ...resolved, inputTokenSemantics: 'legacy' })
   assert.equal(legacy.billableInputTokens, 800000)
+
+  const tiered = {
+    ...resolved,
+    tiered: true,
+    tiers: [{ type: 'context', size: 200000, input: '20', output: '40', cacheRead: '2', cacheWrite: '4' }],
+  }
+  const totalContext = calculateCost({ input: 200000, cacheRead: 100000, cacheWrite: 50000, output: 0 }, { ...tiered, inputTokenSemantics: 'total' })
+  assert.equal(totalContext.contextTokens, 200000)
+  assert.equal(totalContext.selectedTier.size, 0)
+  const legacyContext = calculateCost({ input: 199000, cacheRead: 1000, cacheWrite: 1000, output: 0 }, { ...tiered, inputTokenSemantics: 'legacy' })
+  assert.equal(legacyContext.contextTokens, 200000)
+  assert.equal(legacyContext.selectedTier.size, 0)
 })
 
 test('does not add reasoning twice when output already carries completion tokens', () => {
@@ -281,14 +296,48 @@ test('does not apply provider-scoped model mappings to another route', () => {
   assert.equal(other.rates.input, '5')
 })
 
-test('does not report tiered catalog pricing as flat priced', () => {
+test('calculates context-tiered pricing at the documented boundary', () => {
+  const state = normalizePricingState({
+    catalogEntries: [{
+      providerId: 'openai', modelId: 'gpt-5.5', input: '5', output: '30', cacheRead: '0.5', cacheWrite: '6.25',
+      tiers: [{ input: 10, output: 40, cache_read: 1, cache_write: 12.5, tier: { type: 'context', size: 200000 } }],
+    }],
+  })
+  const resolved = resolvePricing({ provider: 'relay', actualModel: 'gpt-5.5' }, state)
+  assert.equal(resolved.status, 'priced')
+  assert.equal(resolved.tiered, true)
+  const atBoundary = calculateCost({ input: 199000, cacheRead: 1000, output: 1000000, cacheWrite: 0 }, resolved)
+  assert.equal(atBoundary.contextTokens, 200000)
+  assert.deepEqual(atBoundary.selectedTier, { type: 'context', size: 0 })
+  assert.deepEqual(atBoundary.rates, { input: '5', output: '30', cacheRead: '0.5', cacheWrite: '6.25' })
+  assert.equal(atBoundary.total, '30.9955')
+  const overBoundary = calculateCost({ input: 199000, cacheRead: 1001, output: 1000000, cacheWrite: 0 }, resolved)
+  assert.equal(overBoundary.contextTokens, 200001)
+  assert.deepEqual(overBoundary.selectedTier, { type: 'context', size: 200000 })
+  assert.deepEqual(overBoundary.rates, { input: '10', output: '40', cacheRead: '1', cacheWrite: '12.5' })
+  assert.equal(overBoundary.total, '41.991001')
+  const roundTrip = normalizeCostSnapshot(overBoundary)
+  assert.deepEqual(roundTrip.selectedTier, { type: 'context', size: 200000 })
+  assert.equal(roundTrip.contextTokens, 200001)
+})
+
+test('supports legacy context_over_200k output when no tier array exists', () => {
+  const state = normalizePricingState({
+    catalogEntries: [{ providerId: 'openai', modelId: 'gpt-5.5', input: '5', output: '30', context_over_200k: { input: 8, output: 40 } }],
+  })
+  const resolved = resolvePricing({ provider: 'relay', actualModel: 'gpt-5.5' }, state)
+  assert.equal(resolved.status, 'priced')
+  assert.equal(resolved.tiers[0].size, 200000)
+  assert.equal(calculateCost({ input: 200001, output: 0 }, resolved).rates.input, '8')
+})
+
+test('fails closed for malformed context tiers', () => {
   const state = normalizePricingState({
     catalogEntries: [{ providerId: 'openai', modelId: 'gpt-5.5', input: '5', output: '30', cacheRead: '0.5', cacheWrite: '6.25', tiers: [{ input: 10 }] }],
   })
   const resolved = resolvePricing({ provider: 'relay', actualModel: 'gpt-5.5' }, state)
   assert.equal(resolved.status, 'unsupported')
   assert.equal(resolved.reason, 'tiered-pricing-not-modeled')
-  assert.equal(resolved.tiered, true)
   const cost = calculateCost({ input: 1000000, output: 1000000 }, resolved)
   assert.equal(cost.status, 'unsupported')
   assert.equal(cost.total, '0')

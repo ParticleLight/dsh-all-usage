@@ -27,7 +27,7 @@ All notable changes to `dsh-all-usage` are documented here.
 - Initialized the durable ledger revision clock and reject persisted ledger records whose `updatedAt` is not finite.
 - Require HTTP socket peers to be loopback before accepting a request, including IPv4-mapped loopback addresses.
 - Preserve route-specific pricing mappings through the `identityKey` field, while accepting legacy `usageIdentityKey` data.
-- Mark tiered model prices as unsupported until tier-aware calculation is implemented instead of reporting a flat estimate as priced.
+- Add validated context-tiered model pricing using the request input context; malformed schedules remain unsupported instead of producing a guessed estimate.
 - Require `webServer` before Host activation so the dashboard routes cannot silently disappear when the service mounts late.
 - Migrate legacy tiered flat cost snapshots to `unsupported`, reject timestamps outside JavaScript's TimeClip range, and exercise the real SessionStore append/flush firehose in runtime smoke tests.
 - Require manual npm recovery dispatches to provide and verify the target release tag and full commit SHA.
