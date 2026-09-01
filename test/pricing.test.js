@@ -81,6 +81,22 @@ test('hashes identical catalog contents identically across fetches', () => {
   assert.equal(second.fetchedAt, 2222)
 })
 
+test('truncates large catalogs deterministically before hashing', () => {
+  const large = {}
+  for (let index = 0; index < 10001; index += 1) {
+    const modelId = 'model-' + String(index).padStart(5, '0')
+    large['provider-' + index] = { id: 'provider-' + index, name: 'P' + index, models: { [modelId]: { id: modelId, name: 'M' + index, cost: { input: '1', output: '2', cache_read: '0.1', cache_write: '0.2' } } } }
+  }
+  const reversed = {}
+  for (const key of Object.keys(large).reverse()) reversed[key] = large[key]
+  const first = parseModelsDevCatalog(large, 1111).catalog
+  const second = parseModelsDevCatalog(reversed, 2222).catalog
+  assert.equal(first.catalogHash, second.catalogHash)
+  assert.equal(first.entries.length, 10000)
+  assert.equal(first.entries[0].modelId, 'model-00000')
+  assert.deepEqual(first.entries.map((entry) => entry.modelId), second.entries.map((entry) => entry.modelId))
+})
+
 test('hashes reordered catalogs identically when the prices are the same', () => {
   const reorder = (source) => {
     const copy = {}
@@ -116,7 +132,7 @@ test('parses models.dev nested providers and keeps capability flags', () => {
   assert.equal(gpt.tiered, true)
   assert.deepEqual(gpt.tiers, [{ type: 'context', size: 200000, input: '10', output: '40', cacheRead: '1', cacheWrite: '12.5' }])
   const serialized = serializePricingState(normalizePricingState({ catalogEntries: parsed.catalog.entries }))
-  assert.deepEqual(serialized.catalogEntries.find((entry) => entry.modelId === 'gpt-5.5').tiers, gpt.tiers)
+  assert.deepEqual(serialized.catalogEntries.find((entry) => entry.providerId === 'openai').tiers, gpt.tiers)
   const free = parsed.catalog.entries.find((entry) => entry.modelId === 'free-model')
   assert.ok(free)
   assert.equal(free.input, '0')

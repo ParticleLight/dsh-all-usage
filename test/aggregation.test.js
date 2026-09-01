@@ -1630,6 +1630,46 @@ test('pricing backfill cannot re-enable folding of mixed-workspace records', asy
   for (const turn of record.turns) assert.equal(turn.workspaceId, 'ws-b')
 })
 
+test('invalid live sequences get positional keys and survive restart reuse', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const baseEvents = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 1 }, 2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+  ]
+  const fullEvents = baseEvents.concat([
+    { seq: Number.POSITIVE_INFINITY, time: eventTime, type: 'turn/end', data: { turn: 2 } },
+    { seq: Number.POSITIVE_INFINITY, time: eventTime, type: 'turn/end', data: { turn: 3 } },
+  ])
+  const first = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-ins', path: 'C:\\ins', title: 'Ins' }],
+    sessions: [{ header: { id: 's-ins', cwd: 'C:\\ins' } }],
+    events: new Map([['s-ins', baseEvents]]),
+    snapshots: [{ header: { id: 's-ins' }, revision: 'r1' }],
+  })
+  await waitForScan(first)
+  const handler = first.listeners['session/event'][0]
+  handler({ id: 's-ins', header: { cwd: 'C:\\ins' } }, { seq: Number.POSITIVE_INFINITY, time: eventTime, type: 'turn/end', data: { turn: 2 } })
+  handler({ id: 's-ins', header: { cwd: 'C:\\ins' } }, { seq: Number.POSITIVE_INFINITY, time: eventTime, type: 'turn/end', data: { turn: 3 } })
+  await new Promise((resolve) => setImmediate(resolve))
+  await first.listeners['session/flush'][0]({ id: 's-ins', header: { id: 's-ins', cwd: 'C:\\ins' }, events: fullEvents })
+  await waitForLedgerWrite()
+  const stored = first.storageUnit.records.sessions['s-ins']
+  assert.equal(stored.turns.length, 3)
+  assert.ok(stored.turns.every((turn) => turn.key !== 'Infinity'))
+  const second = await createApp({
+    withStorage: true,
+    storage: first.storageUnit,
+    workspaces: [{ id: 'ws-ins', path: 'C:\\ins', title: 'Ins' }],
+    sessions: [{ header: { id: 's-ins', cwd: 'C:\\ins' } }],
+    events: new Map([['s-ins', fullEvents]]),
+    snapshots: [{ header: { id: 's-ins' }, revision: 'r1' }],
+  })
+  const snap = (await waitForScan(second)).json()
+  assert.equal(snap.totals.turns, 3)
+})
+
 test('safe-integer sequences prevent live cursor poisoning', async () => {
   const eventTime = Date.now() - 60 * 1000
   const app = await createApp({

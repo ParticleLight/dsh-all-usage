@@ -34,7 +34,9 @@ All notable changes to `dsh-all-usage` are documented here.
 - Require safe-integer event sequences everywhere sequences gate folding or fast-forward comparisons, so contract-external values such as Infinity cannot freeze later flushes or poison the live-event cursor.
 - Keep the mixed-workspace upgrade flag through pricing backfills too: repairing costs must never re-enable tail folding of a record whose historical items still belong to another workspace.
 - Invalidate in-flight official-model searches whenever the catalog is replaced (manual sync, open-panel refresh, close/reopen), not only when a mapping row is deleted.
-- Sort catalog entries by their stable key before hashing so semantically identical catalogs hash identically regardless of upstream object order; refresh snapshot cache sync health on unchanged-catalog syncs.
+- Normalize live-fallback sequences to non-negative safe integers and give positional keys to invalid events, so contract-external sequences cannot overwrite ledger turns or poison the live cursor; ledger rows with non-safe sequences are marked for rebuild.
+- Sort the catalog by its stable key before truncating, so models.dev catalogs above the entry cap keep the same models and content hash regardless of upstream object order.
+- Make the manual pricing sync route wait for ledger readiness like the pricing POST, so its backfill never answers with an empty ledger.
 - Keep the server-persisted pricing auto-sync flag as the single truth: the client stops seeding the draft from its own local UI state, so saving unrelated settings cannot revert the server value.
 - Move in-flight official-model search state (timers, sequence guards, results) when mappings are deleted, so a stale response can no longer populate a shifted row.
 - Restrict pricing revision bumps to cost-affecting changes: sync attempts and failed attempts no longer invalidate scoped query caches or records cursors, while the client treats pricing changes as a full snapshot refresh so summary costs stay fresh.
