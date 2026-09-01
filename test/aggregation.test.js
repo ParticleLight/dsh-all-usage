@@ -1645,7 +1645,7 @@ test('invalid live sequences get positional keys and survive restart reuse', asy
     withStorage: true,
     workspaces: [{ id: 'ws-ins', path: 'C:\\ins', title: 'Ins' }],
     sessions: [{ header: { id: 's-ins', cwd: 'C:\\ins' } }],
-    events: new Map([['s-ins', baseEvents]]),
+    events: new Map([['s-ins', fullEvents]]),
     snapshots: [{ header: { id: 's-ins' }, revision: 'r1' }],
   })
   await waitForScan(first)
@@ -1845,6 +1845,34 @@ test('ledger-recovery cannot clear the rebuild flag of invalid records', async (
   assert.ok((second.readCalls.get('s-recovery') || 0) >= 1)
 })
 
+test('non-canonical numeric keys from old builds are rebuilt from source', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const identity = { identityKey: 'deepseek / deepseek-chat', provider: 'deepseek', requestedModel: 'deepseek-chat', actualModel: 'deepseek-chat', label: 'deepseek-chat', legacy: false }
+  const validCost = { status: 'priced', pricingMode: 'official-model', currency: 'USD', source: 'catalog', pricingModel: 'deepseek-chat', providerId: 'deepseek', inputTokenSemantics: 'fresh', multiplier: '1', billableInputTokens: 100, billableOutputTokens: 100, rates: { input: '0.27', output: '1.1', cacheRead: '0.07', cacheWrite: '0.27' }, breakdown: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, baseTotal: '0', total: '0', reason: '', tiered: false, reasoningRateAvailable: false, selectedTier: { type: 'context', size: 0 } }
+  const keys = ['00', '01', '0002', '+1', '1.', ' 1']
+  const turns = keys.map((key, index) => ({ key, seq: -1, time: eventTime, workspaceId: 'ws-nc', turn: index + 1, identity }))
+  const poll = { version: 3, sessionId: 's-nc', workspaceId: 'ws-nc', lastSeq: 3, lastRevision: 'r1', updatedAt: 1000, turns, usage: [{ key: 's-nc:step:1:1', seq: -1, time: eventTime, workspaceId: 'ws-nc', identity, modelId: 'deepseek-chat', turn: 1, step: 1, values: { input: 100, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: validCost }], lastIdentity: identity }
+  const fullEvents = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 2 }, 2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    usageEvent(eventTime, 2, 1, { inputTokens: 7, outputTokens: 3 }, 4),
+    { seq: 5, time: eventTime, type: 'turn/end', data: { turn: 2 } },
+  ]
+  const app = await createApp({
+    withStorage: true,
+    ledgerSeed: { 's-nc': poll },
+    workspaces: [{ id: 'ws-nc', path: 'C:\\nc', title: 'Nc' }],
+    sessions: [{ header: { id: 's-nc', cwd: 'C:\\nc' } }],
+    events: new Map([['s-nc', fullEvents]]),
+    snapshots: [{ header: { id: 's-nc' }, revision: 'r1' }],
+  })
+  const snap = (await waitForScan(app)).json()
+  assert.equal(snap.totals.input, 17)
+  assert.equal(snap.totals.turns, 2)
+  assert.ok((app.readCalls.get('s-nc') || 0) >= 1)
+})
+
 test('safe-integer sequences prevent live cursor poisoning', async () => {
   const eventTime = Date.now() - 60 * 1000
   const app = await createApp({
@@ -1862,4 +1890,41 @@ test('safe-integer sequences prevent live cursor poisoning', async () => {
   await new Promise((resolve) => setImmediate(resolve))
   const snap = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
   assert.equal(snap.totals.input, 17)
+})
+
+test('flush with rewritten invalid history triggers a full rebuild', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const original = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 1 }, 2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+  ]
+  const rewritten = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 5, outputTokens: 1 }, -2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    usageEvent(eventTime, 2, 1, { inputTokens: 7, outputTokens: 1 }, 3),
+  ]
+  let source = original
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-rew', path: 'C:\\rew', title: 'Rew' }],
+    sessions: [{ header: { id: 's-rew', cwd: 'C:\\rew' } }],
+    events: new Map(),
+    readSession: async () => ({ events: source }),
+  })
+  await waitForScan(app)
+  // Real DSH marks the session dirty when a live event arrives before flush.
+  app.listeners['session/event'][0]({ id: 's-rew', header: { id: 's-rew', cwd: 'C:\\rew' } }, usageEvent(eventTime, 2, 1, { inputTokens: 7, outputTokens: 1 }, 3))
+  source = rewritten
+  await app.listeners['session/flush'][0]({ id: 's-rew', header: { id: 's-rew', cwd: 'C:\\rew' }, events: rewritten })
+  let snap = null
+  for (let i = 0; i < 400; i += 1) {
+    snap = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+    if (snap.totals.input === 12) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  assert.equal(snap.totals.input, 12)
+  const stored = app.storageUnit.records.sessions['s-rew']
+  assert.equal(stored.usage.reduce((sum, item) => sum + item.values.input, 0), 12)
 })
