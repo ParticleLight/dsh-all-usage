@@ -1928,3 +1928,60 @@ test('flush with rewritten invalid history triggers a full rebuild', async () =>
   const stored = app.storageUnit.records.sessions['s-rew']
   assert.equal(stored.usage.reduce((sum, item) => sum + item.values.input, 0), 12)
 })
+
+test('flush with append after history rewrite rebuilds the aggregate', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const original = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 1 }, 2),
+    usageEvent(eventTime, 2, 1, { inputTokens: 20, outputTokens: 1 }, 3),
+  ]
+  const rewritten = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 5, outputTokens: 1 }, -2),
+    usageEvent(eventTime, 2, 1, { inputTokens: 20, outputTokens: 1 }, 3),
+    usageEvent(eventTime, 3, 1, { inputTokens: 7, outputTokens: 1 }, 4),
+  ]
+  let source = original
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-rew2', path: 'C:\\rew2', title: 'Rew2' }],
+    sessions: [{ header: { id: 's-rew2', cwd: 'C:\\rew2' } }],
+    events: new Map(),
+    readSession: async () => ({ events: source }),
+  })
+  await waitForScan(app)
+  app.listeners['session/event'][0]({ id: 's-rew2', header: { id: 's-rew2', cwd: 'C:\\rew2' } }, usageEvent(eventTime, 3, 1, { inputTokens: 7, outputTokens: 1 }, 4))
+  source = rewritten
+  await app.listeners['session/flush'][0]({ id: 's-rew2', header: { id: 's-rew2', cwd: 'C:\\rew2' }, events: rewritten })
+  let snap = null
+  for (let i = 0; i < 400; i += 1) {
+    snap = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+    if (snap.totals.input === 32) break
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  assert.equal(snap.totals.input, 32)
+  const stored = app.storageUnit.records.sessions['s-rew2']
+  assert.equal(stored.usage.reduce((sum, item) => sum + item.values.input, 0), 32)
+})
+
+test('positional and prefix-numeric composite ledger keys keep the revision fast path', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const identity = { identityKey: 'deepseek / deepseek-chat', provider: 'deepseek', requestedModel: 'deepseek-chat', actualModel: 'deepseek-chat', label: 'deepseek-chat', legacy: false }
+  const validCost = { status: 'priced', pricingMode: 'official-model', currency: 'USD', source: 'catalog', pricingModel: 'deepseek-chat', providerId: 'deepseek', inputTokenSemantics: 'fresh', multiplier: '1', billableInputTokens: 10, billableOutputTokens: 10, rates: { input: '0.27', output: '1.1', cacheRead: '0.07', cacheWrite: '0.27' }, breakdown: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, baseTotal: '0', total: '0', reason: '', tiered: false, reasoningRateAvailable: false, selectedTier: { type: 'context', size: 0 } }
+  const positional = { version: 3, sessionId: 's-pos', workspaceId: 'ws-pos', lastSeq: 1, lastRevision: 'r1', updatedAt: 1000, turns: [{ key: 'event:1', seq: 1, time: eventTime, workspaceId: 'ws-pos', turn: 1, identity }], usage: [], lastIdentity: identity }
+  const prefixed = { version: 3, sessionId: '1abc-session', workspaceId: 'ws-num', lastSeq: 2, lastRevision: 'r1', updatedAt: 1000, turns: [{ key: '1abc-session:turn:1', seq: 2, time: eventTime, workspaceId: 'ws-num', turn: 1, identity }], usage: [{ key: '1abc-session:step:1:1', seq: 2, time: eventTime, workspaceId: 'ws-num', identity, modelId: 'deepseek-chat', turn: 1, step: 1, values: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: validCost }], lastIdentity: identity }
+  const app = await createApp({
+    withStorage: true,
+    ledgerSeed: { 's-pos': positional, '1abc-session': prefixed },
+    workspaces: [{ id: 'ws-pos', path: 'C:\\pos', title: 'Pos' }, { id: 'ws-num', path: 'C:\\num2', title: 'Num2' }],
+    sessions: [{ header: { id: 's-pos', cwd: 'C:\\pos' } }, { header: { id: '1abc-session', cwd: 'C:\\num2' } }],
+    events: new Map(),
+    snapshots: [{ header: { id: 's-pos' }, revision: 'r1' }, { header: { id: '1abc-session' }, revision: 'r1' }],
+  })
+  const snap = (await waitForScan(app)).json()
+  assert.equal(snap.totals.turns, 2)
+  assert.equal(snap.totals.input, 10)
+  assert.equal((app.readCalls.get('s-pos') || 0), 0)
+  assert.equal((app.readCalls.get('1abc-session') || 0), 0)
+})
