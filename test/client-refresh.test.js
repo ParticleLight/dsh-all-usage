@@ -13,6 +13,14 @@ const context = {}
 vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__refreshHelpers = { createRequestGate, snapshotVersion, queryVersion, metadataVersion, statusRefreshKind, statusRequiresFullSnapshot, statusRequiresQueryRefresh, retryDelayFor }', context)
 const { createRequestGate, snapshotVersion, queryVersion, metadataVersion, statusRefreshKind, statusRequiresFullSnapshot, statusRequiresQueryRefresh, retryDelayFor } = context.__refreshHelpers
 
+const pricingStart = source.indexOf('    function pricingDraftOf')
+const pricingEnd = source.indexOf('    function pricingModelKey')
+assert.notEqual(pricingStart, -1, 'pricing helper start must exist')
+assert.notEqual(pricingEnd, -1, 'pricing helper end must exist')
+const pricingContext = {}
+vm.runInNewContext(source.slice(pricingStart, pricingEnd) + '\nglobalThis.__pricingHelpers = { pricingUsedModelsOf, pricingDraftAfterSync, validPricingRateDraft, pricingDraftValidationError }', pricingContext)
+const { pricingUsedModelsOf, pricingDraftAfterSync, validPricingRateDraft, pricingDraftValidationError } = pricingContext.__pricingHelpers
+
 test('compares full snapshot and status by instance plus revision', () => {
   const snapshot = { instanceId: 'host-a', revision: 7, scan: { done: true } }
   assert.equal(snapshotVersion(snapshot), 'host-a:7')
@@ -53,6 +61,33 @@ test('request gates discard stale refresh responses', () => {
   const second = gate.next()
   assert.equal(gate.isCurrent(first), false)
   assert.equal(gate.isCurrent(second), true)
+})
+
+test('validates pricing drafts with the same decimal grammar as the host', () => {
+  for (const value of ['0', '0.5', '1', '1.0', '1e24', '0.000001']) assert.equal(validPricingRateDraft(value), true, value)
+  for (const value of ['', '.5', '1.', '-1', '1e25', '1e-25', '9'.repeat(41), 'NaN', 'Infinity']) assert.equal(validPricingRateDraft(value), false, value)
+  assert.equal(pricingDraftValidationError({ mappings: [], overrides: [{ modelId: 'manual', input: '.5', output: '1', cacheRead: '0', cacheWrite: '0', tiers: [] }] }), 'override')
+  assert.equal(pricingDraftValidationError({ mappings: [{ model: 'alias', catalogModelId: 'official', inputTokenSemantics: 'fresh', multiplier: '1.' }], overrides: [] }), 'mapping')
+})
+
+test('hydrates shared tier schedules and preserves unsaved drafts after sync', () => {
+  const schedule = [{ type: 'context', size: 200000, input: '4', output: '12', cacheRead: '0.4', cacheWrite: '6' }]
+  const hydrated = pricingUsedModelsOf({ tierSchedules: [{ id: 'tier-0', tiers: schedule }], usedModels: [{ identityKey: 'route', tierScheduleId: 'tier-0', tierCount: 1 }] })
+  assert.equal(hydrated[0].tiers[0].size, 200000)
+  hydrated[0].tiers[0].size = 1
+  assert.equal(schedule[0].size, 200000)
+
+  const previous = {
+    sync: { autoEnabled: false, intervalMs: 21600000 },
+    mappings: [{ model: 'local', catalogModelId: 'official', inputTokenSemantics: 'total', multiplier: '1.5' }],
+    overrides: [{ modelId: 'local', input: '2', output: '8', cacheRead: '0.2', cacheWrite: '3', tiered: true, tiers: schedule }],
+  }
+  const synced = pricingDraftAfterSync(previous, { config: { sync: { autoEnabled: true, intervalMs: 21600000 }, mappings: [], overrides: [] } })
+  assert.equal(synced.sync.autoEnabled, true)
+  assert.equal(synced.mappings[0].inputTokenSemantics, 'total')
+  assert.equal(synced.overrides[0].tiers[0].size, 200000)
+  synced.overrides[0].tiers[0].size = 2
+  assert.equal(previous.overrides[0].tiers[0].size, 200000)
 })
 
 test('passes the injected timer service into the sidebar dashboard', () => {
@@ -269,20 +304,38 @@ test('renders cost totals, pricing status, and models.dev settings controls', ()
   assert.match(source, /Save and backfill/)
   assert.match(source, /Cost status/)
   assert.match(source, /Pricing model/)
-  assert.doesNotMatch(source, /pricingSemanticsLabel/)
+  assert.match(source, /pricingSemanticsLabel/)
+  assert.match(source, /pricingTierBandLabel/)
+  assert.match(source, /pricingDraftValidationError/)
+  assert.match(source, /getPricing\(\)\.then/)
+  assert.match(source, /pricingDraftAfterSync\(prev, data\.pricing\)/)
+  assert.match(source, /const closePricingPanel = \(\) => \{\s*if \(pricingSaving \|\| pricingSyncing \|\| pricingSyncSaving\) return/)
+  assert.match(source, /setPricingRpc\(pricingDraft, backfill, requestToken\)\.then\(\(data\) => \{\s*if \(!pricingGate\.isCurrent\(seq\)\) return/)
+  assert.match(source, /disabled: pricingSaving \|\| pricingSyncing \|\| pricingSyncSaving, onClick: closePricingPanel/)
+  assert.match(source, /pricingUsedModelsOf\(currentPricing\)/)
+  assert.match(source, /pricingLoading/)
+  assert.match(source, /addPricingOverrideTier/)
+  assert.match(source, /updatePricingOverrideTier/)
+  assert.match(source, /removePricingOverrideTier/)
   assert.match(source, /pricingStatusLabel(model.status || 'unpriced', language)/)
   assert.doesNotMatch(source, /tr\('官方厂商 ID'/)
   assert.match(source, /uh-pricing-model-table/)
   assert.match(source, /React\.createElement\('table'/)
   assert.match(source, /React\.createElement\('thead'/)
   assert.ok(source.includes("plus: [React.createElement('path'"))
-  assert.equal((source.match(/name: 'plus'/g) || []).length, 2)
+  assert.equal((source.match(/name: 'plus'/g) || []).length, 3)
+  assert.match(source, /上下文费率档位/)
+  assert.match(source, /uh-pricing-tier-table/)
+  assert.match(source, /uh-pricing-tier-edit-row/)
   assert.match(source, /tr\('输入', 'Input'\)/)
   assert.match(source, /tr\('输出', 'Output'\)/)
   assert.match(source, /tr\('缓存读', 'Cache read'\)/)
   assert.match(source, /tr\('缓存写', 'Cache write'\)/)
   assert.match(source, /max-height:392px/)
   assert.match(source, /uh-pricing-edit-row \{[^}]*gap:10px/)
+  assert.match(source, /@media \(max-width:640px\) \{[\s\S]*?uh-pricing-edit-row \{ grid-template-columns:minmax\(0,1fr\) 36px/)
+  assert.match(source, /uh-pricing-price-row > input\[type='number'\] \{ grid-column:1 \/ -1/)
+  assert.match(source, /uh-pricing-tier-edit-row \{ grid-template-columns:minmax\(0,1fr\) 36px/)
   assert.match(source, /uh-pricing-used-model-input \{ box-sizing:border-box/)
   assert.match(source, /uh-pricing-model-search-input \{ box-sizing:border-box/)
   assert.match(source, /uh-pricing-table-wrap \{[^}]*overflow-y:scroll/)

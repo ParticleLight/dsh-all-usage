@@ -4,6 +4,10 @@ All notable changes to `dsh-all-usage` are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Make Cost Statistics tier-aware: show expandable official rate schedules, expose per-route input-token semantics, and support validated context bands in explicit price overrides.
+
 ### Performance
 
 - Avoid rebuilding and writing a clean session's derived ledger at `session/flush`; queue and coalesce dirty records, then drain pending writes during disposal.

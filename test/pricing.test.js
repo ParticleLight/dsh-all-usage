@@ -296,6 +296,26 @@ test('does not apply provider-scoped model mappings to another route', () => {
   assert.equal(other.rates.input, '5')
 })
 
+test('round-trips manual context rate bands and applies the selected override tier', () => {
+  const state = normalizePricingState({
+    overrides: [{
+      modelId: 'custom-tier-model',
+      input: '2', output: '8', cacheRead: '0.2', cacheWrite: '3',
+      tiered: true,
+      tiers: [{ type: 'context', size: 200000, input: '4', output: '12', cacheRead: '0.4', cacheWrite: '6' }],
+    }],
+  })
+  const serialized = serializePricingState(state)
+  assert.equal(serialized.overrides[0].tiered, true)
+  assert.deepEqual(serialized.overrides[0].tiers, [{ type: 'context', size: 200000, input: '4', output: '12', cacheRead: '0.4', cacheWrite: '6' }])
+  const restored = normalizePricingState(serialized)
+  const resolved = resolvePricing({ provider: 'relay', actualModel: 'custom-tier-model' }, restored)
+  assert.equal(resolved.status, 'priced')
+  const cost = calculateCost({ input: 200001, output: 10, cacheRead: 0, cacheWrite: 0 }, resolved)
+  assert.deepEqual(cost.selectedTier, { type: 'context', size: 200000 })
+  assert.equal(cost.rates.input, '4')
+})
+
 test('calculates context-tiered pricing at the documented boundary', () => {
   const state = normalizePricingState({
     catalogEntries: [{
@@ -329,6 +349,18 @@ test('supports legacy context_over_200k output when no tier array exists', () =>
   assert.equal(resolved.status, 'priced')
   assert.equal(resolved.tiers[0].size, 200000)
   assert.equal(calculateCost({ input: 200001, output: 0 }, resolved).rates.input, '8')
+})
+
+test('caps oversized context schedules and fails closed', () => {
+  const tiers = Array.from({ length: 33 }, (_, index) => ({ type: 'context', size: (index + 1) * 100000, input: '10', output: '40', cacheRead: '1', cacheWrite: '12.5' }))
+  const state = normalizePricingState({
+    catalogEntries: [{ providerId: 'openai', modelId: 'gpt-5.5', input: '5', output: '30', cacheRead: '0.5', cacheWrite: '6.25', tiers }],
+  })
+  assert.equal(state.catalogEntries[0].tiers.length, 32)
+  assert.equal(state.catalogEntries[0].tieredInvalid, true)
+  const resolved = resolvePricing({ provider: 'relay', actualModel: 'gpt-5.5' }, state)
+  assert.equal(resolved.status, 'unsupported')
+  assert.equal(resolved.reason, 'tiered-pricing-not-modeled')
 })
 
 test('fails closed for malformed context tiers', () => {

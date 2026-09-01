@@ -176,7 +176,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
   - `POST /api/all-usage/alias` — 设置工作区别名
   - `GET /api/all-usage/pricing` — 查看 models.dev 同步状态、已用模型匹配和显式覆盖
   - `GET /api/all-usage/pricing/models?q=...` — 检索官方模型 ID 与名称匹配结果
-  - `POST /api/all-usage/pricing` — 保存同步、mapping 和显式价格覆盖
+  - `POST /api/all-usage/pricing` — 保存同步、mapping 和显式价格覆盖（含 context tier 档位）
   - `POST /api/all-usage/pricing/sync` — 手动同步 models.dev 并回填未计价调用
 - **Client 端**（`lib/client.js`）：`window.__ModuleLoader__` 工厂格式的浏览器 bundle，注册侧边栏「用量统计」入口（`sidebar.footer.action` 槽位）。所有 API 仅接受本机 loopback 请求并拒绝显式跨域请求；余额读取与别名写入还要求插件启动时生成、仅在当前进程有效的令牌（余额 GET 兼容浏览器省略 Origin）。英文模式的日期分桶、范围筛选、连续使用、热力图和导出时间统一按 UTC；中文模式按本地时区。
 
@@ -191,9 +191,9 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - scope query 将回合（turns）、模型调用（calls）和去重会话（sessions）分开统计；Provider/模型筛选缺少路由信息时明确归为 Unknown，不从展示字符串猜测
 - records 接口只返回短 hash、时间、工作区 ID、结构化模型身份、turn/step、Token buckets 和当前物化来源，不返回原始 session ID、路径、提示词、回复或凭据
 - 看板中的总处理量 = 输入 + 输出 + 缓存读写 + 推理；缓存命中表示复用的上下文 Token，不等于新生成 Token 或实际费用
-- 成本计算沿用 cc-switch 的四桶公式：输入、输出、缓存读取和缓存写入分别乘每百万价格，四项相加后再乘倍率；DSH 的 reasoning 字段不再次加到 output，避免底层 completion/thoughts 已含推理时重复计费
+- 成本计算沿用 cc-switch 的四桶公式：输入、输出、缓存读取和缓存写入分别乘每百万价格，四项相加后再乘倍率；context tier 在输入上下文严格大于阈值时为整次请求切换四项费率，不做渐进分段；DSH 的 reasoning 字段不再次加到 output，避免底层 completion/thoughts 已含推理时重复计费
 - 历史账本中带 `tiered` 标志的旧 flat 成本会在加载升级时迁移为 `unsupported`（`tiered-pricing-not-modeled`），不再继续显示为当前精确 priced；Token 统计不受影响。
-- 价格同步默认关闭；models.dev 不可用时保留最近一次成功目录，未匹配模型不会套用默认价格；手工 mapping/override 仅用于模型别名、官方目录缺失或有权威官方价格；看板范围与明细视图保存在浏览器本地，6 小时自动同步开关会立即写入受保护的 pricing API
+- 价格同步默认关闭；models.dev 不可用时保留最近一次成功目录，未匹配模型不会套用默认价格；成本设置可展开查看官方档位、为 mapping 选择 fresh/total/legacy 输入口径，并为显式 override 增删 context tier；看板范围与明细视图保存在浏览器本地，6 小时自动同步开关会立即写入受保护的 pricing API
 - Mapping 语义：带 `identityKey` 的 mapping 只对精确路由身份生效；不带身份键的 mapping 才按模型做全局回退；旧配置中的 `usageIdentityKey` 会在加载时归一化。
 - 余额查询走 DeepSeek 官方 `/user/balance` 接口；未配置 API Key 时卡片显示引导文案
 - 账本按 session ID 稳定 hash 到 32 个 JSON shard，单次 flush 只重写对应 shard；旧的 `all_usage_ledger.json` 会在首次加载时迁移，异步写失败或退出前未落盘不会丢失内存统计，只会让下次启动重新扫描
@@ -364,7 +364,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
   - `POST /api/all-usage/alias` — update workspace aliases
   - `GET /api/all-usage/pricing` — inspect models.dev sync status, used-model matches, and explicit overrides
   - `GET /api/all-usage/pricing/models?q=...` — search official model IDs and display-name matches
-  - `POST /api/all-usage/pricing` — save sync, mappings, and explicit price overrides
+  - `POST /api/all-usage/pricing` — save sync, mappings, and explicit price overrides, including context-tier bands
   - `POST /api/all-usage/pricing/sync` — sync models.dev and backfill unpriced calls
 - **Client** (`lib/client.js`): a `window.__ModuleLoader__` browser bundle that registers the “Usage statistics” sidebar entry through the `sidebar.footer.action` slot. All API routes accept loopback requests and reject an explicit cross-origin Origin; balance reads and alias writes also require a process-scoped token generated when the plugin starts (the balance GET tolerates browsers omitting Origin).
 
@@ -379,9 +379,9 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 - Scoped results keep turns, model calls, and distinct sessions as separate metrics; missing route identity is explicitly Unknown rather than inferred from a display label
 - The records endpoint returns only a short hash, time, workspace ID, structured model identity, turn/step, token buckets, and current materialization source. It omits raw session IDs, paths, prompts, replies, and credentials
 - Processed tokens = input + output + cache read/write + reasoning; a cache hit means reused context, not newly generated tokens or actual cost
-- Cost follows the cc-switch four-bucket formula: input, output, cache-read, and cache-write tokens are priced independently, summed, then multiplied by the final multiplier; context-tiered models choose all four rates from the request context, and DSH reasoning is not added to output a second time
+- Cost follows the cc-switch four-bucket formula: input, output, cache-read, and cache-write tokens are priced independently, summed, then multiplied by the final multiplier; when input context is strictly greater than a context-tier threshold, all four rates switch for the whole request instead of progressive band splitting, and DSH reasoning is not added to output a second time
 - Legacy ledger costs carrying `tiered` are migrated to `unsupported` (`tiered-pricing-not-modeled`) on load instead of remaining falsely marked as current flat priced estimates; token statistics are unchanged.
-- Pricing sync is off by default; when models.dev is unavailable the last good catalog remains in use, and unmatched models never receive a guessed default price; explicit model mappings/overrides are for aliases, missing official catalog entries, or authoritative special pricing; dashboard range and detail-view preferences are stored in browser storage, while the 6-hour sync toggle is immediately saved through the protected pricing API
+- Pricing sync is off by default; when models.dev is unavailable the last good catalog remains in use, and unmatched models never receive a guessed default price; Cost Statistics can expand official tier schedules, select fresh/total/legacy input semantics per mapping, and add or remove context tiers on explicit overrides; dashboard range and detail-view preferences are stored in browser storage, while the 6-hour sync toggle is immediately saved through the protected pricing API
 - Mapping semantics: a mapping with `identityKey` applies only to that exact route identity; a mapping without an identity key is the model-wide fallback. Legacy `usageIdentityKey` values are normalized when loaded.
 - Balance data comes from DeepSeek’s official `/user/balance` endpoint; the card shows guidance when no API key is configured
 - English mode uses UTC for date buckets, range filters, streaks, heatmap dates, and export timestamps; Chinese mode uses local time

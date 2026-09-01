@@ -1000,23 +1000,39 @@ test('syncs models.dev pricing, backfills unpriced rows, and keeps cost consiste
   assert.deepEqual(modelSearchResult.json().items, [])
 
   const saveRequest = makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': token }, JSON.stringify({
-    pricing: { catalogEntries: [{ providerId: 'openai', modelId: 'gpt-5.5', displayName: 'GPT-5.5', input: '5', output: '30', cacheRead: '0.5', cacheWrite: '6.25' }] },
+    pricing: { catalogEntries: [{ providerId: 'openai', modelId: 'gpt-5.5', displayName: 'GPT-5.5', input: '5', output: '30', cacheRead: '0.5', cacheWrite: '6.25', tiers: [{ type: 'context', size: 2000000, input: '10', output: '40', cacheRead: '1', cacheWrite: '12.5' }] }] },
     backfill: true,
   }))
   const saved = await call(app, '/api/all-usage/pricing', saveRequest)
   assert.equal(saved.status, 200)
   assert.equal(saved.json().backfill.priced, 1)
+  const savedTieredModel = saved.json().pricing.usedModels.find((model) => model.pricingModel === 'gpt-5.5')
+  assert.equal(savedTieredModel.tiered, true)
+  assert.equal(savedTieredModel.tierCount, 1)
+  assert.equal(savedTieredModel.inputTokenSemantics, 'fresh')
+  assert.equal(Object.hasOwn(savedTieredModel, 'tiers'), false)
+  const savedSchedule = saved.json().pricing.tierSchedules.find((schedule) => schedule.id === savedTieredModel.tierScheduleId)
+  assert.deepEqual(savedSchedule.tiers, [{ type: 'context', size: 2000000, input: '10', output: '40', cacheRead: '1', cacheWrite: '12.5' }])
   const pricedModelSearch = makeRequest('GET', { host: '127.0.0.1:3080' })
   pricedModelSearch.url = '/api/all-usage/pricing/models?q=gpt-5.5'
   const pricedModelSearchResult = await call(app, '/api/all-usage/pricing/models', pricedModelSearch)
   assert.equal(pricedModelSearchResult.status, 200)
   assert.equal(pricedModelSearchResult.json().items[0].value, 'gpt-5.5')
   assert.equal(pricedModelSearchResult.json().items[0].providerId, 'openai')
+  assert.equal(pricedModelSearchResult.json().items[0].tiered, true)
+  assert.equal(pricedModelSearchResult.json().items[0].tierCount, 1)
 
   full = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
   const body = full.json()
   assert.equal(body.usageSchemaVersion, 3)
   assert.equal(body.costSchemaVersion, 1)
+  const compactTieredModel = body.pricing.usedModels.find((model) => model.pricingModel === 'gpt-5.5')
+  assert.equal(compactTieredModel.tiered, true)
+  assert.equal(compactTieredModel.tierCount, 1)
+  assert.equal(Object.hasOwn(compactTieredModel, 'tiers'), false)
+  assert.equal(Object.hasOwn(compactTieredModel, 'tierScheduleId'), false)
+  assert.equal(Object.hasOwn(body.pricing, 'tierSchedules'), false)
+  assert.equal(Object.hasOwn(body.pricing, 'config'), false)
   assert.equal(body.totals.cost.input, '5')
   assert.equal(body.totals.cost.output, '60')
   assert.equal(body.totals.cost.cacheRead, '0.05')
@@ -1096,7 +1112,7 @@ test('persists pricing mappings and overrides through the DSH storage unit', asy
   const first = await createApp({ withStorage: true, storage: storage })
   const full = await call(first, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
   const saved = await call(first, '/api/all-usage/pricing', makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': full.json().requestToken }, JSON.stringify({
-    pricing: { overrides: [{ providerId: 'relay', modelId: 'gpt-5.5', input: '9', output: '18', cacheRead: '0.9', cacheWrite: '0' }] },
+    pricing: { overrides: [{ providerId: 'relay', modelId: 'gpt-5.5', input: '9', output: '18', cacheRead: '0.9', cacheWrite: '0', tiered: true, tiers: [{ type: 'context', size: 200000, input: '18', output: '27', cacheRead: '1.8', cacheWrite: '0' }] }] },
   })))
   assert.equal(saved.status, 200)
   const toggle = await call(first, '/api/all-usage/pricing', makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': full.json().requestToken }, JSON.stringify({ pricing: { sync: { autoEnabled: true } } })))
@@ -1107,6 +1123,8 @@ test('persists pricing mappings and overrides through the DSH storage unit', asy
   const pricing = await call(second, '/api/all-usage/pricing', makeRequest('GET', { host: '127.0.0.1:3080' }))
   assert.equal(pricing.json().overrideCount, 1)
   assert.equal(pricing.json().config.overrides[0].input, '9')
+  assert.equal(pricing.json().config.overrides[0].tiered, true)
+  assert.deepEqual(pricing.json().config.overrides[0].tiers, [{ type: 'context', size: 200000, input: '18', output: '27', cacheRead: '1.8', cacheWrite: '0' }])
 })
 
 
@@ -1128,13 +1146,17 @@ test('round-trips route-specific pricing mapping identity through the API', asyn
     host: '127.0.0.1:3080',
     origin: 'http://127.0.0.1:3080',
     'x-all-usage-request-token': snapshot.json().requestToken,
-  }, JSON.stringify({ pricing: { mappings: [{ identityKey, model: 'gpt-5.5', catalogProviderId: 'openai', catalogModelId: 'gpt-5.5' }] } })))
+  }, JSON.stringify({ pricing: { mappings: [{ identityKey, model: 'gpt-5.5', catalogProviderId: 'openai', catalogModelId: 'gpt-5.5', inputTokenSemantics: 'total', multiplier: '1.5' }] } })))
   assert.equal(saved.status, 200)
   assert.equal(saved.json().pricing.config.mappings[0].identityKey, identityKey)
+  assert.equal(saved.json().pricing.config.mappings[0].inputTokenSemantics, 'total')
+  assert.equal(saved.json().pricing.config.mappings[0].multiplier, '1.5')
   assert.equal(Object.hasOwn(saved.json().pricing.config.mappings[0], 'usageIdentityKey'), false)
   const second = await createApp({ withStorage: true, storage })
   const loaded = await call(second, '/api/all-usage/pricing', makeRequest('GET', { host: '127.0.0.1:3080' }))
   assert.equal(loaded.json().config.mappings[0].identityKey, identityKey)
+  assert.equal(loaded.json().config.mappings[0].inputTokenSemantics, 'total')
+  assert.equal(loaded.json().config.mappings[0].multiplier, '1.5')
 })
 
 test('counts an assistant usage chunk when the request later fails', async () => {
