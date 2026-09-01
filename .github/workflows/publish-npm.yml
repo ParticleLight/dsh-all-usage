@@ -75,5 +75,13 @@ jobs:
           set -euo pipefail
           name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
-          published="$(npm view "${name}@${version}" version --json)"
-          node -e 'const expected = process.argv[1]; const actual = JSON.parse(process.argv[2]); if (actual !== expected) throw new Error(`npm returned ${actual}, expected ${expected}`)' "$version" "$published"
+          for attempt in 1 2 3 4 5 6; do
+            if published="$(npm view "${name}@${version}" version --json 2>/dev/null)"; then
+              node -e 'const expected = process.argv[1]; const actual = JSON.parse(process.argv[2]); if (actual !== expected) throw new Error(`npm returned ${actual}, expected ${expected}`)' "$version" "$published"
+              exit 0
+            fi
+            echo "npm registry has not exposed ${name}@${version} yet (attempt ${attempt}/6)" >&2
+            sleep $((attempt * 5))
+          done
+          echo "npm registry did not expose ${name}@${version} after retries" >&2
+          exit 1
