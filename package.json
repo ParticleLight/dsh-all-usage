@@ -12,10 +12,12 @@
     "node": ">=22 <25"
   },
   "scripts": {
+    "build:client": "node scripts/build-client.mjs",
     "test": "node --test",
     "fixture:check": "node scripts/replay-fixture.mjs fixtures/usage-events.json",
     "test:runtime": "node --test test/dsh-runtime.test.js",
-    "check:pack": "node scripts/check-package.mjs"
+    "check:pack": "node scripts/check-package.mjs",
+    "prepack": "npm run build:client"
   },
   "main": "lib/index.js",
   "exports": {
@@ -73,5 +75,8 @@
     "tokens",
     "balance"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "terser": "5.51.2"
+  }
 }

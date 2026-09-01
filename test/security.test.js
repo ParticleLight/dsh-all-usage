@@ -756,3 +756,37 @@ test('protects pricing configuration writes with loopback, origin, and process c
   assert.equal(allowed.json().ok, true)
   assert.equal(allowed.json().pricing.sync.autoEnabled, false)
 })
+
+test('waits for the persisted pricing state before serving reads and writes', async () => {
+  let releaseLoad = null
+  const loadGate = new Promise((resolve) => { releaseLoad = resolve })
+  const storageUnit = {
+    saved: [],
+    records: { sessions: {} },
+    async loadAll() {
+      await loadGate
+      return { global: { pricing: { sync: { autoEnabled: true, intervalMs: 21600000 }, mappings: [], overrides: [], catalogEntries: [] } }, tables: { sessions: {} } }
+    },
+    async putRecord(table, key, value) {
+      if (!this.records[table]) this.records[table] = {}
+      this.records[table][key] = value
+    },
+    async deleteRecord() {},
+    async setGlobal(value) { this.saved.push(value) },
+    async close() {},
+  }
+  const app = await createApp({ withStorage: true, storage: storageUnit })
+  // The GET must wait for the persisted configuration instead of reporting the
+  // default (empty) state that exists before loadPricing resolves.
+  const pendingRead = call(app, '/api/all-usage/pricing', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  releaseLoad()
+  const read = await pendingRead
+  assert.equal(read.status, 200)
+  assert.equal(read.json().sync.autoEnabled, true)
+  const stats = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  const token = stats.requestToken
+  const write = await call(app, '/api/all-usage/pricing', makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': token }, JSON.stringify({ sync: { autoEnabled: false } })))
+  assert.equal(write.status, 200)
+  assert.equal(write.json().pricing.sync.autoEnabled, false)
+  assert.ok(storageUnit.saved.some((entry) => entry.pricing && entry.pricing.sync && entry.pricing.sync.autoEnabled === false))
+})

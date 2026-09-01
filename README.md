@@ -21,7 +21,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **完整历史与增量重建**：基线扫描全部可读历史会话；独立用量账本同时作为每会话游标——未变化的会话直接复用账本，新增事件只增量回填，长历史重启不再全量重建
 - **重启免读**：用持久化日志的 revision 作为每会话的变更信号（只读头部行 + stat，不读全量）——日志未变的会话重启时连事件都不读，直接从账本复用；仅日志变化（新增/修改）的会话才做增量读取
 - **数据健康与按需刷新**：扫描完成后浏览器只检查轻量状态版本，只有用量、别名或同步状态变化时才拉完整历史；显示本次数据更新时间、历史扫描健康、revision 免读、实际读取、账本恢复和失败，网络异常保留上次成功数据并可重试
-- **性能优化**：Host 在 ingest 时维护 local/UTC 的日期、工作区、模型身份日级 cube 与单日小时桶；scope 查询按 bucket 合并，成本使用精确 BigInt 小数累加，53 周热力图只生成实际需要的字段，并继续使用 revision-scoped snapshot/records 缓存和可回收的实时事件队列；Client 对 scope 聚合、统计行和官方模型检索做防抖/缓存，并只渲染当前明细页签
+- **性能优化**：Host 在 ingest 时维护 local/UTC 的日期、工作区、模型身份日级 cube 与单日小时桶；scope 查询按 bucket 合并，成本使用精确 BigInt 小数累加，53 周热力图只生成实际需要的字段，并继续使用 revision-scoped snapshot/records 缓存和可回收的实时事件队列；Client 将热力图、tooltip、趋势、环形图、请求日志和定价对话框隔离为 memoized 边界，指针坐标通过 ref + requestAnimationFrame 更新，不再触发整页重渲染；浏览器入口在打包前确定性压缩
 - **趋势折线图**：按当前范围、时区、工作区、供应商和模型显示输入、缓存读写、输出、推理及总处理量；单日范围按小时聚合并显示小时轴，跨日范围按日聚合；使用平滑单调曲线与入场动画，悬停查看精确值，图例可切换曲线，点击点位进入当日明细
 - **统一筛选与审计**：工作区、供应商、模型和日期筛选贯穿摘要、热力图、趋势、表格与 CSV；工作区、供应商、模型三个筛选维度可独立自由组合，工作区、供应商和模型选项只展示当前日期范围内实际使用过的值；切换范围后失效筛选会自动清除；请求日志以紧凑分页表常驻显示，选择单条后查看分组 Token 详情
 - **Token 口径**：输入按「未含缓存命中」计，缓存命中 / 写入与推理独立成桶；全 0 用量的重放事件不会覆盖已记录的真实用量，仅缓存命中的请求也会计入
@@ -178,7 +178,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
   - `GET /api/all-usage/pricing/models?q=...` — 检索官方模型 ID 与名称匹配结果
   - `POST /api/all-usage/pricing` — 保存同步、mapping 和显式价格覆盖（含 context tier 档位）
   - `POST /api/all-usage/pricing/sync` — 手动同步 models.dev 并回填未计价调用
-- **Client 端**（`lib/client.js`）：`window.__ModuleLoader__` 工厂格式的浏览器 bundle，注册侧边栏「用量统计」入口（`sidebar.footer.action` 槽位）。所有 API 仅接受本机 loopback 请求并拒绝显式跨域请求；余额读取与别名写入还要求插件启动时生成、仅在当前进程有效的令牌（余额 GET 兼容浏览器省略 Origin）。英文模式的日期分桶、范围筛选、连续使用、热力图和导出时间统一按 UTC；中文模式按本地时区。
+- **Client 端**：可读源码位于 `src/client.js`，`npm run build:client` 使用固定版本 Terser 生成 `window.__ModuleLoader__` 工厂格式的 `lib/client.js` 浏览器 bundle，并注册侧边栏「用量统计」入口（`sidebar.footer.action` 槽位）。所有 API 仅接受本机 loopback 请求并拒绝显式跨域请求；余额读取与别名写入还要求插件启动时生成、仅在当前进程有效的令牌（余额 GET 兼容浏览器省略 Origin）。英文模式的日期分桶、范围筛选、连续使用、热力图和导出时间统一按 UTC；中文模式按本地时区。
 
 ### 数据说明
 
@@ -201,8 +201,8 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 ### 开发
 
-- 修改 `lib/client.js` 后刷新页面即可；修改 `lib/plugin.js` 或其他 Host 模块后，需由 DSH 重载该包或重启进程，单纯刷新页面不会替换已运行的 Host 代码
-- 插件包无第三方依赖：Host 端只使用 Cordis 服务，Client 端只使用 runtime 提供的 React 模块
+- 修改 `src/client.js` 后先运行 `npm run build:client`，再让 DSH 重载客户端模块并刷新页面；`lib/client.js` 是生成产物，不直接编辑。修改 `lib/plugin.js` 或其他 Host 模块后，需由 DSH 重载该包或重启进程
+- 插件无第三方运行时依赖：Host 端只使用 Cordis 服务，Client 端只使用 runtime 提供的 React 模块；Terser 仅作为固定版本开发依赖生成浏览器产物
 - 手动恢复 npm 发布时，GitHub Actions 要求输入目标 `v<package.version>` tag 和完整 commit SHA，并在 checkout 后校验 tag、SHA 与包版本一致；Release 事件同样执行 commit 校验。
 
 ## English
@@ -222,7 +222,7 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, est
 - **Full history & incremental rebuild**: the baseline scans every readable historical session; the durable usage ledger doubles as a per-session cursor, so unchanged sessions are reused straight from the ledger and only newly appended events are folded — long histories restart without a full rebuild
 - **Restart with no re-read**: the persisted log revision (a header-line + stat via `sessionPersistence.listSnapshots()`) acts as a per-session change signal — sessions whose log is unchanged are applied from the ledger on restart without reading their events at all; only changed/new sessions are read incrementally
 - **Data health and on-demand refresh**: after a scan completes, the browser polls only a lightweight status revision and fetches full history only after usage, alias, or sync state changes; it shows the latest full-data update, historical scan health, revision skips, rereads, ledger recovery, and failures while preserving last-good data on network errors
-- **Performance**: Host maintains ingest-time local/UTC day, workspace, model-identity cubes and single-day hour buckets; scope queries merge buckets, exact costs use BigInt decimal accumulators, and the 53-week heatmap emits only the fields it consumes, while revision-scoped snapshot/records caches and recyclable live-event queues remain in place. Client memoizes scope aggregates and detail rows and renders only the active detail tab
+- **Performance**: Host maintains ingest-time local/UTC day, workspace, model-identity cubes and single-day hour buckets; scope queries merge buckets, exact costs use BigInt decimal accumulators, and the 53-week heatmap emits only the fields it consumes, while revision-scoped snapshot/records caches and recyclable live-event queues remain in place. Client isolates the heatmap, tooltip, trend, donuts, request records, and pricing dialog behind memoized boundaries; pointer coordinates update through refs plus requestAnimationFrame instead of rerendering the page, and the browser entry is deterministically minified before packing
 - **Trend line chart**: show input, cache read/write, output, reasoning, and total processed tokens for the active range, timezone, workspace, provider, and model scope; use hourly buckets for a single-day scope and daily buckets for cross-day scopes, with smooth monotone curves, staged entrance animation, hover for exact values, and click a point to inspect that day
 - **Unified filters and audit**: workspace, provider, model, and date filters apply to the summary, heatmap, trend, tables, and CSV; workspace, provider, and model filters remain independent and can be combined freely, while workspace, provider, and model options are limited to values used in the selected date range and stale selections clear automatically; request logs stay visible as a compact paginated table with grouped Token details for the selected row
 - **Token accounting semantics**: input tokens are fresh (exclude cache hits/writes, which sit in separate buckets along with reasoning); all-zero usage replays never overwrite recorded usage, while cache-only requests still count
@@ -366,7 +366,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
   - `GET /api/all-usage/pricing/models?q=...` — search official model IDs and display-name matches
   - `POST /api/all-usage/pricing` — save sync, mappings, and explicit price overrides, including context-tier bands
   - `POST /api/all-usage/pricing/sync` — sync models.dev and backfill unpriced calls
-- **Client** (`lib/client.js`): a `window.__ModuleLoader__` browser bundle that registers the “Usage statistics” sidebar entry through the `sidebar.footer.action` slot. All API routes accept loopback requests and reject an explicit cross-origin Origin; balance reads and alias writes also require a process-scoped token generated when the plugin starts (the balance GET tolerates browsers omitting Origin).
+- **Client**: readable source lives in `src/client.js`; `npm run build:client` uses the pinned Terser version to generate the `window.__ModuleLoader__` bundle at `lib/client.js`, which registers the “Usage statistics” sidebar entry through the `sidebar.footer.action` slot. All API routes accept loopback requests and reject an explicit cross-origin Origin; balance reads and alias writes also require a process-scoped token generated when the plugin starts (the balance GET tolerates browsers omitting Origin).
 
 ### Data semantics
 
@@ -390,8 +390,8 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 
 ### Development
 
-- After editing `lib/client.js`, refresh the page. After editing `lib/plugin.js` or another Host module, reload the package through DSH or restart the process; a page refresh alone cannot replace running host code
-- The plugin has no third-party package dependencies: the Host uses Cordis services and the Client uses the runtime-provided React module
+- After editing `src/client.js`, run `npm run build:client`, reload the DSH client module, and refresh the page; `lib/client.js` is generated and should not be edited directly. After editing `lib/plugin.js` or another Host module, reload the package through DSH or restart the process
+- The plugin has no third-party runtime dependencies: the Host uses Cordis services and the Client uses the runtime-provided React module; pinned Terser is only a development dependency for generating the browser artifact
 - Manual npm recovery publishes require a target `v<package.version>` tag and full commit SHA; GitHub Actions checks both against the checked-out tag and package version. Release events perform the same commit check.
 
 ## License / 许可证

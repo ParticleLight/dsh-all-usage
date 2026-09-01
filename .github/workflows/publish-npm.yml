@@ -41,6 +41,8 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+      - name: Install development dependencies
+        run: npm ci --ignore-scripts
       - name: Validate release identity
         env:
           RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.target_tag }}

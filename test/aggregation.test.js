@@ -1356,3 +1356,73 @@ test('aggregates exact multi-call costs from query cubes and keeps heatmap rows 
   assert.deepEqual(heatmap.tokens, { input: 3000000, output: 3000000, cacheRead: 400000, cacheWrite: 600000, reasoning: 0 })
   assert.deepEqual(heatmap.perWorkspace, [{ workspaceId: 'ws-query-cube', turns: 2 }])
 })
+
+test('keeps both repeated local hours of a DST fall-back day as distinct buckets', async () => {
+  const previousTz = process.env.TZ
+  process.env.TZ = 'America/New_York'
+  try {
+    // 2024-11-03 in New York: 01:10 EDT (05:10Z) and 01:25 EST (06:25Z) are two
+    // different local 01:xx hours, not one bucket.
+    const firstBack = Date.UTC(2024, 10, 3, 5, 10)
+    const secondBack = Date.UTC(2024, 10, 3, 6, 25)
+    const app = await createApp({
+      workspaces: [{ id: 'ws-dst', path: 'C:\\dst', title: 'Dst' }],
+      sessions: [{ header: { id: 's-dst', cwd: 'C:\\dst' } }],
+      events: new Map([['s-dst', [
+        usageEvent(firstBack, 1, 1, { inputTokens: 10, outputTokens: 1 }, 1),
+        usageEvent(secondBack, 2, 1, { inputTokens: 20, outputTokens: 2 }, 2),
+      ]]]),
+    })
+    let snapshot = null
+    for (let i = 0; i < 200; i += 1) {
+      snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+      if (snapshot.json().scan.done) break
+      await new Promise((resolve) => setImmediate(resolve))
+    }
+    const request = makeRequest('GET', { host: '127.0.0.1:3080' })
+    request.url = '/api/all-usage/query?start=2024-11-03&end=2024-11-03&utc=0'
+    const query = (await call(app, '/api/all-usage/query', request)).json()
+    const counted = query.hourly.filter((row) => row.calls > 0)
+    assert.equal(query.hourly.length, 25)
+    assert.equal(counted.length, 2)
+    assert.equal(counted[0].time, Date.UTC(2024, 10, 3, 5, 0))
+    assert.equal(counted[0].tokens.input, 10)
+    assert.equal(counted[1].time, Date.UTC(2024, 10, 3, 6, 0))
+    assert.equal(counted[1].tokens.input, 20)
+    assert.equal(query.hourly.reduce((sum, row) => sum + row.tokens.input, 0), 30)
+  } finally {
+    if (previousTz === undefined) delete process.env.TZ
+    else process.env.TZ = previousTz
+  }
+})
+
+test('rebuilds the full log when a workspace is recreated with a different id', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const firstEvents = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 20 }, 2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+  ]
+  const secondEvents = firstEvents.concat([
+    usageEvent(eventTime, 2, 1, { inputTokens: 5, outputTokens: 6 }, 4),
+    { seq: 5, time: eventTime, type: 'turn/end', data: { turn: 2 } },
+  ])
+  const samePath = 'C:\\repo'
+  const base = {
+    withStorage: true,
+    sessions: [{ header: { id: 's-1', cwd: samePath } }],
+    snapshots: [{ header: { id: 's-1' }, revision: 'r1' }],
+  }
+  const first = await createApp({ ...base, workspaces: [{ id: 'ws-old', path: samePath, title: 'Repo' }], events: new Map([['s-1', firstEvents]]) })
+  let snap = null
+  for (let i = 0; i < 200; i += 1) { snap = await call(first, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' })); if (snap.json().scan.done) break; await new Promise((resolve) => setImmediate(resolve)) }
+  // Same path now maps to a NEW workspace id; the stored record is for ws-old.
+  const second = await createApp({ ...base, storage: first.storageUnit, workspaces: [{ id: 'ws-new', path: samePath, title: 'Repo' }], events: new Map([['s-1', secondEvents]]) })
+  for (let i = 0; i < 200; i += 1) { snap = await call(second, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' })); if (snap.json().scan.done) break; await new Promise((resolve) => setImmediate(resolve)) }
+  assert.equal(snap.json().totals.input, 15)
+  assert.equal(snap.json().totals.output, 26)
+  const perWorkspace = snap.json().perWorkspace
+  assert.equal(perWorkspace.length, 1)
+  assert.equal(perWorkspace[0].workspaceId, 'ws-new')
+  assert.equal(second.storageUnit.records.sessions['s-1'].workspaceId, 'ws-new')
+})

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import vm from 'node:vm'
 
-const source = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
+const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
 const start = source.indexOf('    function createRequestGate')
 const end = source.indexOf('    function rangeFilenamePart')
 assert.notEqual(start, -1, 'refresh helper start must exist')
@@ -40,6 +40,8 @@ test('classifies split revisions without promoting data changes to full snapshot
   assert.equal(metadataVersion(base), 'host-a:2')
   assert.equal(statusRefreshKind({ ...base, revision: 11, dataRevision: 5, queryRevision: '5:1' }, base), 'query')
   assert.equal(statusRequiresQueryRefresh({ ...base, dataRevision: 5, queryRevision: '5:1' }, base), true)
+  assert.equal(statusRefreshKind({ ...base, revision: 11, pricingRevision: 2, queryRevision: '4:2' }, base), 'full')
+  assert.equal(statusRequiresFullSnapshot({ ...base, revision: 11, pricingRevision: 2, queryRevision: '4:2' }, base), true)
   assert.equal(statusRefreshKind({ ...base, revision: 11, scanRevision: 9 }, base), 'status')
   assert.equal(statusRefreshKind({ ...base, revision: 11, metadataRevision: 3 }, base), 'full')
   assert.equal(statusRequiresFullSnapshot({ ...base, revision: 11, dataRevision: 5, queryRevision: '5:1' }, base), false)
@@ -101,7 +103,8 @@ test('opens the dashboard on the today range by default', () => {
 })
 
 test('calculates streaks from the full daily history', () => {
-  assert.ok(source.includes('for (const d of activeDayRows) dayMap.set(d.date, d)'))
+  assert.ok(source.includes('for (const day of activeDayRows) result.set(day.date, day)'))
+  assert.ok(source.includes('streaks(fullHistoryDayMap, useUtc)'))
 })
 
 test('uses the latest full refresh time as the normal health timestamp', () => {
@@ -196,7 +199,8 @@ test('adds donut charts to model and workspace detail panels', () => {
   assert.ok(source.includes('tooltipHeight = 82'))
   assert.match(source, /stroke-dashoffset:1/)
   assert.match(source, /animation:uh-donut-draw/)
-  assert.match(source, /tooltipPosition/)
+  assert.match(source, /const data = React\.useMemo\(\(\) => buildDonutSegments/)
+  assert.match(source, /window\.requestAnimationFrame\(flushPointer\)/)
   assert.match(source, /onMouseMove: updatePointer/)
   assert.ok(source.includes("key: 'model-donut-' + detailView + ':' + queryKey + ':' + (liveQueryVersion || 'query') + ':' + modelView"))
   assert.ok(source.includes("key: 'workspace-donut-' + detailView + ':' + queryKey + ':' + (liveQueryVersion || 'query')"))
@@ -235,16 +239,45 @@ test('removes row-level log buttons from model and workspace details', () => {
 
 test('aligns request log numeric headers with row values', () => {
   const start = source.indexOf("className: 'uh-record-grid uh-record-header'")
-  const end = source.indexOf('auditRows.map((row)')
+  const end = source.indexOf('rows.map((row)', start)
   const header = source.slice(start, end)
   assert.equal((header.match(/className: 'uh-record-num'/g) || []).length, 6)
 })
 
 test('places the usage heatmap directly below the trend chart', () => {
   const trend = source.indexOf('          trendPanel,')
-  const heatmap = source.indexOf("tr('使用热力图', 'Usage Heatmap')")
+  const heatmap = source.indexOf('          React.createElement(MemoUsageHeatmap, {')
   const details = source.indexOf("className: 'uh-detail-tabs'")
   assert.ok(trend >= 0 && heatmap > trend && details > heatmap)
+})
+
+test('isolates heatmap pointer motion from the dashboard render path', () => {
+  const pageStart = source.indexOf('    function UsagePage(props)')
+  const pageEnd = source.indexOf('    class UsageDashboardBoundary')
+  const pageSource = source.slice(pageStart, pageEnd)
+  const heatmapStart = source.indexOf('    function UsageHeatmap(props)')
+  const heatmapEnd = source.indexOf('    const MemoUsageHeatmap = React.memo(UsageHeatmap)')
+  const heatmapSource = source.slice(heatmapStart, heatmapEnd)
+  assert.doesNotMatch(pageSource, /\[hover, setHover\]/)
+  assert.match(heatmapSource, /const \[hoverDate, setHoverDate\] = React\.useState\(null\)/)
+  assert.match(heatmapSource, /window\.requestAnimationFrame\(flushTooltipPosition\)/)
+  assert.match(heatmapSource, /onMouseMove: moveTooltip/)
+  assert.match(heatmapSource, /\[hoverDate, flushTooltipPosition\]/)
+  assert.ok(source.includes('const MemoUsageHeatmapTooltip = React.memo(UsageHeatmapTooltip)'))
+  assert.ok(source.includes('const cellElements = React.useMemo'))
+  assert.ok(source.includes('const calendar = React.useMemo(() => buildCalendarModel'))
+})
+
+test('memoizes chart geometry and parent trend rows', () => {
+  assert.ok(source.includes('const MemoUsageDonutChart = React.memo(UsageDonutChart)'))
+  assert.ok(source.includes('const MemoUsageTrendChart = React.memo(UsageTrendChart)'))
+  assert.ok(source.includes('const MemoUsageRecordsPanel = React.memo(UsageRecordsPanel, equalRecordsPanelProps)'))
+  assert.ok(source.includes('const MemoUsagePricingDialog = React.memo(UsagePricingDialog'))
+  const pricingRevision = source.slice(source.indexOf('const pricingRenderRevision'), source.indexOf('const modelDonutItems'))
+  assert.match(pricingRevision, /pricingModelSearchOpen/)
+  assert.match(pricingRevision, /pricingModelSearchOptions/)
+  assert.ok(source.includes('const geometry = React.useMemo(() => buildTrendGeometry(rows, visible, width, height), [rows, visible])'))
+  assert.ok(source.includes('const trendRows = React.useMemo(() => {'))
 })
 
 test('isolates dashboard render errors from the sidebar entry', () => {
@@ -310,6 +343,11 @@ test('renders cost totals, pricing status, and models.dev settings controls', ()
   assert.match(source, /pricingTierBandLabel/)
   assert.match(source, /pricingDraftValidationError/)
   assert.match(source, /getPricing\(\)\.then/)
+  // The server-persisted auto-sync value must never be replaced by UI state,
+  // and deleting a mapping moves (and guards) in-flight official model searches.
+  assert.doesNotMatch(source, /draft\.sync\.autoEnabled = uiState\.pricingAutoSync/)
+  assert.ok(source.includes('pricingModelSearchSeqRef.current = shiftIndexedSeqMap('))
+  assert.ok(source.includes('setPricingModelSearchOptions((prev) => shiftIndexedMap(prev, index))'))
   assert.match(source, /pricingDraftAfterSync\(prev, data\.pricing\)/)
   assert.match(source, /const closePricingPanel = \(\) => \{\s*if \(pricingSaving \|\| pricingSyncing \|\| pricingSyncSaving\) return/)
   assert.match(source, /setPricingRpc\(pricingDraft, backfill, requestToken\)\.then\(\(data\) => \{\s*if \(!pricingGate\.isCurrent\(seq\)\) return/)

@@ -3,15 +3,15 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import vm from 'node:vm'
 
-const source = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
+const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
 const start = source.indexOf('    function pad2')
-const end = source.indexOf('    function trendSeriesLabel')
+const end = source.indexOf('    function UsageDonutChart')
 assert.notEqual(start, -1, 'client date helpers must exist')
 assert.notEqual(end, -1, 'client range helper boundary must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath }', context)
-const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath } = context.__rangeHelpers
+vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel }', context)
+const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel } = context.__rangeHelpers
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
   return {
@@ -23,6 +23,22 @@ function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deep
     byModel: [{ model, calls: turns, input, output: input * 2, cacheRead: input * 3, cacheWrite: input * 4, reasoning: input * 5 }],
   }
 }
+
+test('builds one stable Sunday-aligned 53-week calendar', () => {
+  const calendar = buildCalendarModel('2026-05-12', true, 'en')
+  assert.equal(calendar.cells.length, 53 * 7)
+  assert.equal(new Set(calendar.cells.map((cell) => cell.date)).size, 53 * 7)
+  assert.equal(calendar.cells.at(-1).date, '2026-05-16')
+  assert.equal(new Date(calendar.cells[0].date + 'T00:00:00Z').getUTCDay(), 0)
+  for (let index = 1; index < calendar.cells.length; index += 1) {
+    const previous = Date.parse(calendar.cells[index - 1].date + 'T00:00:00Z')
+    const current = Date.parse(calendar.cells[index].date + 'T00:00:00Z')
+    assert.equal(current - previous, 24 * 60 * 60 * 1000)
+  }
+  assert.ok(calendar.cells.some((cell) => cell.date === '2026-05-12'))
+  assert.equal(calendar.weekdays[1], 'Mon')
+  assert.ok(calendar.months.every((month) => typeof month.text === 'string' && month.text !== ''))
+})
 
 test('validates custom calendar ranges and retained-history bounds', () => {
   assert.equal(isCalendarDate('2024-02-29', true), true)

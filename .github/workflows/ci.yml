@@ -30,12 +30,20 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
+      - name: Install development dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify generated client bundle
+        run: |
+          git ls-files --error-unmatch lib/client.js
+          npm run build:client
+          git diff --exit-code -- lib/client.js
       - name: Run tests
         run: npm test
       - name: Check JavaScript syntax
         run: |
           node --check lib/index.js
           node --check lib/client.js
+          node --check src/client.js
           node --check lib/plugin.js
           node --check lib/aggregation.js
           node --check lib/ledger.js
@@ -45,6 +53,7 @@ jobs:
           node --check lib/http.js
           node --check lib/pricing.js
           node --check lib/usage-core.js
+          node --check scripts/build-client.mjs
           node --check scripts/check-package.mjs
           node --check scripts/replay-fixture.mjs
       - name: Check npm package contents

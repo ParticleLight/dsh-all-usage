@@ -13,6 +13,20 @@ All notable changes to `dsh-all-usage` are documented here.
 - Avoid rebuilding and writing a clean session's derived ledger at `session/flush`; queue and coalesce dirty records, then drain pending writes during disposal.
 - Store derived ledger records in 32 stable-hash JSON units so a session update rewrites only its shard; retain the legacy single-unit migration path.
 - Build scoped query and fixed 53-week heatmap results from ingest-time date/workspace/model cubes; use exact BigInt decimal accumulators and a minimal heatmap projection instead of rescanning usage rows or parsing cost strings on cold reads.
+- Isolate heatmap pointer tracking from the dashboard render path: memoize the 53-week calendar, cells, lookup maps, charts, records, and pricing dialog, while tooltip coordinates are coalesced through refs and requestAnimationFrame, with a throttled fallback for background tabs.
+- Generate the shipped browser entry from readable `src/client.js` with pinned Terser during prepack, reducing the current raw client artifact from about 276 KB to about 177 KB; transport gzip/Brotli remains a DSH host concern.
+
+### Correctness
+
+- Keep the usage ledger debounce timer referenced while write waiters are pending: an unreferenced timer let the event loop settle before `persistLedgerRecord` could run, cancelling Node 22 test runs and short-lived processes.
+- Derive the latest session sequence from the tail event instead of scanning the full session log on live flush and again while building the ledger record.
+- Wait for the persisted pricing configuration (and the ledger it backfills) before serving pricing reads and writes, so an early API call can neither report an empty config nor be silently overwritten by the load.
+- Force a full historical rebuild when the workspace behind a session path was recreated with a different id; the previous record can no longer be reused under the wrong workspace.
+- Keep the server-persisted pricing auto-sync flag as the single truth: the client stops seeding the draft from its own local UI state, so saving unrelated settings cannot revert the server value.
+- Move in-flight official-model search state (timers, sequence guards, results) when mappings are deleted, so a stale response can no longer populate a shifted row.
+- Restrict pricing revision bumps to cost-affecting changes: sync attempts and failed attempts no longer invalidate scoped query caches or records cursors, while the client treats pricing changes as a full snapshot refresh so summary costs stay fresh.
+- Bucket hourly rows by the local hour boundary at the event's own offset, keeping both repeated hours of a DST fall-back day distinct.
+- Add a CI guard that rejects a missing or untracked generated client bundle (`git ls-files --error-unmatch`) before the determinism diff.
 
 ### Correctness
 
