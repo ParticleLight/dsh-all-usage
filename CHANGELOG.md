@@ -13,7 +13,9 @@ All notable changes to `dsh-all-usage` are documented here.
 - Added a Node 22/24 CI matrix with package-content checks and required real DSH runtime smoke coverage for DSH 0.1.1-rc.1 and 0.1.1-rc.2.
 - Added community issue templates for data inconsistencies, plugin startup failures, and cost calculation issues.
 
-### Performance
+### Performance Optimizations
+
+This release reduces historical scan work, storage write amplification, and Dashboard render churn while preserving durable-ledger recovery guarantees.
 
 - Avoid rebuilding and writing a clean session's derived ledger at `session/flush`; queue and coalesce dirty records, then drain pending writes during disposal.
 - Store derived ledger records in 32 stable-hash JSON units so a session update rewrites only its shard; retain the legacy single-unit migration path.

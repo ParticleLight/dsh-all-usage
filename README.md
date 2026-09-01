@@ -104,27 +104,11 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 **v1.1.3**
 
-- 成本统计支持经验证的 context-tiered 官方费率、可展开费率表和显式价格覆盖
-- durable usage ledger 支持稳定分片、dirty flush 合并、revision 快路径和安全的增量/全量重建恢复
-- 查询、趋势和固定 53 周热力图改用写入时聚合索引，减少冷读取时的历史 usage 扫描
-- 定价目录、价格同步、模型检索和映射编辑强化确定性与并发刷新边界
-- 加强非法序列、旧账本、工作区重建、滞后 persistence revision 与复合账本键的恢复保护
-- 增加 Node 22/24、DSH rc.1/rc.2 runtime smoke、脱敏 fixture replay 和包内容发布门禁
-
-**v1.1.2**
-
-- 模型与工作区环图及右侧列表新增 Token 数、成本和占比展示，其他分组同步合并成本
-- Host 增加日期索引、快照/日志查询缓存、实时事件恢复和写入生命周期保护
-- 成本设置官方模型检索增加防抖，新增 body、别名、时间戳和扫描失败边界校验
-- 更新插件自有截图清单，使用全量看板、成本设置和请求日志截图
-
-**v1.1.1**
-
-- 结构化模型身份与兼容 ledger v2：区分 Provider、请求模型和实际模型，旧账本自动升级
-- 统一 scope 查询：时间、时区、工作区、Provider、模型筛选同时作用于摘要、热力图、趋势、表格和 CSV
-- Token 趋势折线图：单日范围按小时、跨日范围按日；平滑单调曲线、分层入场动画、多桶图例切换、悬停精确值和点位审计钻取
-- **模型与工作区统计**：在明细表上方提供 Token 占比环形图、中心总量、Top 项目图例和 hover 明细；环段与右侧列表同时展示 Token、成本和占比，tooltip 会跟随鼠标位置
-- turn / step 审计明细：常驻请求日志标签、紧凑分页表、选中行分组详情、脱敏来源标记和当前筛选范围明细 CSV
+- 成本统计支持经验证的 context-tiered 官方费率、可展开费率表和显式价格覆盖。
+- **性能优化**：账本采用稳定分片、dirty flush 合并和 revision 快路径；查询、趋势和固定 53 周热力图改用写入时聚合索引，减少历史扫描、存储写放大和 Dashboard 重渲染。
+- 定价目录、价格同步、模型检索和映射编辑强化确定性与并发刷新边界。
+- 加强非法序列、旧账本、工作区重建、滞后 persistence revision 与复合账本键的恢复保护。
+- 增加 Node 22/24、DSH rc.1/rc.2 runtime smoke、脱敏 fixture replay 和包内容发布门禁。
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -306,22 +290,11 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 
 **v1.1.3**
 
-- Added validated context-tiered official pricing, expandable rate schedules, and explicit price overrides
-- Reworked the durable usage ledger with stable shards, dirty-flush coalescing, revision reuse, and safe incremental/full recovery
-- Built scoped queries, trends, and the fixed 53-week heatmap from ingest-time aggregates to reduce cold historical scans
-- Hardened deterministic pricing catalogs, pricing sync, official-model search, and mapping refresh races
-- Strengthened recovery for invalid sequences, legacy ledgers, recreated workspaces, lagging persistence revisions, and composite ledger keys
-- Added Node 22/24, DSH rc.1/rc.2 runtime smoke, redacted fixture replay, and package-content release gates
-
-**v1.1.2**
-
-- Official models.dev pricing, cache/reasoning token buckets, and persisted pricing configuration
-- Assistant chunk usage is retained and replaced by the final message for the same turn/step
-- Structured model identity with backward-compatible ledger v2 migration
-- Unified scope queries for time, timezone, workspace, provider, and model filters
-- Token trend line chart with hourly single-day data, selectable series, exact hover values, and point-to-audit drill-down
-- Model and workspace analytics with Token-share donut charts, center totals, ranked legends, animated arc reveals, and cursor-following hover details
-- Paginated turn/step audit records with redacted provenance and scoped detail CSV export
+- Added validated context-tiered official pricing, expandable rate schedules, and explicit price overrides.
+- **Performance optimizations**: the durable ledger uses stable shards, dirty-flush coalescing, and revision reuse; scoped queries, trends, and the fixed 53-week heatmap use ingest-time aggregates to reduce historical scans, storage write amplification, and Dashboard rerenders.
+- Hardened deterministic pricing catalogs, pricing sync, official-model search, and mapping refresh races.
+- Strengthened recovery for invalid sequences, legacy ledgers, recreated workspaces, lagging persistence revisions, and composite ledger keys.
+- Added Node 22/24, DSH rc.1/rc.2 runtime smoke, redacted fixture replay, and package-content release gates.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 
