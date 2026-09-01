@@ -6,7 +6,7 @@ All notable changes to `dsh-all-usage` are documented here.
 
 ### Added
 
-- Make Cost Statistics tier-aware: show expandable official rate schedules, expose per-route input-token semantics, and support validated context bands in explicit price overrides.
+- Make Cost Statistics tier-aware: show expandable official rate schedules and support validated context bands in explicit price overrides.
 
 ### Performance
 
