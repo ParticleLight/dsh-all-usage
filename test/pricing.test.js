@@ -81,6 +81,21 @@ test('hashes identical catalog contents identically across fetches', () => {
   assert.equal(second.fetchedAt, 2222)
 })
 
+test('resolves normalized duplicate catalog keys deterministically', () => {
+  const build = (first, second) => {
+    const catalog = {}
+    catalog[first] = { id: first, name: 'OpenAI', models: { 'gpt-5.5': { id: 'gpt-5.5', name: 'G', cost: { input: '1', output: '2' } } } }
+    catalog[second] = { id: second, name: 'OpenAI', models: { 'gpt-5.5': { id: 'gpt-5.5', name: 'G', cost: { input: '9', output: '2' } } } }
+    return catalog
+  }
+  const first = parseModelsDevCatalog(build('OpenAI', 'openai'), 1).catalog
+  const second = parseModelsDevCatalog(build('openai', 'OpenAI'), 2).catalog
+  assert.equal(first.catalogHash, second.catalogHash)
+  assert.equal(first.entries.length, 1)
+  assert.equal(first.entries[0].input, '1')
+  assert.equal(second.entries[0].input, '1')
+})
+
 test('truncates large catalogs deterministically before hashing', () => {
   const large = {}
   for (let index = 0; index < 10001; index += 1) {

@@ -36,7 +36,9 @@ All notable changes to `dsh-all-usage` are documented here.
 - Invalidate in-flight official-model searches whenever the catalog is replaced (manual sync, open-panel refresh, close/reopen), not only when a mapping row is deleted.
 - Normalize live-fallback sequences to non-negative safe integers and give positional keys to invalid events, so contract-external sequences cannot overwrite ledger turns or poison the live cursor; ledger rows with non-safe sequences are marked for rebuild.
 - Sort the catalog by its stable key before truncating, so models.dev catalogs above the entry cap keep the same models and content hash regardless of upstream object order.
-- Make the manual pricing sync route wait for ledger readiness like the pricing POST, so its backfill never answers with an empty ledger.
+- Enforce the ledger sequence contract (-1 sentinel or non-negative safe integer) when loading persisted records, flag old Infinity/NaN/negative keys and sequences for rebuild, and never clear the rebuild flag during cost repacking or ledger recovery.
+- Resolve normalized duplicate catalog entries deterministically (stable sort with conflict groups comparing full content, provider id case-normalized) so enumeration order can no longer change which price survives.
+- Wait for ledger readiness inside syncPricing itself, covering automatic schedulePricingSync runs in addition to the manual route.
 - Keep the server-persisted pricing auto-sync flag as the single truth: the client stops seeding the draft from its own local UI state, so saving unrelated settings cannot revert the server value.
 - Move in-flight official-model search state (timers, sequence guards, results) when mappings are deleted, so a stale response can no longer populate a shifted row.
 - Restrict pricing revision bumps to cost-affecting changes: sync attempts and failed attempts no longer invalidate scoped query caches or records cursors, while the client treats pricing changes as a full snapshot refresh so summary costs stay fresh.

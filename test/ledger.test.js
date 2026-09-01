@@ -174,7 +174,9 @@ test('migrates legacy tiered priced costs to unsupported', () => {
   }, 's-tiered')
   assert.equal(record.needsUpgrade, true)
   ledger.prepareLedgerRecord(record)
-  assert.equal(record.needsUpgrade, false)
+  // Cost repacking must not clear the rebuild flag: only a complete rebuild
+  // from the source log produces a record safe for revision fast-pathing.
+  assert.equal(record.needsUpgrade, true)
   assert.equal(record.usage[0].cost.status, 'unsupported')
   assert.equal(record.usage[0].cost.reason, 'tiered-pricing-not-modeled')
   assert.equal(record.usage[0].cost.total, '0')

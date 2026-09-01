@@ -1670,6 +1670,61 @@ test('invalid live sequences get positional keys and survive restart reuse', asy
   assert.equal(snap.totals.turns, 3)
 })
 
+test('legacy invalid-sequence ledger rows are rebuilt from source', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const identity = { identityKey: 'deepseek / deepseek-chat', provider: 'deepseek', requestedModel: 'deepseek-chat', actualModel: 'deepseek-chat', label: 'deepseek-chat', legacy: false }
+  const validCost = { status: 'priced', pricingMode: 'official-model', currency: 'USD', source: 'catalog', pricingModel: 'deepseek-chat', providerId: 'deepseek', inputTokenSemantics: 'fresh', multiplier: '1', billableInputTokens: 100, billableOutputTokens: 100, rates: { input: '0.27', output: '1.1', cacheRead: '0.07', cacheWrite: '0.27' }, breakdown: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, baseTotal: '0', total: '0', reason: '', tiered: false, reasoningRateAvailable: false, selectedTier: { type: 'context', size: 0 } }
+  const polluted = { version: 3, sessionId: 's-polluted', workspaceId: 'ws-poll', lastSeq: -2, lastRevision: 'r1', updatedAt: 1000, turns: [{ key: 'Infinity', seq: -1, time: eventTime, workspaceId: 'ws-poll', turn: 1, identity }], usage: [{ key: 'Infinity', seq: -2, time: eventTime, workspaceId: 'ws-poll', identity, modelId: 'deepseek-chat', turn: 1, step: 1, values: { input: 100, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: validCost }], lastIdentity: identity }
+  const fullEvents = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 2 }, 2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    usageEvent(eventTime, 2, 1, { inputTokens: 7, outputTokens: 3 }, 4),
+    { seq: 5, time: eventTime, type: 'turn/end', data: { turn: 2 } },
+  ]
+  const app = await createApp({
+    withStorage: true,
+    ledgerSeed: { 's-polluted': polluted },
+    workspaces: [{ id: 'ws-poll', path: 'C:\\poll', title: 'Poll' }],
+    sessions: [{ header: { id: 's-polluted', cwd: 'C:\\poll' } }],
+    events: new Map([['s-polluted', fullEvents]]),
+    snapshots: [{ header: { id: 's-polluted' }, revision: 'r1' }],
+  })
+  const snap = (await waitForScan(app)).json()
+  assert.equal(snap.totals.input, 17)
+  assert.equal(snap.totals.turns, 2)
+  assert.ok((app.readCalls.get('s-polluted') || 0) >= 1)
+  const rebuilt = app.storageUnit.records.sessions['s-polluted']
+  assert.ok(rebuilt.turns.every((turn) => turn.key !== 'Infinity'))
+})
+
+test('ledger-recovery cannot clear the rebuild flag of invalid records', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const identity = { identityKey: 'deepseek / deepseek-chat', provider: 'deepseek', requestedModel: 'deepseek-chat', actualModel: 'deepseek-chat', label: 'deepseek-chat', legacy: false }
+  const validCost = { status: 'priced', pricingMode: 'official-model', currency: 'USD', source: 'catalog', pricingModel: 'deepseek-chat', providerId: 'deepseek', inputTokenSemantics: 'fresh', multiplier: '1', billableInputTokens: 100, billableOutputTokens: 100, rates: { input: '0.27', output: '1.1', cacheRead: '0.07', cacheWrite: '0.27' }, breakdown: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, baseTotal: '0', total: '0', reason: '', tiered: false, reasoningRateAvailable: false, selectedTier: { type: 'context', size: 0 } }
+  const polluted = { version: 3, sessionId: 's-recovery', workspaceId: 'ws-rec', lastSeq: -2, lastRevision: 'r1', updatedAt: 1000, turns: [{ key: 'Infinity', seq: -1, time: eventTime, workspaceId: 'ws-rec', turn: 1, identity }], usage: [{ key: 'Infinity', seq: -1, time: eventTime, workspaceId: 'ws-rec', identity, modelId: 'deepseek-chat', turn: 1, step: 1, values: { input: 100, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: validCost }], lastIdentity: identity }
+  const base = {
+    withStorage: true,
+    ledgerSeed: { 's-recovery': polluted },
+    workspaces: [{ id: 'ws-rec', path: 'C:\\rec', title: 'Rec' }],
+    sessions: [{ header: { id: 's-recovery', cwd: 'C:\\rec' } }],
+  }
+  const first = await createApp({ ...base, events: new Map(), readSession: async () => { throw new Error('read failed') } })
+  await waitForScan(first)
+  const fullEvents = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 2 }, 2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    usageEvent(eventTime, 2, 1, { inputTokens: 7, outputTokens: 3 }, 4),
+    { seq: 5, time: eventTime, type: 'turn/end', data: { turn: 2 } },
+  ]
+  const second = await createApp({ ...base, storage: first.storageUnit, ledgerSeed: {}, events: new Map([['s-recovery', fullEvents]]) })
+  const snap = (await waitForScan(second)).json()
+  assert.equal(snap.totals.input, 17)
+  assert.equal(snap.totals.turns, 2)
+  assert.ok((second.readCalls.get('s-recovery') || 0) >= 1)
+})
+
 test('safe-integer sequences prevent live cursor poisoning', async () => {
   const eventTime = Date.now() - 60 * 1000
   const app = await createApp({
