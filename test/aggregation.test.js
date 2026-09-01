@@ -1426,3 +1426,71 @@ test('rebuilds the full log when a workspace is recreated with a different id', 
   assert.equal(perWorkspace[0].workspaceId, 'ws-new')
   assert.equal(second.storageUnit.records.sessions['s-1'].workspaceId, 'ws-new')
 })
+
+test('rebuilds a legacy mixed-workspace ledger record instead of reusing it', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const validCost = { status: 'priced', pricingMode: 'official-model', currency: 'USD', source: 'catalog', pricingModel: 'deepseek-chat', providerId: 'deepseek', inputTokenSemantics: 'fresh', multiplier: '1', billableInputTokens: 10, billableOutputTokens: 20, rates: { input: '0.27', output: '1.1', cacheRead: '0.07', cacheWrite: '0.27' }, breakdown: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, baseTotal: '0', total: '0', reason: '', tiered: false, reasoningRateAvailable: false, selectedTier: { type: 'context', size: 0 } }
+  const identity = { identityKey: 'deepseek / deepseek-chat', provider: 'deepseek', requestedModel: 'deepseek-chat', actualModel: 'deepseek-chat', label: 'deepseek-chat', legacy: false }
+  // An old write could leave record.workspaceId = ws-b while every historical
+  // item still carries the previous ws-a; such a record must not be reused.
+  const mixed = { version: 3, sessionId: 's-mixed', workspaceId: 'ws-b', lastSeq: 3, lastRevision: 'same-rev', updatedAt: 1000, turns: [{ key: '3', seq: 3, time: eventTime, workspaceId: 'ws-a', turn: 1, identity }], usage: [{ key: 's-mixed:1:2', seq: 2, time: eventTime, workspaceId: 'ws-a', identity, modelId: 'deepseek-chat', turn: 1, step: 1, values: { input: 100, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: validCost }], lastIdentity: identity }
+  const app = await createApp({
+    withStorage: true,
+    ledgerSeed: { 's-mixed': mixed },
+    workspaces: [{ id: 'ws-b', path: 'C:\\mixed', title: 'Mixed' }],
+    sessions: [{ header: { id: 's-mixed', cwd: 'C:\\mixed' } }],
+    events: new Map([['s-mixed', [
+      { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+      usageEvent(eventTime, 1, 1, { inputTokens: 7, outputTokens: 9 }, 2),
+      { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    ]]]),
+    snapshots: [{ header: { id: 's-mixed' }, revision: 'same-rev' }],
+  })
+  let snap = null
+  for (let i = 0; i < 200; i += 1) { snap = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' })); if (snap.json().scan.done) break; await new Promise((resolve) => setImmediate(resolve)) }
+  assert.equal(snap.json().totals.input, 7)
+  assert.equal(snap.json().totals.output, 9)
+  const reconstructed = app.storageUnit.records.sessions['s-mixed']
+  assert.equal(reconstructed.workspaceId, 'ws-b')
+  assert.equal(reconstructed.usage.length, 1)
+  assert.equal(reconstructed.usage[0].workspaceId, 'ws-b')
+  assert.equal(reconstructed.turns[0].workspaceId, 'ws-b')
+})
+
+test('keeps fractional-hour DST fall-back buckets without losing events', async () => {
+  const previousTz = process.env.TZ
+  process.env.TZ = 'Australia/Lord_Howe'
+  try {
+    // 2025-04-06 Lord Howe clocks fall back 02:00 (+11) to 01:30 (+10:30).
+    const firstBack = Date.UTC(2025, 3, 5, 14, 45)   // 01:45 +11
+    const secondBack = Date.UTC(2025, 3, 5, 15, 15)  // repeated 01:45 +10:30
+    const afterBack = Date.UTC(2025, 3, 5, 15, 45)   // 02:15 +10:30
+    const app = await createApp({
+      workspaces: [{ id: 'ws-lh', path: 'C:\\lh', title: 'Lh' }],
+      sessions: [{ header: { id: 's-lh', cwd: 'C:\\lh' } }],
+      events: new Map([['s-lh', [
+        usageEvent(firstBack, 1, 1, { inputTokens: 1, outputTokens: 0 }, 1),
+        usageEvent(secondBack, 2, 1, { inputTokens: 2, outputTokens: 0 }, 2),
+        usageEvent(afterBack, 3, 1, { inputTokens: 4, outputTokens: 0 }, 3),
+      ]]]),
+    })
+    let snapshot = null
+    for (let i = 0; i < 200; i += 1) {
+      snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+      if (snapshot.json().scan.done) break
+      await new Promise((resolve) => setImmediate(resolve))
+    }
+    const request = makeRequest('GET', { host: '127.0.0.1:3080' })
+    request.url = '/api/all-usage/query?start=2025-04-06&end=2025-04-06&utc=0'
+    const query = (await call(app, '/api/all-usage/query', request)).json()
+    assert.equal(query.totals.calls, 3)
+    assert.equal(query.totals.input, 7)
+    assert.equal(query.hourly.reduce((sum, row) => sum + row.calls, 0), 3)
+    assert.equal(query.hourly.reduce((sum, row) => sum + row.tokens.input, 0), 7)
+    const counted = query.hourly.filter((row) => row.calls > 0)
+    assert.equal(counted.length, 3)
+  } finally {
+    if (previousTz === undefined) delete process.env.TZ
+    else process.env.TZ = previousTz
+  }
+})

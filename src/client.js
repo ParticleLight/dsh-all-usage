@@ -88,8 +88,11 @@ window.__ModuleLoader__.load({
       if (typeof status.instanceId !== 'string' || typeof snapshot.instanceId !== 'string' || status.instanceId === '' || status.instanceId !== snapshot.instanceId) return 'full'
       if (hasSplitRevisions(status) && hasSplitRevisions(snapshot)) {
         if (status.metadataRevision !== snapshot.metadataRevision) return 'full'
-        if (status.dataRevision !== snapshot.dataRevision) return 'query'
+        // Check pricing first: when data and pricing move together a query-only
+        // refresh would merge the new pricing revision into the applied baseline
+        // and the summary costs/dialog would never see the change.
         if (status.pricingRevision !== snapshot.pricingRevision) return 'full'
+        if (status.dataRevision !== snapshot.dataRevision) return 'query'
         const statusScan = status.scan
         const snapshotScan = snapshot.scan
         if (status.scanRevision !== snapshot.scanRevision || !!(statusScan && snapshotScan && !!statusScan.done !== !!snapshotScan.done)) return 'status'
@@ -1868,7 +1871,10 @@ window.__ModuleLoader__.load({
       const [pricingOverrideSearchText, setPricingOverrideSearchText] = React.useState({})
       const [pricingOverrideOpen, setPricingOverrideOpen] = React.useState(null)
       const pricingModelSearchSeqRef = React.useRef({})
+      const pricingSearchEpochRef = React.useRef(0)
       const pricingModelSearchTimerRef = React.useRef({})
+      const pricingOpenRef = React.useRef(false)
+      const refreshPricingPanelRef = React.useRef(() => {})
       const [languageMenuOpen, setLanguageMenuOpen] = React.useState(false)
       const languageMenuRef = React.useRef(null)
       const recordsPanelRef = React.useRef(null)
@@ -1891,6 +1897,24 @@ window.__ModuleLoader__.load({
       const recordsGate = recordsGateRef.current
       const pricingGate = pricingGateRef.current
       const refreshRef = React.useRef(() => {})
+      // All hooks must run before the stats-null early return below; keep this
+      // callback (and the ref sync effect) in the hook region of the component.
+      const refreshOpenPricing = React.useCallback(() => {
+        if (!pricingOpenRef.current || pricingSaving || pricingSyncing || pricingSyncSaving) return
+        const seq = pricingGate.next()
+        setPricingLoading(true)
+        getPricing().then((pricing) => {
+          if (!pricingGate.isCurrent(seq)) return
+          if (!pricing || typeof pricing !== 'object' || !pricing.config) { setPricingError('load'); setPricingLoading(false); return }
+          setPricingDetails(pricing)
+          setPricingDraft((prev) => pricingDraftAfterSync(prev, pricing))
+          setPricingError('')
+          setPricingLoading(false)
+        }, () => {
+          if (pricingGate.isCurrent(seq)) { setPricingError('load'); setPricingLoading(false) }
+        })
+      }, [pricingSaving, pricingSyncing, pricingSyncSaving])
+      React.useEffect(() => { refreshPricingPanelRef.current = refreshOpenPricing })
       const setLanguage = (next) => { if (typeof props.onLanguageChange === 'function') props.onLanguageChange(next === 'en' ? 'en' : 'zh') }
       const chooseLanguage = (next) => { setLanguage(next); setLanguageMenuOpen(false) }
       React.useEffect(() => { persistUsageUiState({ detailView }) }, [detailView])
@@ -1988,6 +2012,10 @@ window.__ModuleLoader__.load({
             // Full data owns metadata transitions; data and pricing transitions
             // are consumed by the scoped query effect below.
             if (refreshKind === 'full') {
+              // A pricing revision change means the open settings panel is
+              // showing a stale catalog; re-fetch it and keep local edits.
+              const pricingTouched = typeof data.pricingRevision === 'number' && typeof appliedSnapshot.pricingRevision === 'number' && data.pricingRevision !== appliedSnapshot.pricingRevision
+              if (pricingTouched) refreshPricingPanelRef.current()
               refreshStats()
               return
             }
@@ -2329,6 +2357,7 @@ window.__ModuleLoader__.load({
         pricingGate.next()
         setPricingLoading(false)
         setPricingOpen(false)
+        pricingOpenRef.current = false
       }
       const openPricingPanel = () => {
         const seq = pricingGate.next()
@@ -2343,6 +2372,7 @@ window.__ModuleLoader__.load({
         setPricingModelSearchOpen(null)
         setPricingError('')
         setPricingOpen(true)
+        pricingOpenRef.current = true
         setAliasOpen(false)
         getPricing().then((pricing) => {
           if (!pricingGate.isCurrent(seq)) return
@@ -2472,17 +2502,8 @@ window.__ModuleLoader__.load({
         }
         return next
       }
-      const shiftIndexedSeqMap = (map, removedIndex) => {
-        const next = {}
-        for (const key of Object.keys(map)) {
-          const index = Number(key)
-          if (!Number.isInteger(index) || index < 0 || index === removedIndex) continue
-          const target = index > removedIndex ? index - 1 : index
-          next[String(target)] = (Number(map[key]) || 0) + (index > removedIndex ? 1 : 0)
-        }
-        return next
-      }
       const searchOfficialModels = (index, value) => {
+        const searchEpoch = pricingSearchEpochRef.current
         updatePricingMapping(index, 'catalogModelId', value)
         setPricingModelSearchOpen(index)
         const previousTimer = pricingModelSearchTimerRef.current[index]
@@ -2499,9 +2520,14 @@ window.__ModuleLoader__.load({
         const timerId = setTimeout(() => {
           delete pricingModelSearchTimerRef.current[index]
           getPricingModels(value).then((data) => {
+            // A deleted mapping can shift every later row, so an in-flight response
+            // must also prove the row-generation it was issued under is still the
+            // current one; the per-index seq alone can collide after a shift.
+            if (pricingSearchEpochRef.current !== searchEpoch) return
             if (pricingModelSearchSeqRef.current[index] !== nextSeq) return
             setPricingModelSearchOptions((prev) => Object.assign({}, prev, { [index]: Array.isArray(data && data.items) ? data.items : [] }))
           }, () => {
+            if (pricingSearchEpochRef.current !== searchEpoch) return
             if (pricingModelSearchSeqRef.current[index] === nextSeq) setPricingModelSearchOptions((prev) => Object.assign({}, prev, { [index]: [] }))
           })
         }, 180)
@@ -2527,13 +2553,15 @@ window.__ModuleLoader__.load({
         setPricingDraft((prev) => prev === null ? prev : Object.assign({}, prev, { mappings: prev.mappings.concat([{ identityKey: '', model: '', catalogProviderId: '', catalogModelId: '', inputTokenSemantics: 'fresh', multiplier: '1' }]) }))
       }
       const removePricingMapping = (index) => {
-        // Deleting a mapping shifts every later row: cancel in-flight official
-        // model searches, move their async state down, and bump their sequence
-        // guards so a stale response can never populate a shifted row.
+        // Deleting a mapping shifts every later row: cancel pending searches,
+        // move their async state down, and invalidate every in-flight response
+        // with a row-generation bump so a stale response can never populate a
+        // shifted row (the per-index sequence alone can collide after the shift).
+        pricingSearchEpochRef.current += 1
         const timers = pricingModelSearchTimerRef.current
         for (const key of Object.keys(timers)) clearTimeout(timers[key])
         pricingModelSearchTimerRef.current = shiftIndexedMap(timers, index)
-        pricingModelSearchSeqRef.current = shiftIndexedSeqMap(pricingModelSearchSeqRef.current, index)
+        pricingModelSearchSeqRef.current = shiftIndexedMap(pricingModelSearchSeqRef.current, index)
         setPricingModelSearchOptions((prev) => shiftIndexedMap(prev, index))
         setPricingUsedModelSearchText((prev) => shiftIndexedMap(prev, index))
         setPricingOverrideSearchText((prev) => shiftIndexedMap(prev, index))
