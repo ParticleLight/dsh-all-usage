@@ -1949,6 +1949,7 @@ test('flush with append after history rewrite rebuilds the aggregate', async () 
     sessions: [{ header: { id: 's-rew2', cwd: 'C:\\rew2' } }],
     events: new Map(),
     readSession: async () => ({ events: source }),
+    snapshots: [{ header: { id: 's-rew2' }, revision: 'r1' }],
   })
   await waitForScan(app)
   app.listeners['session/event'][0]({ id: 's-rew2', header: { id: 's-rew2', cwd: 'C:\\rew2' } }, usageEvent(eventTime, 3, 1, { inputTokens: 7, outputTokens: 1 }, 4))
@@ -1984,4 +1985,33 @@ test('positional and prefix-numeric composite ledger keys keep the revision fast
   assert.equal(snap.totals.input, 10)
   assert.equal((app.readCalls.get('s-pos') || 0), 0)
   assert.equal((app.readCalls.get('1abc-session') || 0), 0)
+})
+
+test('numeric-token-named sessions keep the composite-key fast path', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const identity = { identityKey: 'deepseek / deepseek-chat', provider: 'deepseek', requestedModel: 'deepseek-chat', actualModel: 'deepseek-chat', label: 'deepseek-chat', legacy: false }
+  const validCost = { status: 'priced', pricingMode: 'official-model', currency: 'USD', source: 'catalog', pricingModel: 'deepseek-chat', providerId: 'deepseek', inputTokenSemantics: 'fresh', multiplier: '1', billableInputTokens: 10, billableOutputTokens: 10, rates: { input: '0.27', output: '1.1', cacheRead: '0.07', cacheWrite: '0.27' }, breakdown: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, baseTotal: '0', total: '0', reason: '', tiered: false, reasoningRateAvailable: false, selectedTier: { type: 'context', size: 0 } }
+  const records = {}
+  const sessions = []
+  const snapshots = []
+  const workspaces = []
+  for (const [index, name] of ['Infinity-session', 'NaN-session'].entries()) {
+    const wsId = 'ws-tok' + index
+    records[name] = { version: 3, sessionId: name, workspaceId: wsId, lastSeq: 2, lastRevision: 'r1', updatedAt: 1000, turns: [{ key: name + ':turn:1', seq: 2, time: eventTime, workspaceId: wsId, turn: 1, identity }], usage: [{ key: name + ':step:1:1', seq: 2, time: eventTime, workspaceId: wsId, identity, modelId: 'deepseek-chat', turn: 1, step: 1, values: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: validCost }], lastIdentity: identity }
+    sessions.push({ header: { id: name, cwd: 'C:\\tok' + index } })
+    snapshots.push({ header: { id: name }, revision: 'r1' })
+    workspaces.push({ id: wsId, path: 'C:\\tok' + index, title: 'Tok' + index })
+  }
+  const app = await createApp({
+    withStorage: true,
+    ledgerSeed: records,
+    workspaces,
+    sessions,
+    events: new Map(),
+    snapshots,
+  })
+  const snap = (await waitForScan(app)).json()
+  assert.equal(snap.totals.turns, 2)
+  assert.equal((app.readCalls.get('Infinity-session') || 0), 0)
+  assert.equal((app.readCalls.get('NaN-session') || 0), 0)
 })

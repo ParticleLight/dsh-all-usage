@@ -43,7 +43,8 @@ All notable changes to `dsh-all-usage` are documented here.
 - Recognise any non-canonical numeric text (floats, exponents, negatives) in old event keys as pollution, and forbid both memory and ledger tail-folding when an incremental log contains invalid sequences anywhere before the fold start.
 - Refuse to tail-fold a flush whose log tail does not advance and whose history contains invalid sequences: the whole usage index is rebuilt from source so the in-memory aggregate and the persisted ledger cannot disagree.
 - Detect invalid sequences on every dirty flush (not only when the tail did not advance), so a history rewrite followed by a normal appended tail also rebuilds instead of folding stale in-memory rows.
-- Judge ledger keys by their whole string, not their first character: positional event:N keys and numeric-prefixed usageStepKey composite keys keep the revision fast path while every fully-numeric non-canonical text is rebuilt.
+- Persist an invalid-flush-sequence rebuild flag on the stale ledger record before triggering the full rebuild, so a lagging persistence revision cannot fast-path the baseline back to the old data.
+- Match Infinity/NaN pollution only as bare whole values, keeping composite keys such as Infinity-session:step:1:1 on the revision fast path.
 - Keep the server-persisted pricing auto-sync flag as the single truth: the client stops seeding the draft from its own local UI state, so saving unrelated settings cannot revert the server value.
 - Move in-flight official-model search state (timers, sequence guards, results) when mappings are deleted, so a stale response can no longer populate a shifted row.
 - Restrict pricing revision bumps to cost-affecting changes: sync attempts and failed attempts no longer invalidate scoped query caches or records cursors, while the client treats pricing changes as a full snapshot refresh so summary costs stay fresh.
