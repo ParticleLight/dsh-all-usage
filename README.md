@@ -104,11 +104,12 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 **v1.1.3**
 
-- 修复 durable ledger revision 初始化、有限值校验和 HTTP socket peer loopback 守卫
-- route-specific pricing mapping 统一使用 `identityKey`，legacy `usageIdentityKey` 自动兼容
-- 支持 models.dev context-tiered 价格，按输入上下文选择档位；无法验证的异常 tier 仍 fail closed
-- 增加 Node 22/24 与 DSH rc.1/rc.2 的发布和真实 runtime smoke 门禁
-- 增加脱敏 fixture replay、统计示例和社区 Issue 模板
+- 成本统计支持经验证的 context-tiered 官方费率、可展开费率表和显式价格覆盖
+- durable usage ledger 支持稳定分片、dirty flush 合并、revision 快路径和安全的增量/全量重建恢复
+- 查询、趋势和固定 53 周热力图改用写入时聚合索引，减少冷读取时的历史 usage 扫描
+- 定价目录、价格同步、模型检索和映射编辑强化确定性与并发刷新边界
+- 加强非法序列、旧账本、工作区重建、滞后 persistence revision 与复合账本键的恢复保护
+- 增加 Node 22/24、DSH rc.1/rc.2 runtime smoke、脱敏 fixture replay 和包内容发布门禁
 
 **v1.1.2**
 
@@ -305,11 +306,12 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 
 **v1.1.3**
 
-- Fixed durable ledger revision initialization, finite-value validation, and HTTP socket peer loopback enforcement
-- Unified route-specific pricing mappings on `identityKey` with legacy `usageIdentityKey` compatibility
-- Added context-tiered models.dev pricing with validated thresholds and fail-closed handling for malformed schedules
-- Added release and real runtime smoke gates for Node 22/24 and DSH rc.1/rc.2
-- Added redacted fixture replay, accounting examples, and community issue templates
+- Added validated context-tiered official pricing, expandable rate schedules, and explicit price overrides
+- Reworked the durable usage ledger with stable shards, dirty-flush coalescing, revision reuse, and safe incremental/full recovery
+- Built scoped queries, trends, and the fixed 53-week heatmap from ingest-time aggregates to reduce cold historical scans
+- Hardened deterministic pricing catalogs, pricing sync, official-model search, and mapping refresh races
+- Strengthened recovery for invalid sequences, legacy ledgers, recreated workspaces, lagging persistence revisions, and composite ledger keys
+- Added Node 22/24, DSH rc.1/rc.2 runtime smoke, redacted fixture replay, and package-content release gates
 
 **v1.1.2**
 

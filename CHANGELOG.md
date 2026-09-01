@@ -4,9 +4,14 @@ All notable changes to `dsh-all-usage` are documented here.
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-09-01
+
 ### Added
 
 - Make Cost Statistics tier-aware: show expandable official rate schedules and support validated context bands in explicit price overrides.
+- Added deterministic usage invariants and a redacted fixture replay command covering failed requests, orphan usage chunks, cache buckets, replacement semantics, and exact expected totals.
+- Added a Node 22/24 CI matrix with package-content checks and required real DSH runtime smoke coverage for DSH 0.1.1-rc.1 and 0.1.1-rc.2.
+- Added community issue templates for data inconsistencies, plugin startup failures, and cost calculation issues.
 
 ### Performance
 
@@ -20,6 +25,7 @@ All notable changes to `dsh-all-usage` are documented here.
 
 - Keep the usage ledger debounce timer referenced while write waiters are pending: an unreferenced timer let the event loop settle before `persistLedgerRecord` could run, cancelling Node 22 test runs and short-lived processes.
 - Derive the latest session sequence from the tail event instead of scanning the full session log on live flush and again while building the ledger record.
+- Use the previous ledger cursor for safe append-only tail folding and fall back to a full rebuild when sequence continuity or turn replacement is uncertain.
 - Wait for the persisted pricing configuration (and the ledger it backfills) before serving pricing reads and writes, so an early API call can neither report an empty config nor be silently overwritten by the load.
 - Force a full historical rebuild when the workspace behind a session path was recreated with a different id; the previous record can no longer be reused under the wrong workspace, and ledger rows whose top-level workspace differs from their historical items are marked unusable and rebuilt once.
 - Keep the pricing refresh classification order intact: a pricing revision change always wins over a concurrent data change so summary costs and the open settings panel cannot consume a partially-consumed baseline.
@@ -50,21 +56,6 @@ All notable changes to `dsh-all-usage` are documented here.
 - Restrict pricing revision bumps to cost-affecting changes: sync attempts and failed attempts no longer invalidate scoped query caches or records cursors, while the client treats pricing changes as a full snapshot refresh so summary costs stay fresh.
 - Bucket hourly rows by the local hour boundary at the event's own offset, keeping both repeated hours of a DST fall-back day distinct.
 - Add a CI guard that rejects a missing or untracked generated client bundle (`git ls-files --error-unmatch`) before the determinism diff.
-
-### Correctness
-
-- Use the previous ledger cursor for safe append-only tail folding and fall back to a full rebuild when sequence continuity or turn replacement is uncertain.
-
-## [1.1.3] - 2026-08-31
-
-### Added
-
-- Added deterministic usage invariants and a redacted fixture replay command covering failed requests, orphan usage chunks, cache buckets, replacement semantics, and exact expected totals.
-- Added a Node 22/24 CI matrix with package-content checks and required real DSH runtime smoke coverage for DSH 0.1.1-rc.1 and 0.1.1-rc.2.
-- Added community issue templates for data inconsistencies, plugin startup failures, and cost calculation issues.
-
-### Fixed
-
 - Initialized the durable ledger revision clock and reject persisted ledger records whose `updatedAt` is not finite.
 - Require HTTP socket peers to be loopback before accepting a request, including IPv4-mapped loopback addresses.
 - Preserve route-specific pricing mappings through the `identityKey` field, while accepting legacy `usageIdentityKey` data.
