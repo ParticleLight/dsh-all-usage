@@ -107,6 +107,21 @@ test('rejects catalogs beyond the candidate cap instead of unbounded selection',
   assert.match(parsed.error, /candidate-limit/)
 })
 
+test('hashes catalogs identically when Unicode sort keys tie under locale', () => {
+  const build = (order) => {
+    const catalog = {}
+    for (const key of order) catalog['p-' + key] = { id: 'p-' + key, name: 'P', models: { [key]: { id: key, name: 'M', cost: { input: '3', output: '4' } } } }
+    return catalog
+  }
+  const composed = 'model-á'        // á
+  const decomposed = 'model-á'     // a + combining acute
+  const first = parseModelsDevCatalog(build([composed, decomposed]), 1).catalog
+  const second = parseModelsDevCatalog(build([decomposed, composed]), 2).catalog
+  assert.equal(first.catalogHash, second.catalogHash)
+  assert.equal(first.entries.length, 2)
+  assert.deepEqual(first.entries.map((entry) => entry.modelId), second.entries.map((entry) => entry.modelId))
+})
+
 test('truncates large catalogs deterministically before hashing', () => {
   const large = {}
   for (let index = 0; index < 10001; index += 1) {
