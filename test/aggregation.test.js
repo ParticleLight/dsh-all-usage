@@ -1698,6 +1698,32 @@ test('legacy invalid-sequence ledger rows are rebuilt from source', async () => 
   assert.ok(rebuilt.turns.every((turn) => turn.key !== 'Infinity'))
 })
 
+test('oversized numeric ledger keys are rebuilt from source', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const identity = { identityKey: 'deepseek / deepseek-chat', provider: 'deepseek', requestedModel: 'deepseek-chat', actualModel: 'deepseek-chat', label: 'deepseek-chat', legacy: false }
+  const validCost = { status: 'priced', pricingMode: 'official-model', currency: 'USD', source: 'catalog', pricingModel: 'deepseek-chat', providerId: 'deepseek', inputTokenSemantics: 'fresh', multiplier: '1', billableInputTokens: 100, billableOutputTokens: 100, rates: { input: '0.27', output: '1.1', cacheRead: '0.07', cacheWrite: '0.27' }, breakdown: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, baseTotal: '0', total: '0', reason: '', tiered: false, reasoningRateAvailable: false, selectedTier: { type: 'context', size: 0 } }
+  const oversized = { version: 3, sessionId: 's-oversized', workspaceId: 'ws-ov', lastSeq: Number.MAX_SAFE_INTEGER + 1, lastRevision: 'r1', updatedAt: 1000, turns: [{ key: String(Number.MAX_SAFE_INTEGER + 1), seq: -1, time: eventTime, workspaceId: 'ws-ov', turn: 1, identity }], usage: [{ key: 's-oversized:step:1:1', seq: -1, time: eventTime, workspaceId: 'ws-ov', identity, modelId: 'deepseek-chat', turn: 1, step: 1, values: { input: 100, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: validCost }], lastIdentity: identity }
+  const fullEvents = [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 2 }, 2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    usageEvent(eventTime, 2, 1, { inputTokens: 7, outputTokens: 3 }, 4),
+    { seq: 5, time: eventTime, type: 'turn/end', data: { turn: 2 } },
+  ]
+  const app = await createApp({
+    withStorage: true,
+    ledgerSeed: { 's-oversized': oversized },
+    workspaces: [{ id: 'ws-ov', path: 'C:\\ov', title: 'Ov' }],
+    sessions: [{ header: { id: 's-oversized', cwd: 'C:\\ov' } }],
+    events: new Map([['s-oversized', fullEvents]]),
+    snapshots: [{ header: { id: 's-oversized' }, revision: 'r1' }],
+  })
+  const snap = (await waitForScan(app)).json()
+  assert.equal(snap.totals.input, 17)
+  assert.equal(snap.totals.turns, 2)
+  assert.ok((app.readCalls.get('s-oversized') || 0) >= 1)
+})
+
 test('ledger-recovery cannot clear the rebuild flag of invalid records', async () => {
   const eventTime = Date.now() - 60 * 1000
   const identity = { identityKey: 'deepseek / deepseek-chat', provider: 'deepseek', requestedModel: 'deepseek-chat', actualModel: 'deepseek-chat', label: 'deepseek-chat', legacy: false }

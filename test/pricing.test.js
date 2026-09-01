@@ -96,6 +96,17 @@ test('resolves normalized duplicate catalog keys deterministically', () => {
   assert.equal(second.entries[0].input, '1')
 })
 
+test('rejects catalogs beyond the candidate cap instead of unbounded selection', () => {
+  const huge = {}
+  for (let index = 0; index < 30001; index += 1) {
+    const modelId = 'model-' + String(index).padStart(5, '0')
+    huge['provider-' + index] = { id: 'provider-' + index, name: 'P' + index, models: { [modelId]: { id: modelId, name: 'M' + index, cost: { input: '1', output: '2' } } } }
+  }
+  const parsed = parseModelsDevCatalog(huge, 123)
+  assert.equal(parsed.ok, false)
+  assert.match(parsed.error, /candidate-limit/)
+})
+
 test('truncates large catalogs deterministically before hashing', () => {
   const large = {}
   for (let index = 0; index < 10001; index += 1) {

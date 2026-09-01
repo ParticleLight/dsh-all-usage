@@ -182,7 +182,10 @@ test('migrates legacy tiered priced costs to unsupported', () => {
   assert.equal(record.usage[0].cost.total, '0')
   const migratedRevision = record.updatedAt
   const roundTrip = ledger.normalizeLedgerRecord(JSON.parse(JSON.stringify(record)), 's-tiered')
-  assert.equal(roundTrip.needsUpgrade, false)
+  // The persisted rebuild reason survives the JSON round trip until a complete
+  // source-log rebuild clears it.
+  assert.equal(roundTrip.needsUpgrade, true)
+  assert.equal(roundTrip.rebuildRequired, 'invalid-usage')
   assert.equal(roundTrip.usage[0].cost.status, 'unsupported')
   assert.equal(roundTrip.usage[0].cost.reason, 'tiered-pricing-not-modeled')
   assert.equal(host.state.ledgerRevision, migratedRevision)
