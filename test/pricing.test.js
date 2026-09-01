@@ -81,6 +81,27 @@ test('hashes identical catalog contents identically across fetches', () => {
   assert.equal(second.fetchedAt, 2222)
 })
 
+test('hashes reordered catalogs identically when the prices are the same', () => {
+  const reorder = (source) => {
+    const copy = {}
+    for (const key of Object.keys(source).reverse()) {
+      const provider = source[key]
+      const copied = {
+        id: provider.id,
+        name: provider.name,
+        models: {},
+      }
+      for (const modelKey of Object.keys(provider.models).reverse()) copied.models[modelKey] = provider.models[modelKey]
+      copy[key] = copied
+    }
+    return copy
+  }
+  const first = parseModelsDevCatalog(catalogFixture, 1111).catalog
+  const second = parseModelsDevCatalog(reorder(catalogFixture), 2222).catalog
+  assert.equal(first.catalogHash, second.catalogHash)
+  assert.equal(first.entries.length, second.entries.length)
+})
+
 test('parses models.dev nested providers and keeps capability flags', () => {
   const parsed = parseModelsDevCatalog(catalogFixture, 123)
   assert.equal(parsed.ok, true)

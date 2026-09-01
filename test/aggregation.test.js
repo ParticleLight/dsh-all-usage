@@ -1591,3 +1591,60 @@ test('non-finite sequence numbers cannot freeze later flushes', async () => {
   assert.equal(record.usage.length, 2)
   for (const item of record.usage) assert.ok(Number.isSafeInteger(item.seq))
 })
+
+test('pricing backfill cannot re-enable folding of mixed-workspace records', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const unpricedCost = { status: 'unpriced', pricingMode: 'official-model', currency: 'USD', source: 'none', pricingModel: null, providerId: null, inputTokenSemantics: 'fresh', multiplier: '1', billableInputTokens: 100, billableOutputTokens: 100, rates: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, breakdown: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, baseTotal: '0', total: '0', reason: 'model-not-found', tiered: false, reasoningRateAvailable: false }
+  const identity = { identityKey: 'deepseek / deepseek-chat', provider: 'deepseek', requestedModel: 'deepseek-chat', actualModel: 'deepseek-chat', label: 'deepseek-chat', legacy: false }
+  const mixed = { version: 3, sessionId: 's-backfill', workspaceId: 'ws-b', lastSeq: 3, lastRevision: 'r1', updatedAt: 1000, turns: [{ key: '3', seq: 3, time: eventTime, workspaceId: 'ws-a', turn: 1, identity }], usage: [{ key: 's-backfill:1:2', seq: 2, time: eventTime, workspaceId: 'ws-a', identity, modelId: 'deepseek-chat', turn: 1, step: 1, values: { input: 100, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: unpricedCost }], lastIdentity: identity }
+  // The mixed record is applied through the ledger-recovery path (read failure),
+  // which is how it ends up in the in-memory usage index that backfill repairs.
+  const app = await createApp({
+    withStorage: true,
+    ledgerSeed: { 's-backfill': mixed },
+    workspaces: [{ id: 'ws-b', path: 'C:\\backfill', title: 'Backfill' }],
+    sessions: [{ header: { id: 's-backfill', cwd: 'C:\\backfill' } }],
+    events: new Map([['s-backfill', []]]),
+    readSession: async () => { throw new Error('read failed') },
+  })
+  await waitForScan(app)
+  const stats = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  const token = stats.requestToken
+  // Backfill the unpriced entry through the pricing POST with a small catalog.
+  const backfill = await call(app, '/api/all-usage/pricing', makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': token }, JSON.stringify({ pricing: { catalogEntries: [{ providerId: 'deepseek', modelId: 'deepseek-chat', providerName: 'DeepSeek', displayName: 'DeepSeek Chat', currency: 'USD', input: '0.27', output: '1.1', cacheRead: '0.07', cacheWrite: '0.27', source: 'models.dev', fetchedAt: 0, tiered: false }], mappings: [], overrides: [], sync: { autoEnabled: false } }, backfill: true })))
+  assert.equal(backfill.status, 200)
+  assert.equal(backfill.json().backfill.priced, 1)
+  await waitForLedgerWrite()
+  // A flush that appends new events must rebuild, not copy the ws-a items.
+  await app.listeners['session/flush'][0]({ id: 's-backfill', header: { id: 's-backfill', cwd: 'C:\\backfill' }, events: [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 5, outputTokens: 6 }, 2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    usageEvent(eventTime, 2, 1, { inputTokens: 7, outputTokens: 8 }, 4),
+    { seq: 5, time: eventTime, type: 'turn/end', data: { turn: 2 } },
+  ] })
+  await waitForLedgerWrite()
+  const record = app.storageUnit.records.sessions['s-backfill']
+  assert.equal(record.usage.length, 2)
+  for (const item of record.usage) assert.equal(item.workspaceId, 'ws-b')
+  for (const turn of record.turns) assert.equal(turn.workspaceId, 'ws-b')
+})
+
+test('safe-integer sequences prevent live cursor poisoning', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    workspaces: [{ id: 'ws-poison', path: 'C:\\poison', title: 'Poison' }],
+    sessions: [{ header: { id: 's-poison', cwd: 'C:\\poison' } }],
+    events: new Map([['s-poison', [
+      { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+      usageEvent(eventTime, 1, 1, { inputTokens: 10, outputTokens: 1 }, 2),
+      { seq: Number.POSITIVE_INFINITY, time: eventTime, type: 'turn/end', data: { turn: 9 } },
+    ]]]),
+  })
+  await waitForScan(app)
+  const handler = app.listeners['session/event'][0]
+  handler({ id: 's-poison', header: { cwd: 'C:\\poison' } }, usageEvent(eventTime, 3, 1, { inputTokens: 7, outputTokens: 1 }, 3))
+  await new Promise((resolve) => setImmediate(resolve))
+  const snap = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.equal(snap.totals.input, 17)
+})

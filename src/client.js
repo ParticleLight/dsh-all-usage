@@ -1875,6 +1875,17 @@ window.__ModuleLoader__.load({
       const pricingModelSearchTimerRef = React.useRef({})
       const pricingOpenRef = React.useRef(false)
       const refreshPricingPanelRef = React.useRef(() => {})
+      const invalidatePricingSearches = () => {
+        // Any catalog replacement (sync, refresh, close/reopen) invalidates all
+        // in-flight official-model searches: bump the row generation and cancel
+        // pending timers so stale responses cannot reach current rows.
+        pricingSearchEpochRef.current += 1
+        const timers = pricingModelSearchTimerRef.current
+        for (const key of Object.keys(timers)) clearTimeout(timers[key])
+        pricingModelSearchTimerRef.current = {}
+        pricingModelSearchSeqRef.current = {}
+        setPricingModelSearchOptions({})
+      }
       const [languageMenuOpen, setLanguageMenuOpen] = React.useState(false)
       const languageMenuRef = React.useRef(null)
       const recordsPanelRef = React.useRef(null)
@@ -1906,6 +1917,8 @@ window.__ModuleLoader__.load({
         getPricing().then((pricing) => {
           if (!pricingGate.isCurrent(seq)) return
           if (!pricing || typeof pricing !== 'object' || !pricing.config) { setPricingError('load'); setPricingLoading(false); return }
+          // A refreshed catalog invalidates searches issued against the old one.
+          invalidatePricingSearches()
           setPricingDetails(pricing)
           setPricingDraft((prev) => pricingDraftAfterSync(prev, pricing))
           setPricingError('')
@@ -2354,12 +2367,8 @@ window.__ModuleLoader__.load({
       }
       const closePricingPanel = () => {
         if (pricingSaving || pricingSyncing || pricingSyncSaving) return
-        // In-flight official-model searches must not reach a reopened panel:
-        // bump the row generation and cancel their pending timers.
-        pricingSearchEpochRef.current += 1
-        const timers = pricingModelSearchTimerRef.current
-        for (const key of Object.keys(timers)) clearTimeout(timers[key])
-        pricingModelSearchTimerRef.current = {}
+        // In-flight official-model searches must not reach a reopened panel.
+        invalidatePricingSearches()
         pricingGate.next()
         setPricingLoading(false)
         setPricingOpen(false)
@@ -2374,8 +2383,8 @@ window.__ModuleLoader__.load({
         setPricingOverrideSearchText({})
         setPricingUsedModelOpen(null)
         setPricingOverrideOpen(null)
-        setPricingModelSearchOptions({})
         setPricingModelSearchOpen(null)
+        invalidatePricingSearches()
         setPricingError('')
         setPricingOpen(true)
         pricingOpenRef.current = true
@@ -2427,6 +2436,9 @@ window.__ModuleLoader__.load({
         setPricingError('')
         syncPricingRpc(requestToken).then((data) => {
           if (!data || data.ok !== true || !data.pricing) { setPricingError('sync'); return }
+          // The synced catalog replaces the search corpus; invalidate searches
+          // issued against the previous one before updating the panel.
+          invalidatePricingSearches()
           setStats((prev) => prev === null ? prev : Object.assign({}, prev, { pricing: data.pricing }))
           setPricingDetails(data.pricing)
           setPricingDraft((prev) => pricingDraftAfterSync(prev, data.pricing))
