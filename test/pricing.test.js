@@ -73,6 +73,14 @@ test('normalizes model IDs using cc-switch candidate rules', () => {
   assert.equal(decimalText('1' + '0'.repeat(50)), null)
 })
 
+test('hashes identical catalog contents identically across fetches', () => {
+  const first = parseModelsDevCatalog(catalogFixture, 1111).catalog
+  const second = parseModelsDevCatalog(catalogFixture, 2222).catalog
+  assert.equal(first.catalogHash, second.catalogHash)
+  assert.equal(first.fetchedAt, 1111)
+  assert.equal(second.fetchedAt, 2222)
+})
+
 test('parses models.dev nested providers and keeps capability flags', () => {
   const parsed = parseModelsDevCatalog(catalogFixture, 123)
   assert.equal(parsed.ok, true)

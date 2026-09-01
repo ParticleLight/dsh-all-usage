@@ -765,7 +765,7 @@ test('waits for the persisted pricing state before serving reads and writes', as
     records: { sessions: {} },
     async loadAll() {
       await loadGate
-      return { global: { pricing: { sync: { autoEnabled: true, intervalMs: 21600000 }, mappings: [], overrides: [], catalogEntries: [] } }, tables: { sessions: {} } }
+      return { global: { pricing: { sync: { autoEnabled: true, intervalMs: 21600000 }, mappings: [], overrides: [], catalogEntries: [{ providerId: 'openai', modelId: 'gpt-5.5', providerName: 'OpenAI', displayName: 'GPT-5.5', currency: 'USD', input: '5', output: '30', cacheRead: '0.5', cacheWrite: '6.25', source: 'models.dev', fetchedAt: 0, tiered: false }] } }, tables: { sessions: {} } }
     },
     async putRecord(table, key, value) {
       if (!this.records[table]) this.records[table] = {}
@@ -789,4 +789,31 @@ test('waits for the persisted pricing state before serving reads and writes', as
   assert.equal(write.status, 200)
   assert.equal(write.json().pricing.sync.autoEnabled, false)
   assert.ok(storageUnit.saved.some((entry) => entry.pricing && entry.pricing.sync && entry.pricing.sync.autoEnabled === false))
+})
+
+test('full snapshot waits for the persisted pricing state before responding', async () => {
+  let releaseLoad = null
+  const loadGate = new Promise((resolve) => { releaseLoad = resolve })
+  const storageUnit = {
+    saved: [],
+    records: { sessions: {} },
+    async loadAll() {
+      await loadGate
+      return { global: { pricing: { sync: { autoEnabled: true, intervalMs: 21600000 }, mappings: [], overrides: [], catalogEntries: [{ providerId: 'openai', modelId: 'gpt-5.5', providerName: 'OpenAI', displayName: 'GPT-5.5', currency: 'USD', input: '5', output: '30', cacheRead: '0.5', cacheWrite: '6.25', source: 'models.dev', fetchedAt: 0, tiered: false }] } }, tables: { sessions: {} } }
+    },
+    async putRecord(table, key, value) {
+      if (!this.records[table]) this.records[table] = {}
+      this.records[table][key] = value
+    },
+    async deleteRecord() {},
+    async setGlobal(value) { this.saved.push(value) },
+    async close() {},
+  }
+  const app = await createApp({ withStorage: true, storage: storageUnit })
+  const pendingSnapshot = call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  releaseLoad()
+  const response = await pendingSnapshot
+  assert.equal(response.status, 200)
+  assert.equal(response.json().pricing.catalogModelCount, 1)
+  assert.equal(response.json().pricing.configured, true)
 })

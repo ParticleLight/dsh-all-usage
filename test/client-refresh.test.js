@@ -351,6 +351,7 @@ test('renders cost totals, pricing status, and models.dev settings controls', ()
   // and deleting a mapping moves (and guards) in-flight official model searches.
   assert.doesNotMatch(source, /draft\.sync\.autoEnabled = uiState\.pricingAutoSync/)
   assert.ok(source.includes('pricingSearchEpochRef.current += 1'))
+  assert.match(source, /const closePricingPanel = \(\) => \{[\s\S]*?pricingSearchEpochRef\.current \+= 1/)
   assert.ok(source.includes('setPricingModelSearchOptions((prev) => shiftIndexedMap(prev, index))'))
   assert.ok(source.includes('if (pricingSearchEpochRef.current !== searchEpoch) return'))
   assert.ok(source.includes('refreshPricingPanelRef.current'))

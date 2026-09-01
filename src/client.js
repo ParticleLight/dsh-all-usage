@@ -2354,6 +2354,12 @@ window.__ModuleLoader__.load({
       }
       const closePricingPanel = () => {
         if (pricingSaving || pricingSyncing || pricingSyncSaving) return
+        // In-flight official-model searches must not reach a reopened panel:
+        // bump the row generation and cancel their pending timers.
+        pricingSearchEpochRef.current += 1
+        const timers = pricingModelSearchTimerRef.current
+        for (const key of Object.keys(timers)) clearTimeout(timers[key])
+        pricingModelSearchTimerRef.current = {}
         pricingGate.next()
         setPricingLoading(false)
         setPricingOpen(false)

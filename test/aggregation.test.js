@@ -1494,3 +1494,100 @@ test('keeps fractional-hour DST fall-back buckets without losing events', async 
     else process.env.TZ = previousTz
   }
 })
+
+test('labels Lord Howe spring-forward rows with the true hour boundary', async () => {
+  const previousTz = process.env.TZ
+  process.env.TZ = 'Australia/Lord_Howe'
+  try {
+    // 2025-10-05 Lord Howe clocks jump 02:00 (+10:30) to 03:00 (+11).
+    const springEvent = Date.UTC(2025, 9, 4, 16, 15) // 03:15 +11
+    const app = await createApp({
+      workspaces: [{ id: 'ws-lh2', path: 'C:\\lh2', title: 'Lh2' }],
+      sessions: [{ header: { id: 's-lh2', cwd: 'C:\\lh2' } }],
+      events: new Map([['s-lh2', [
+        usageEvent(springEvent, 1, 1, { inputTokens: 3, outputTokens: 0 }, 1),
+      ]]]),
+    })
+    let snapshot = null
+    for (let i = 0; i < 200; i += 1) {
+      snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+      if (snapshot.json().scan.done) break
+      await new Promise((resolve) => setImmediate(resolve))
+    }
+    const request = makeRequest('GET', { host: '127.0.0.1:3080' })
+    request.url = '/api/all-usage/query?start=2025-10-05&end=2025-10-05&utc=0'
+    const query = (await call(app, '/api/all-usage/query', request)).json()
+    const row = query.hourly.find((candidate) => candidate.calls > 0)
+    assert.equal(query.totals.input, 3)
+    assert.equal(row.time, Date.UTC(2025, 9, 4, 16, 0))
+  } finally {
+    if (previousTz === undefined) delete process.env.TZ
+    else process.env.TZ = previousTz
+  }
+})
+
+test('mixed-workspace records are never tail-folded on flush', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const validCost = { status: 'priced', pricingMode: 'official-model', currency: 'USD', source: 'catalog', pricingModel: 'deepseek-chat', providerId: 'deepseek', inputTokenSemantics: 'fresh', multiplier: '1', billableInputTokens: 10, billableOutputTokens: 20, rates: { input: '0.27', output: '1.1', cacheRead: '0.07', cacheWrite: '0.27' }, breakdown: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, baseTotal: '0', total: '0', reason: '', tiered: false, reasoningRateAvailable: false, selectedTier: { type: 'context', size: 0 } }
+  const identity = { identityKey: 'deepseek / deepseek-chat', provider: 'deepseek', requestedModel: 'deepseek-chat', actualModel: 'deepseek-chat', label: 'deepseek-chat', legacy: false }
+  const mixed = { version: 3, sessionId: 's-flush-mixed', workspaceId: 'ws-b', lastSeq: 3, lastRevision: 'r1', updatedAt: 1000, turns: [{ key: '3', seq: 3, time: eventTime, workspaceId: 'ws-a', turn: 1, identity }], usage: [{ key: 's-flush-mixed:1:2', seq: 2, time: eventTime, workspaceId: 'ws-a', identity, modelId: 'deepseek-chat', turn: 1, step: 1, values: { input: 100, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: validCost }], lastIdentity: identity }
+  const app = await createApp({
+    withStorage: true,
+    ledgerSeed: { 's-flush-mixed': mixed },
+    workspaces: [{ id: 'ws-b', path: 'C:\\mixed-flush', title: 'MixedFlush' }],
+    sessions: [],
+    events: new Map(),
+  })
+  await waitForScan(app)
+  // Appending A-workspace events must rebuild the whole record instead of
+  // copying the historical B-workspace items into the flushed row.
+  await app.listeners['session/flush'][0]({ id: 's-flush-mixed', header: { id: 's-flush-mixed', cwd: 'C:\\mixed-flush' }, events: [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 8, outputTokens: 9 }, 2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    usageEvent(eventTime, 2, 1, { inputTokens: 11, outputTokens: 12 }, 4),
+    { seq: 5, time: eventTime, type: 'turn/end', data: { turn: 2 } },
+  ] })
+  await waitForLedgerWrite()
+  const record = app.storageUnit.records.sessions['s-flush-mixed']
+  assert.equal(record.usage.length, 2)
+  assert.equal(record.turns.length, 2)
+  for (const item of record.usage) assert.equal(item.workspaceId, 'ws-b')
+  for (const turn of record.turns) assert.equal(turn.workspaceId, 'ws-b')
+  assert.equal(record.usage.reduce((sum, item) => sum + item.values.input, 0), 19)
+})
+
+test('non-finite sequence numbers cannot freeze later flushes', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-seq', path: 'C:\\seq', title: 'Seq' }],
+    sessions: [],
+    events: new Map(),
+  })
+  await waitForScan(app)
+  const flush = app.listeners['session/flush'][0]
+  // An unsafe tail sequence must not produce lastSeq=Infinity.
+  await flush({ id: 's-seq', header: { id: 's-seq', cwd: 'C:\\seq' }, events: [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 1, outputTokens: 1 }, 2),
+    usageEvent(eventTime, 2, 1, { inputTokens: 2, outputTokens: 2 }, Number.POSITIVE_INFINITY),
+  ] })
+  await waitForLedgerWrite()
+  const firstRecord = app.storageUnit.records.sessions['s-seq']
+  assert.equal(firstRecord.lastSeq, 2)
+  assert.ok(Number.isSafeInteger(firstRecord.lastSeq))
+  // A later normal flush still works and keeps finite sequences.
+  await flush({ id: 's-seq', header: { id: 's-seq', cwd: 'C:\\seq' }, events: [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 5, outputTokens: 6 }, 2),
+    { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    usageEvent(eventTime, 2, 1, { inputTokens: 7, outputTokens: 8 }, 4),
+    { seq: 5, time: eventTime, type: 'turn/end', data: { turn: 2 } },
+  ] })
+  await waitForLedgerWrite()
+  const record = app.storageUnit.records.sessions['s-seq']
+  assert.equal(record.lastSeq, 5)
+  assert.equal(record.usage.length, 2)
+  for (const item of record.usage) assert.ok(Number.isSafeInteger(item.seq))
+})

@@ -26,7 +26,12 @@ All notable changes to `dsh-all-usage` are documented here.
 - Refresh the open cost-settings panel when the pricing revision changes, merging fresh catalog data while preserving unsaved local mappings and overrides.
 - Invalidate every in-flight official-model search when a mapping row is deleted (row generation bump), so a stale response can never populate a shifted row even when per-index sequence numbers collide.
 - Skip the pricing revision bump when a catalog sync succeeds with an unchanged catalog hash and no newly priced usage.
-- Round hourly bucket indices against the requested range so fractional-hour zone offsets (Lord Howe) never drop or merge events.
+- Round hourly bucket indices against the requested range so fractional-hour zone offsets (Lord Howe) never drop or merge events, and emit real bucket boundaries as trend labels so spring-forward hours carry the true 03:00 label instead of drifting 30 minutes off.
+- Mark mixed-workspace ledger records as unfoldable so both the scan tail path and session flush rebuild them instead of persisting historical items under the wrong workspace.
+- Exclude the per-fetch fetchedAt stamp from the catalog content hash, so syncing identical models.dev contents keeps pricingRevision (and query caches) stable.
+- Wait for the persisted pricing and ledger state before serving the full snapshot, so the first payload cannot embed a default empty pricing summary.
+- Bump the official-model search row generation when the settings panel closes, so in-flight responses cannot populate a reopened panel.
+- Require safe-integer event sequences everywhere sequences gate folding or fast-forward comparisons, so contract-external values such as Infinity cannot freeze later flushes.
 - Keep the server-persisted pricing auto-sync flag as the single truth: the client stops seeding the draft from its own local UI state, so saving unrelated settings cannot revert the server value.
 - Move in-flight official-model search state (timers, sequence guards, results) when mappings are deleted, so a stale response can no longer populate a shifted row.
 - Restrict pricing revision bumps to cost-affecting changes: sync attempts and failed attempts no longer invalidate scoped query caches or records cursors, while the client treats pricing changes as a full snapshot refresh so summary costs stay fresh.
