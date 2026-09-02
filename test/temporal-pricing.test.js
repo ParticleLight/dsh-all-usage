@@ -711,3 +711,36 @@ test('a full live resync clears stale request contexts after a history rewrite',
   assert.equal(outcome.pricingTimeSource, 'usage-event')
   assert.equal(outcome.pricingAt, MONDAY_OFF)
 })
+test('snapshots priced under a retired policy are migrated once', async () => {
+  // A usage instant BEFORE the official effective start priced under the old
+  // build (effectiveFrom 0) must fail closed after the policy archive changed.
+  const beforeEffective = Date.UTC(2026, 7, 15, 2, 0, 0)
+  const retiredCost = {
+    schemaVersion: 2, status: 'priced', pricingMode: 'official-model', currency: 'USD', source: 'catalog', pricingModel: 'deepseek-v4-flash', providerId: 'deepseek', inputTokenSemantics: 'fresh', multiplier: '1', billableInputTokens: 1000000, billableOutputTokens: 0,
+    pricingAt: beforeEffective, pricingTimeSource: 'usage-event', pricingBand: 'peak', pricingTimezone: 'UTC', pricingPolicyId: 'deepseek-v4-2026-08-pricing', pricingPolicyHash: 'stale-hash-from-an-earlier-build', temporalApplicable: true, temporalExemptReason: null,
+    rates: { input: '0.22', output: '0.66', cacheRead: '0.007', cacheWrite: '0' }, breakdown: { input: '0.44', output: '0', cacheRead: '0', cacheWrite: '0' }, baseTotal: '0.44', total: '0.44', reason: '', tiered: false,
+  }
+  const identity = { identityKey: 'deepseek / deepseek-v4-flash', provider: 'deepseek', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', label: 'deepseek-v4-flash', legacy: false }
+  const record = {
+    version: 3, sessionId: 's-retired', workspaceId: 'ws-ret', lastSeq: 2, lastRevision: 'r1', updatedAt: 1000,
+    turns: [{ key: 's-retired:turn:1', seq: 1, time: beforeEffective, workspaceId: 'ws-ret', turn: 1, identity }],
+    usage: [{ key: 's-retired:step:1:1', seq: 2, time: beforeEffective, workspaceId: 'ws-ret', identity, modelId: 'deepseek-v4-flash', turn: 1, step: 1, values: { input: 1000000, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: retiredCost }],
+    lastIdentity: identity,
+  }
+  const app = await createApp({
+    withStorage: true,
+    ledgerSeed: { 's-retired': record },
+    workspaces: [{ id: 'ws-ret', path: 'C:\\ret', title: 'Ret' }],
+    sessions: [{ header: { id: 's-retired', cwd: 'C:\\ret' } }],
+    readSession: async () => { throw new Error('read failed') },
+  })
+  await waitForScan(app)
+  const snap = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  const token = snap.requestToken
+  await postPricing(app, token, { pricing: { catalogEntries: [V4_FLASH] }, backfill: true })
+  await waitForScan(app, (body) => body.totals.cost.unsupportedCalls === 1)
+  const stored = app.storageUnit.records.sessions['s-retired'].usage[0].cost
+  assert.equal(stored.status, 'unsupported')
+  assert.equal(stored.reason, 'temporal-price-history-unavailable')
+  assert.equal(stored.total, '0')
+})
