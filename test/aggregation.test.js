@@ -1025,7 +1025,7 @@ test('syncs models.dev pricing, backfills unpriced rows, and keeps cost consiste
   full = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
   const body = full.json()
   assert.equal(body.usageSchemaVersion, 3)
-  assert.equal(body.costSchemaVersion, 1)
+  assert.equal(body.costSchemaVersion, 2)
   const compactTieredModel = body.pricing.usedModels.find((model) => model.pricingModel === 'gpt-5.5')
   assert.equal(compactTieredModel.tiered, true)
   assert.equal(compactTieredModel.tierCount, 1)

@@ -242,6 +242,21 @@ window.__ModuleLoader__.load({
       const numeric = Number(value.total)
       return Number.isFinite(numeric) ? money(value.currency, numeric, language) : value.currency + ' ' + value.total
     }
+    function costBandLabel(row, language) {
+      const cost = row && row.cost && typeof row.cost === 'object' ? row.cost : {}
+      if (cost.pricingBand === 'peak') return language === 'en' ? 'Peak' : '峰时'
+      if (cost.pricingBand === 'off-peak') return language === 'en' ? 'Off-peak' : '谷时'
+      if (cost.temporalExemptReason === 'route-not-official') return language === 'en' ? 'static (non-first-party)' : '静态价（非官方直连）'
+      if (cost.temporalExemptReason === 'no-temporal-profile') return language === 'en' ? 'static (no band plan)' : '静态价（无峰谷计划）'
+      return '—'
+    }
+    function costPolicyLabel(row, language) {
+      const cost = row && row.cost && typeof row.cost === 'object' ? row.cost : {}
+      const parts = []
+      if (cost.pricingPolicyId) parts.push(cost.pricingPolicyId)
+      if (cost.pricingTimezone === 'UTC' && Number.isFinite(cost.pricingAt)) parts.push((language === 'en' ? 'at ' : '计费时刻 ') + new Date(cost.pricingAt).toISOString().slice(0, 16).replace('T', ' ') + ' UTC')
+      return parts.length > 0 ? parts.join(' · ') : null
+    }
     function costCoverageLabel(row, language) {
       const value = costAggregate(row)
       if (value.pricedCalls > 0 && value.unpricedCalls === 0 && value.ambiguousCalls === 0 && value.unsupportedCalls === 0) return language === 'en' ? value.pricedCalls + ' priced' : value.pricedCalls + ' 次已计价'
@@ -1169,7 +1184,7 @@ window.__ModuleLoader__.load({
             React.createElement('div', { className: 'uh-record-num' }, fmtCompact(auditToken(row, 'cacheRead'))),
             React.createElement('div', { className: 'uh-record-num' }, fmtCompact(auditToken(row, 'cacheWrite'))),
             React.createElement('div', { className: 'uh-record-num' }, fmtCompact(auditToken(row, 'output'))),
-            React.createElement('div', { className: 'uh-record-num uh-cost-num' }, costDisplay(row, language)),
+            React.createElement('div', { className: 'uh-record-num uh-cost-num' }, costDisplay(row, language), row.cost && (row.cost.pricingBand === 'peak' || row.cost.pricingBand === 'off-peak') ? React.createElement('small', { className: 'uh-record-band-badge' }, row.cost.pricingBand === 'peak' ? (language === 'en' ? 'Peak' : '峰') : (language === 'en' ? 'OFF' : '谷')) : null),
             React.createElement('div', { className: 'uh-record-source' }, auditSource(row)),
           )),
         ),
@@ -1184,6 +1199,8 @@ window.__ModuleLoader__.load({
             React.createElement('span', {}, 'turn ' + (selected.turn === null || selected.turn === undefined ? '—' : selected.turn) + ' · step ' + (selected.step === null || selected.step === undefined ? '—' : selected.step)),
             React.createElement('span', {}, tr('来源：', 'Source: ') + auditSource(selected)),
             React.createElement('span', {}, tr('计价模型：', 'Pricing model: ') + (selected.cost && selected.cost.pricingModel ? selected.cost.pricingModel : tr('未计价', 'unpriced'))),
+            React.createElement('span', { className: 'uh-record-band ' + (selected.cost && selected.cost.pricingBand ? 'uh-record-band-' + selected.cost.pricingBand : '') }, tr('计费档位：', 'Billing band: ') + costBandLabel(selected, language)),
+            costPolicyLabel(selected, language) !== null ? React.createElement('span', { className: 'uh-record-band', title: (selected.cost && selected.cost.pricingPolicyHash) || '' }, tr('计费计划：', 'Plan: ') + costPolicyLabel(selected, language)) : null,
           ),
           React.createElement('div', { className: 'uh-record-token-strip' },
             ['input', 'cacheRead', 'cacheWrite', 'output', 'reasoning'].map((key) => React.createElement('div', { key }, React.createElement('span', {}, key === 'cacheRead' ? tr('缓存命中', 'Cache read') : key === 'cacheWrite' ? tr('缓存写入', 'Cache write') : key === 'reasoning' ? tr('推理', 'Reasoning') : key === 'input' ? tr('输入', 'Input') : tr('输出', 'Output')), React.createElement('strong', {}, fmtCompact(auditToken(selected, key))))),
@@ -1443,6 +1460,10 @@ window.__ModuleLoader__.load({
 .uh-record-model { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:550; }
 .uh-record-model small { display:block; overflow:hidden; color:var(--dsw-alias-label-secondary); font-size:10px; font-weight:400; text-overflow:ellipsis; white-space:nowrap; }
 .uh-record-source { color:var(--dsw-alias-label-secondary); white-space:nowrap; }
+.uh-record-band { white-space:nowrap; }
+.uh-record-band-badge { margin-left:6px; color:var(--dsw-alias-label-secondary); font-size:10px; }
+.uh-record-band-peak { color:var(--dsw-alias-warning, #a55b00); font-weight:600; }
+.uh-record-band-off-peak { color:#2e7d32; }
 .uh-records-footer { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:9px; }
 .uh-record-detail { margin-top:12px; padding:10px 11px; border-top:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-2) 42%, transparent); animation:uh-detail-in .24s ease both; }
 .uh-record-detail-head, .uh-record-detail-meta { display:flex; align-items:center; flex-wrap:wrap; gap:7px 14px; }
@@ -2927,13 +2948,14 @@ window.__ModuleLoader__.load({
                 const tiers = Array.isArray(model.tiers) ? model.tiers : []
                 const hasTierSchedule = model.tiered === true && model.tieredInvalid !== true && tiers.length > 0 && model.rates
                 const tierLabel = model.tieredInvalid === true ? tr('档位异常', 'Invalid tiers') : model.tiered === true ? tr('分层 · ', 'Tiered · ') + tiers.length : tr('固定', 'Flat')
+                const temporalLabel = model.temporalRoute === 'official' || model.temporalRoute === 'mapped' ? (language === 'en' ? '峰谷 · ' : 'Peak/off-peak · ') + 'UTC' : model.temporalRoute === 'other' ? (language === 'en' ? '静态价 · 非官方直连' : 'static · reseller') : ''
                 const schedule = hasTierSchedule ? [Object.assign({ type: 'context', size: 0 }, model.rates)].concat(tiers) : []
                 return React.createElement(React.Fragment, { key: model.identityKey },
                   React.createElement('tr', {},
                     React.createElement('td', { className: 'uh-pricing-model-name', title: model.model }, model.model || tr('未知模型', 'Unknown model')),
                     React.createElement('td', { title: model.reason || '' }, React.createElement('span', { className: 'uh-pricing-status uh-pricing-status-' + (model.status || 'unpriced') }, pricingStatusLabel(model.status || 'unpriced', language))),
                     React.createElement('td', { className: 'uh-pricing-model-target', title: model.pricingModel || '' }, model.pricingModel || tr('未匹配', 'No match')),
-                    React.createElement('td', {}, React.createElement('span', { className: 'uh-pricing-tier-badge' + (model.tiered === true ? '' : ' uh-flat') }, tierLabel)),
+                    React.createElement('td', {}, React.createElement('span', { className: 'uh-pricing-tier-badge' + (model.tiered === true ? '' : ' uh-flat'), title: model.temporalPolicyId || '' }, tierLabel + (temporalLabel !== '' ? ' · ' + temporalLabel : ''))),
                     React.createElement('td', { className: 'uh-pricing-model-rate' }, model.status === 'priced' && model.rates ? model.rates.input : '—'),
                     React.createElement('td', { className: 'uh-pricing-model-rate' }, model.status === 'priced' && model.rates ? model.rates.output : '—'),
                     React.createElement('td', { className: 'uh-pricing-model-rate' }, model.status === 'priced' && model.rates ? model.rates.cacheRead : '—'),
@@ -3361,7 +3383,7 @@ window.__ModuleLoader__.load({
           ),
           React.createElement('div', { className: 'uh-token-semantics' },
             React.createElement(LineIcon, { name: 'cache', size: 16 }),
-            tr('总处理 Token = 输入 + 输出 + 缓存读写 + 推理。缓存命中代表复用上下文，不等于新生成 Token 或实际费用。', 'Total tokens processed = input + output + cache reads/writes + reasoning. Cache hits represent reused context; they are not newly generated tokens or actual cost.'),
+            tr('总处理 Token = 输入 + 输出 + 缓存读写 + 推理。缓存命中代表复用上下文，不等于新生成 Token 或实际费用。成本按事件发生时刻与官方价目估算，不等同于供应商账单。', 'Total tokens processed = input + output + cache reads/writes + reasoning. Cache hits represent reused context; they are not newly generated tokens or actual cost. Costs are estimated at event time from official price lists and do not equal the provider invoice.'),
           ),
           trendPanel,
           React.createElement(MemoUsageHeatmap, {

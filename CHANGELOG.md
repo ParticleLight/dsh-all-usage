@@ -4,6 +4,16 @@ All notable changes to `dsh-all-usage` are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- DeepSeek peak/off-peak billing as a first-class, versioned **temporal pricing plan**: the cost schema is v2, and each cost snapshot records the billing instant, its time source (request-context / usage-event), the UTC band (peak / off-peak), the policy id, and a policy hash. Request logs show the band and UTC billing time, and the cost settings panel marks which usage models follow the DeepSeek band plan.
+- Built-in first-party DeepSeek profiles (deepseek-v4-flash, deepseek-v4-flash-vision-exp, deepseek-v4-pro) with explicit per-band rates for the UTC windows 01:00-04:00 and 06:00-10:00 on weekdays; the peak rates are stored as data, never derived as an automatic discount rule.
+- UTC band boundaries are half-open: 00:59:59 off-peak, 01:00:00 peak, 03:59:59 peak, 04:00:00 off-peak, 06:00:00 peak, 10:00:00 off-peak; weekends are off-peak. Band selection uses UTC fields only, so viewer timezones, DST, and fractional-hour zones cannot change a result.
+- Deterministic reuse: a later usage sample for the same turn/step reuses the previous cost snapshot only when identity, token buckets, band, policy id/hash, and applicability all match, so a message crossing a peak boundary never inherits the chunk price.
+- Requests preferred as the billing instant when the request/context time matches the usage turn/step; otherwise the usage event time is the auditable fallback. Both are persisted in the snapshot.
+- Controlled DeepSeek temporal reconciliation: first-party DeepSeek snapshots are re-priced against the usage instant on baseline/backfill/sync, v1 snapshots are migrated to the v2 shape in memory and in the persisted ledger, and a plan whose effective window does not cover the instant fails closed as unsupported (temporal-price-history-unavailable) instead of guessing.
+- Route safety boundary: the band plan applies only to first-party deepseek routes or routes explicitly mapped to the DeepSeek official entry; reseller routes (OpenRouter and other gateways) keep the static official price and are labelled route-not-official.
+
 ## [1.1.3] - 2026-09-01
 
 ### Added
