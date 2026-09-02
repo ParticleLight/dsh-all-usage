@@ -41,15 +41,16 @@ function makeRequest(method, headers = {}, body = '') {
   }
 }
 
-async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride, readSession: readSessionOverride, ledgerSeed = {} } = {}) {
+async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride, readSession: readSessionOverride, ledgerSeed = {}, storage: storageUnitOverride } = {}) {
   const routes = new Map()
   const cleanups = []
   const listeners = {}
-  const storageUnit = {
+  const storageUnit = storageUnitOverride || {
     saved: [],
+    global: {},
     records: { sessions: {} },
     async loadAll() {
-      return { global: {}, tables: this.records }
+      return { global: this.global || {}, tables: this.records }
     },
     async putRecord(table, key, value) {
       if (!this.records[table]) this.records[table] = {}
@@ -60,6 +61,7 @@ async function createApp({ key = 'test-key', workspaces = [], withStorage = fals
     },
     async setGlobal(value) {
       this.saved.push(value)
+      this.global = value
     },
     async close() {},
   }
@@ -688,14 +690,16 @@ test('a full live resync clears stale request contexts after a history rewrite',
   let cost = (await call(app, '/api/all-usage/records', request)).json().items[0].cost
   assert.equal(cost.pricingBand, 'peak')
   assert.equal(cost.pricingTimeSource, 'request-context')
-  // History rewrite removes the request/context; a sequence gap forces a full
-  // live resync, which must drop the stale peak context.
+  // History rewrite removes the request/context; the rewrite becomes
+  // authoritative once the snapshot contains the triggering event (tail seq
+  // matches), so the live resync drops the stale peak context.
   source = [
     usageEvent(MONDAY_OFF, 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 1),
+    { seq: 3, time: MONDAY_OFF, type: 'turn/end', data: { turn: 1 } },
   ]
-  app.listeners['session/event'][0]({ id: 's-rew3', header: { cwd: 'C:\\rew3' } }, { seq: 7, time: MONDAY_OFF, type: 'turn/end', data: { turn: 2 } })
+  app.listeners['session/event'][0]({ id: 's-rew3', header: { cwd: 'C:\\rew3' } }, { seq: 3, time: MONDAY_OFF, type: 'turn/end', data: { turn: 1 } })
   let outcome = null
-  for (let i = 0; i < 80; i += 1) {
+  for (let i = 0; i < 100; i += 1) {
     await new Promise((resolve) => setImmediate(resolve))
     request = makeRequest('GET', { host: '127.0.0.1:3080' })
     request.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText + '&utc=0&limit=10'
@@ -710,6 +714,83 @@ test('a full live resync clears stale request contexts after a history rewrite',
   assert.equal(outcome.pricingBand, 'off-peak')
   assert.equal(outcome.pricingTimeSource, 'usage-event')
   assert.equal(outcome.pricingAt, MONDAY_OFF)
+})
+
+test('an authoritative live resync removes usage deleted by a rewritten history', async () => {
+  let source = [
+    { seq: 0, time: MONDAY_PEAK, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 1, step: 1 } },
+    usageEvent(MONDAY_OFF, 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 1),
+  ]
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-del', path: 'C:\\del', title: 'Del' }],
+    sessions: [{ header: { id: 's-del', cwd: 'C:\\del' } }],
+    events: new Map(),
+    readSession: async () => ({ events: source }),
+    snapshots: [{ header: { id: 's-del' }, revision: 'r1' }],
+  })
+  await waitForScan(app)
+  const snap = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  const token = snap.requestToken
+  await postPricing(app, token, { pricing: { catalogEntries: [V4_FLASH] }, backfill: true })
+  await waitForScan(app, (body) => body.totals.cost.pricedCalls === 1)
+  let snapNow = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.equal(snapNow.totals.input, 1000000)
+  // The history rewrite deletes every usage row; once the authoritative
+  // snapshot carries the triggering tail event (which makes the read complete
+  // and triggers the resync through the sequence gap), the aggregate must drop
+  // the removed usage.
+  source = [
+    { seq: 3, time: MONDAY_OFF, type: 'turn/end', data: { turn: 1 } },
+  ]
+  app.listeners['session/event'][0]({ id: 's-del', header: { cwd: 'C:\\del' } }, { seq: 3, time: MONDAY_OFF, type: 'turn/end', data: { turn: 1 } })
+  let result = null
+  for (let i = 0; i < 100; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+    const body = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+    if (body.totals.input === 0) { result = body; break }
+  }
+  assert.ok(result !== null)
+  assert.equal(result.totals.input, 0)
+  assert.equal(result.totals.cost.pricedCalls, 0)
+  const dateText = snap.byDay[0].date
+  const request = makeRequest('GET', { host: '127.0.0.1:3080' })
+  request.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText + '&utc=0&limit=10'
+  assert.equal((await call(app, '/api/all-usage/records', request)).json().items.length, 0)
+})
+
+test('a live resync cursor never keeps the pre-rewrite tail', async () => {
+  let source = [
+    { seq: 0, time: MONDAY_OFF, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 1, step: 1 } },
+  ]
+  const app = await createApp({
+    workspaces: [{ id: 'ws-cur', path: 'C:\\cur', title: 'Cur' }],
+    sessions: [{ header: { id: 's-cur', cwd: 'C:\\cur' } }],
+    events: new Map(),
+    readSession: async () => ({ events: source }),
+  })
+  await waitForScan(app)
+  const before = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.equal(before.totals.input, 0)
+  // The appended history arrives together with the triggering tail event; the
+  // resync must fold it all instead of trusting the old cursor of 0.
+  source = [
+    usageEvent(MONDAY_OFF, 1, 1, { inputTokens: 60, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 1),
+    usageEvent(MONDAY_OFF, 2, 1, { inputTokens: 60, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 2),
+    usageEvent(MONDAY_OFF, 3, 1, { inputTokens: 60, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 3),
+    usageEvent(MONDAY_OFF, 4, 1, { inputTokens: 60, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 4),
+    usageEvent(MONDAY_OFF, 5, 1, { inputTokens: 60, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 5),
+    usageEvent(MONDAY_OFF, 6, 1, { inputTokens: 60, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 6),
+    { seq: 7, time: MONDAY_OFF, type: 'turn/end', data: { turn: 6 } },
+  ]
+  app.listeners['session/event'][0]({ id: 's-cur', header: { cwd: 'C:\\cur' } }, { seq: 7, time: MONDAY_OFF, type: 'turn/end', data: { turn: 6 } })
+  let total = null
+  for (let i = 0; i < 100; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+    const body = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+    if (body.totals.input === 360) { total = 360; break }
+  }
+  assert.equal(total, 360)
 })
 test('snapshots priced under a retired policy are migrated once', async () => {
   // A usage instant BEFORE the official effective start priced under the old
@@ -743,4 +824,157 @@ test('snapshots priced under a retired policy are migrated once', async () => {
   assert.equal(stored.status, 'unsupported')
   assert.equal(stored.reason, 'temporal-price-history-unavailable')
   assert.equal(stored.total, '0')
+})
+
+test('an invalid temporal config stays fail-closed across persistence and restart', async () => {
+  const invalidEntry = Object.assign({}, V4_FLASH, { temporalPricing: { policyId: 'bad-plan', timezone: 'Asia/Shanghai', effectiveFrom: 0, effectiveUntil: null, defaultPlan: null, rules: [{ id: 'peak', weekdays: [1, 2, 3, 4, 5], windows: [{ startMinute: 60, endMinute: 240 }], rates: { input: '0.44', output: '1.32', cacheRead: '0.014', cacheWrite: '0' } }] } })
+  const first = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-inv2', path: 'C:\\inv2', title: 'Inv2' }],
+    sessions: [{ header: { id: 's-inv2', cwd: 'C:\\inv2' } }],
+    events: new Map([['s-inv2', [
+      usageEvent(MONDAY_PEAK, 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 1),
+    ]]]),
+  })
+  await waitForScan(first)
+  const snap = (await call(first, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  const token = snap.requestToken
+  await postPricing(first, token, { pricing: { catalogEntries: [invalidEntry] }, backfill: true })
+  let body = (await call(first, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.equal(body.totals.cost.unsupportedCalls, 1)
+  await waitForLedgerWrite()
+  // Restart over the same storage: the invalid sentinel must survive the
+  // serialize → normalize cycle and the built-in profile must not return.
+  const second = await createApp({
+    withStorage: true,
+    storage: first.storageUnit,
+    workspaces: [{ id: 'ws-inv2', path: 'C:\\inv2', title: 'Inv2' }],
+    sessions: [{ header: { id: 's-inv2', cwd: 'C:\\inv2' } }],
+    events: new Map([['s-inv2', [
+      usageEvent(MONDAY_PEAK, 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 1),
+    ]]]),
+  })
+  await waitForScan(second, (pred) => pred.totals.cost.unsupportedCalls === 1)
+  body = (await call(second, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.equal(body.totals.cost.unsupportedCalls, 1)
+  assert.equal(body.totals.cost.pricedCalls, 0)
+  const request = makeRequest('GET', { host: '127.0.0.1:3080' })
+  request.url = '/api/all-usage/records?start=' + snap.byDay[0].date + '&end=' + snap.byDay[0].date + '&utc=0&limit=10'
+  const cost = (await call(second, '/api/all-usage/records', request)).json().items[0].cost
+  assert.equal(cost.status, 'unsupported')
+  assert.equal(cost.reason, 'temporal-config-invalid')
+})
+
+test('a same-hash snapshot whose instant left the policy window fails closed', async () => {
+  const beforeWindow = Date.UTC(2026, 7, 17, 2, 0, 0)
+  // Archive: one policy ending 08-18. The snapshot was priced under the same
+  // policy id/hash but its instant (08-21) now lies in a history gap.
+  const profile = peakProfile()
+  const policy = profile.policies[0]
+  const ownHash = 'same-policy-hash'
+  const lateCost = {
+    schemaVersion: 2, status: 'priced', pricingMode: 'official-model', currency: 'USD', source: 'manual', pricingModel: 'deepseek-v4-flash', providerId: 'deepseek', inputTokenSemantics: 'fresh', multiplier: '1', billableInputTokens: 1000000, billableOutputTokens: 0,
+    pricingAt: Date.UTC(2026, 7, 21, 2, 0, 0), pricingTimeSource: 'usage-event', pricingBand: 'peak', pricingTimezone: 'UTC', pricingPolicyId: policy.policyId, pricingPolicyHash: ownHash, temporalApplicable: true, temporalExemptReason: null,
+    rates: { input: '0.22', output: '0.66', cacheRead: '0.007', cacheWrite: '0' }, breakdown: { input: '0.44', output: '0', cacheRead: '0', cacheWrite: '0' }, baseTotal: '0.44', total: '0.44', reason: '', tiered: false,
+  }
+  const identity = { identityKey: 'deepseek / deepseek-v4-flash', provider: 'deepseek', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', label: 'deepseek-v4-flash', legacy: false }
+  const record = {
+    version: 3, sessionId: 's-gap2', workspaceId: 'ws-gap2', lastSeq: 2, lastRevision: 'r1', updatedAt: 1000,
+    turns: [{ key: 's-gap2:turn:1', seq: 1, time: beforeWindow, workspaceId: 'ws-gap2', turn: 1, identity }],
+    usage: [{ key: 's-gap2:step:1:1', seq: 2, time: beforeWindow, workspaceId: 'ws-gap2', identity, modelId: 'deepseek-v4-flash', turn: 1, step: 1, values: { input: 1000000, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: lateCost }],
+    lastIdentity: identity,
+  }
+  const app = await createApp({
+    withStorage: true,
+    ledgerSeed: { 's-gap2': record },
+    workspaces: [{ id: 'ws-gap2', path: 'C:\\gap2', title: 'Gap2' }],
+    sessions: [{ header: { id: 's-gap2', cwd: 'C:\\gap2' } }],
+    readSession: async () => { throw new Error('read failed') },
+  })
+  await waitForScan(app)
+  const snap = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  const token = snap.requestToken
+  // Provide a windowed plan (08-16 16:00 UTC -> 08-18 00:00 UTC) that no longer
+  // covers the snapshot instant of 08-21.
+  await postPricing(app, token, { pricing: { catalogEntries: [Object.assign({}, V4_FLASH, { temporalPricing: { policyId: policy.policyId, timezone: 'UTC', effectiveFrom: DEEPSEEK_EFFECTIVE, effectiveUntil: Date.UTC(2026, 7, 18, 0, 0, 0), defaultPlan: null, rules: [{ id: 'peak', weekdays: [1, 2, 3, 4, 5], windows: [{ startMinute: 60, endMinute: 240 }], rates: { input: '0.44', output: '1.32', cacheRead: '0.014', cacheWrite: '0' } }] } })] }, backfill: true })
+  await waitForScan(app, (body) => body.totals.cost.unsupportedCalls === 1)
+  const stored = app.storageUnit.records.sessions['s-gap2'].usage[0].cost
+  assert.equal(stored.status, 'unsupported')
+  assert.equal(stored.reason, 'temporal-price-history-unavailable')
+})
+
+test('a same-band update refreshes the pricingAt audit metadata', async () => {
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-meta', path: 'C:\\meta', title: 'Meta' }],
+    sessions: [{ header: { id: 's-meta', cwd: 'C:\\meta' } }],
+    events: new Map([['s-meta', [
+      { seq: 1, time: MONDAY_EDGE_START, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 1, step: 1 } },
+      usageChunkEvent(MONDAY_EDGE_START, 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 2),
+    ]]]),
+  })
+  await waitForScan(app)
+  const snap = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  const token = snap.requestToken
+  await postPricing(app, token, { pricing: { catalogEntries: [V4_FLASH] }, backfill: true })
+  await waitForScan(app, (body) => body.totals.cost.pricedCalls === 1)
+  const dateText = snap.byDay[0].date
+  const readRecord = async () => {
+    const request = makeRequest('GET', { host: '127.0.0.1:3080' })
+    request.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText + '&utc=0&limit=10'
+    return (await call(app, '/api/all-usage/records', request)).json().items[0].cost
+  }
+  let cost = await readRecord()
+  assert.equal(cost.pricingAt, MONDAY_EDGE_START)
+  assert.equal(cost.pricingBand, 'peak')
+  // Replacement with the same turn/step but a later context (still peak): the
+  // audit instant must move to the new context even though the band unchanged.
+  const laterContext = Date.UTC(2026, 7, 17, 3, 30, 0)
+  app.listeners['session/event'][0]({ id: 's-meta', header: { cwd: 'C:\\meta' } }, { seq: 3, time: laterContext, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 1, step: 1 } })
+  app.listeners['session/event'][0]({ id: 's-meta', header: { cwd: 'C:\\meta' } }, usageChunkEvent(laterContext, 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 4))
+  await new Promise((resolve) => setTimeout(resolve, 60))
+  const meta = await readRecord()
+  assert.equal(meta.pricingAt, laterContext)
+  assert.equal(meta.pricingBand, 'peak')
+  assert.equal(meta.total, '0.44')
+})
+
+test('context archives evict true LRU and stay bounded across restart', async () => {
+  const time = MONDAY_OFF
+  const events = []
+  for (let index = 1; index <= 512; index += 1) {
+    events.push({ seq: index - 1, time, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: index, step: 1 } })
+  }
+  // Rewrite context:1 (LRU touch) then add context:513: the archive must keep
+  // context:1 and evict context:2 instead of the FIFO head.
+  events.push({ seq: 512, time, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 1, step: 1 } })
+  events.push({ seq: 513, time, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 513, step: 1 } })
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-lru', path: 'C:\\lru', title: 'Lru' }],
+    sessions: [{ header: { id: 's-lru', cwd: 'C:\\lru' } }],
+    events: new Map([['s-lru', events]]),
+    snapshots: [{ header: { id: 's-lru' }, revision: 'r1' }],
+  })
+  await waitForScan(app)
+  await waitForLedgerWrite()
+  const archive = app.storageUnit.records.sessions['s-lru'].contextTimes
+  const keys = archive.map((entry) => entry.key)
+  assert.equal(archive.length, 512)
+  assert.ok(keys.includes('context:1:1'))
+  assert.ok(keys.includes('context:513:1'))
+  assert.ok(!keys.includes('context:2:1'))
+  // Restart: the normalized archive stays bounded and keeps the same entries.
+  const second = await createApp({
+    withStorage: true,
+    storage: app.storageUnit,
+    workspaces: [{ id: 'ws-lru', path: 'C:\\lru', title: 'Lru' }],
+    sessions: [{ header: { id: 's-lru', cwd: 'C:\\lru' } }],
+    events: new Map([['s-lru', events]]),
+    snapshots: [{ header: { id: 's-lru' }, revision: 'r1' }],
+  })
+  await waitForScan(second)
+  const secondArchiveKeys = second.storageUnit.records.sessions['s-lru'].contextTimes.map((entry) => entry.key)
+  assert.equal(secondArchiveKeys.length, 512)
+  assert.ok(secondArchiveKeys.includes('context:1:1'))
 })

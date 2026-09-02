@@ -21,6 +21,14 @@ All notable changes to `dsh-all-usage` are documented here.
 - Support an ordered policy archive (policies: [...]) with non-overlapping effective windows, reject overlapping rules across rules (JSON array order can never decide a price), keep an invalid temporal config visible and fail closed instead of silently falling back to the built-in profile, and compare temporal plans in the duplicate-candidate check so conflicting band plans resolve ambiguous.
 - Include pricingAt, pricingTimeSource, band, policy id and policy hash in the reconciliation equivalence check and in the CSV audit export.
 
+- Persist the invalid temporal-config sentinel through the serialize/normalize cycle: a rejected temporalPricing edit stays fail-closed across restarts instead of re-enabling the built-in DeepSeek profile.
+- Rebuild a session atomically on authoritative live resyncs: usage samples, turn records, date indexes and cost aggregates are removed before the snapshot is folded, so usage deleted by a rewritten history disappears from the aggregate (lagging snapshots keep upsert semantics until the follow-up resync aligns).
+- Base the live resync cursor on the snapshot tail (merged with an absorbed fallback event) instead of the previous cursor, so truncated or rewritten history cannot skip over missing events that arrive later.
+- Accept deepseek-official as a first-party catalog provider in the official provider rules, so its entries price and follow the band plan like deepseek.
+- Validate that a priced snapshot's instant is still covered and band-consistent when deciding whether a policy still matches: snapshots that slipped into a gap (same id/hash, window moved) fail closed instead of staying priced.
+- Include pricingAt and pricingTimeSource in the live/incremental reuse check, so audit metadata refreshes when the request instant or its source changes even within one band.
+- Use real LRU eviction (delete + set) for the bounded request-context archive, applying the same 512-entry cap to the live fold, the persisted ledger, and deserialization.
+
 ## [1.1.3] - 2026-09-01
 
 ### Added
