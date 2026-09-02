@@ -169,6 +169,7 @@ window.__ModuleLoader__.load({
     const MODEL_ICON_TABLE = Array.isArray(MODEL_ICONS) ? MODEL_ICONS : []
     const MODEL_ICON_BY_KEY = new Map(MODEL_ICON_TABLE.map((icon) => [icon.key, icon]))
     const MODEL_ICON_CACHE = new Map()
+    const MAX_MODEL_ICON_CACHE = 2000
     function normalizeIconModel(value) {
       if (typeof value !== 'string') return ''
       let text = value.trim().toLowerCase()
@@ -182,6 +183,22 @@ window.__ModuleLoader__.load({
       for (const icon of MODEL_ICON_TABLE) if (icon.providers.includes(normalized)) return icon
       return null
     }
+    /**
+     * A prefix matches only on a token boundary: a prefix that already ends in a
+     * separator matches directly, otherwise the next character must be a
+     * separator or a digit-to-letter style break. This keeps 'o3-mini' on
+     * OpenAI while 'o3x' and 'o10-preview' stay neutral.
+     */
+    function modelPrefixMatches(model, prefix) {
+      if (prefix === '' || !model.startsWith(prefix)) return false
+      if (model.length === prefix.length) return true
+      if (/[-_.:\/]$/.test(prefix)) return true
+      const next = model.charAt(prefix.length)
+      if (next === '-' || next === '_' || next === '.' || next === ':' || next === '/') return true
+      // A bare alphabetic prefix (qwen, abab) may be followed by its version
+      // digits, but never by more letters that form a different word.
+      return /[a-z]$/.test(prefix) && /[0-9]/.test(next)
+    }
     function iconForModel(model) {
       const normalized = normalizeIconModel(model)
       if (normalized === '') return null
@@ -190,7 +207,7 @@ window.__ModuleLoader__.load({
       let bestLength = 0
       for (const icon of MODEL_ICON_TABLE) {
         for (const prefix of icon.prefixes) {
-          if (prefix !== '' && normalized.startsWith(prefix) && prefix.length > bestLength) { best = icon; bestLength = prefix.length }
+          if (modelPrefixMatches(normalized, prefix) && prefix.length > bestLength) { best = icon; bestLength = prefix.length }
         }
       }
       return best
@@ -210,13 +227,18 @@ window.__ModuleLoader__.load({
       const cacheKey = actual + '\u0000' + requested + '\u0000' + label + '\u0000' + provider
       if (MODEL_ICON_CACHE.has(cacheKey)) return MODEL_ICON_CACHE.get(cacheKey)
       const labelModel = label.includes(' / ') ? label.slice(label.indexOf(' / ') + 3) : label
-      let icon = iconForModel(actual) || iconForModel(requested)
-      if (icon === null) {
+      // The served model decides the brand. When actualModel is present but
+      // unrecognised (a gateway's private model id), the row stays neutral
+      // instead of inheriting the requested model's brand: attributing an
+      // unknown model to OpenAI/DeepSeek would be a false claim.
+      let icon = actual !== '' ? iconForModel(actual) : iconForModel(requested)
+      if (icon === null && actual === '' && requested === '') {
         const providerIcon = iconForProvider(provider)
         const labelIcon = iconForModel(labelModel)
         // A provider-only match must not contradict the model namespace.
         icon = providerIcon !== null && (labelIcon === null || labelIcon === providerIcon) ? providerIcon : labelIcon
       }
+      if (MODEL_ICON_CACHE.size >= MAX_MODEL_ICON_CACHE) MODEL_ICON_CACHE.clear()
       MODEL_ICON_CACHE.set(cacheKey, icon)
       return icon
     }
@@ -1246,13 +1268,22 @@ window.__ModuleLoader__.load({
       // (e.g. a provider aggregate for a reseller): never fall back to guessing
       // a brand from the row's model namespace in that case.
       const icon = props.iconKey === null ? null : props.iconKey !== undefined ? MODEL_ICON_BY_KEY.get(props.iconKey) || null : resolveModelIcon(props.row)
-      const [failed, setFailed] = React.useState(false)
+      // The load-failure flag belongs to one icon identity: a shared component
+      // instance (records detail, donut legend slot) that later renders another
+      // brand must retry instead of staying on the neutral fallback forever.
+      const identity = icon === null ? '' : icon.key + '\u0000' + icon.href
+      const [failedIdentity, setFailedIdentity] = React.useState(null)
+      const failed = failedIdentity !== null && failedIdentity === identity
       const style = { width: size, height: size, minWidth: size }
       if (icon === null || failed) {
         return React.createElement('span', { className: 'uh-model-icon uh-model-icon-fallback' + (props.className ? ' ' + props.className : ''), style, 'aria-hidden': true })
       }
-      return React.createElement('span', { className: 'uh-model-icon' + (props.className ? ' ' + props.className : ''), style, 'aria-hidden': true, title: props.showTitle === true ? icon.label : undefined },
-        React.createElement('img', { src: icon.href, alt: '', width: size, height: size, loading: 'lazy', decoding: 'async', draggable: false, onError: () => setFailed(true) }),
+      // showTitle exposes the brand through the image's accessible name; the
+      // decorative default stays fully hidden because the adjacent text already
+      // names the model (a title on an aria-hidden host is not announced).
+      const labelled = props.showTitle === true
+      return React.createElement('span', { className: 'uh-model-icon' + (props.className ? ' ' + props.className : ''), style, ...(labelled ? {} : { 'aria-hidden': true }) },
+        React.createElement('img', { key: identity, src: icon.href, alt: labelled ? icon.label : '', title: labelled ? icon.label : undefined, width: size, height: size, loading: 'lazy', decoding: 'async', draggable: false, onError: () => setFailedIdentity(identity) }),
       )
     }
     const MemoModelIcon = React.memo(ModelIcon)

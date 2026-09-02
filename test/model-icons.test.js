@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import vm from 'node:vm'
+import { assertSafeSvg, decodeEntities } from '../scripts/svg-guard.mjs'
 
 const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
 const manifest = JSON.parse(await readFile(new URL('../assets/model-icons/manifest.json', import.meta.url), 'utf8'))
@@ -26,6 +27,7 @@ const table = manifest.icons.map((icon) => ({
 const context = {
   MODEL_ICON_TABLE: table,
   MODEL_ICON_CACHE: new Map(),
+  MAX_MODEL_ICON_CACHE: 2000,
 }
 vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__iconHelpers = { normalizeIconModel, iconForProvider, iconForModel, resolveModelIcon, resolveAggregateModelIcon }', context)
 const { normalizeIconModel, iconForModel, iconForProvider, resolveModelIcon, resolveAggregateModelIcon } = context.__iconHelpers
@@ -48,7 +50,7 @@ function aggregateRows(rows, view) {
 
 
 test('the manifest ships one valid entry per bundled brand icon', () => {
-  assert.equal(manifest.schemaVersion, 1)
+  assert.equal(manifest.schemaVersion, 2)
   assert.equal(manifest.icons.length, 11)
   const keys = manifest.icons.map((icon) => icon.key)
   assert.equal(new Set(keys).size, keys.length)
@@ -147,6 +149,91 @@ test('provider aggregates use provider icons and never inherit a model brand', (
   const byModel = aggregateRows(rows, 'model')
   assert.equal(byModel.find((row) => row.model === 'deepseek-v4-flash').iconKey, 'deepseek')
   assert.equal(byModel.find((row) => row.model === 'gpt-5.6-luna').iconKey, 'openai')
+})
+
+test('the manifest records pinned upstream provenance for every icon', () => {
+  assert.equal(manifest.schemaVersion, 2)
+  const upstream = manifest.upstream
+  assert.ok(upstream !== null && typeof upstream === 'object')
+  assert.match(upstream.revision, /^[0-9a-f]{40}$/)
+  assert.equal(upstream.license, 'MIT')
+  assert.ok(upstream.copyright.includes('Copyright'))
+  assert.ok(Array.isArray(manifest.modifications) && manifest.modifications.length > 0)
+  for (const icon of manifest.icons) {
+    assert.ok(typeof icon.upstreamPath === 'string' && icon.upstreamPath !== '', icon.key + ' needs an upstream path')
+    assert.equal(typeof icon.modified, 'boolean', icon.key + ' needs a modification flag')
+  }
+  // The two neutralised marks must be flagged as modified.
+  assert.equal(manifest.icons.find((icon) => icon.key === 'grok').modified, true)
+  assert.equal(manifest.icons.find((icon) => icon.key === 'openai').modified, true)
+})
+
+test('the bundled licence file carries the upstream notice and pinned revision', async () => {
+  const text = await readFile(new URL('../assets/model-icons/' + manifest.upstream.licenseFile, import.meta.url), 'utf8')
+  assert.ok(text.includes(manifest.upstream.revision), 'licence must reference the pinned revision')
+  assert.ok(text.includes('MIT License'))
+  assert.ok(text.includes(manifest.upstream.copyright))
+  assert.ok(/Trademark notice/i.test(text))
+  assert.ok(/#8a8f98/.test(text), 'local modifications must be documented')
+})
+
+test('the SVG guard rejects encoded and unquoted external references', () => {
+  const cases = [
+    ['unquoted href', '<svg><a href=//attacker.invalid>x</a></svg>'],
+    ['entity-encoded css url', '<svg><path style="fill:url(&quot;https://attacker.invalid/x&quot;)"/></svg>'],
+    ['entity-encoded attribute', '<svg><a &#104;ref="https://attacker.invalid">x</a></svg>'],
+    ['use element', '<svg><use href="#a"/></svg>'],
+    ['image element', '<svg><image href="#a"/></svg>'],
+    ['script element', '<svg><script>alert(1)</script></svg>'],
+    ['inline handler', '<svg onload=alert(1)></svg>'],
+    ['javascript uri', '<svg><a href="javascript:alert(1)">x</a></svg>'],
+    ['data uri paint', '<svg><path fill="data:image/png;base64,AAA"/></svg>'],
+    ['doctype', '<!DOCTYPE svg><svg></svg>'],
+    ['currentColor', '<svg fill="currentColor"></svg>'],
+    ['error page body', '404: Not Found'],
+    ['unclosed root', '<svg><path/>'],
+  ]
+  for (const [name, svg] of cases) {
+    assert.throws(() => assertSafeSvg(name, svg), Error, name + ' must be rejected')
+  }
+  // Entities are decoded repeatedly so nested encodings cannot hide a payload.
+  assert.equal(decodeEntities('&#104;ref &quot;x&quot;'), 'href "x"')
+  assert.equal(decodeEntities('&amp;#104;ref'), 'href')
+})
+
+test('every bundled icon passes the same guard the build uses', async () => {
+  for (const icon of manifest.icons) {
+    const svg = await readFile(new URL('../assets/model-icons/' + icon.file, import.meta.url), 'utf8')
+    assert.equal(assertSafeSvg(icon.file, svg), svg)
+  }
+})
+
+test('model prefixes match on token boundaries only', () => {
+  const key = (model) => { const icon = iconForModel(model); return icon === null ? null : icon.key }
+  assert.equal(key('o3-mini'), 'openai')
+  assert.equal(key('o3'), 'openai')
+  assert.equal(key('gpt-5.6-luna'), 'openai')
+  assert.equal(key('qwen3-max'), 'qwen')
+  assert.equal(key('abab6.5s'), 'minimax')
+  // Negative cases: a longer word that merely starts with the same letters.
+  assert.equal(key('o10-preview'), null)
+  assert.equal(key('o3x'), null)
+  assert.equal(key('qwenfoo'), null)
+  assert.equal(key('ababcustom'), null)
+  assert.equal(key('gptzero'), null)
+  assert.equal(key('claudette-1'), null)
+})
+
+test('an unrecognised actual model never inherits the requested brand', () => {
+  // A gateway that answers with its own private model id must stay neutral:
+  // attributing an unknown model to the requested vendor would be a false claim.
+  assert.equal(keyOf({ provider: 'openrouter', actualModel: 'vendor-private-v1', requestedModel: 'gpt-4o' }), null)
+  assert.equal(keyOf({ provider: 'openrouter', actualModel: 'house-model-v1', requestedModel: 'gpt-4o' }), null)
+  // Only a missing actual model falls back to the requested one.
+  assert.equal(keyOf({ provider: 'openrouter', actualModel: null, requestedModel: 'gpt-4o' }), 'openai')
+  assert.equal(keyOf({ provider: 'openrouter', actualModel: '', requestedModel: 'deepseek-v4-flash' }), 'deepseek')
+  // A recognised actual model still wins over a different requested brand.
+  assert.equal(keyOf({ provider: 'openrouter', actualModel: 'claude-opus-4.7', requestedModel: 'gpt-4o' }), 'claude')
 })
 
 test('longer model prefixes win over shorter ones', () => {

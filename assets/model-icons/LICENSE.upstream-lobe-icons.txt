@@ -1,0 +1,51 @@
+Model brand icons bundled in assets/model-icons/
+=================================================
+
+Upstream project : lobe-icons
+Repository       : https://github.com/lobehub/lobe-icons
+Pinned revision  : 0863807f3a6ce4d7ea23ad86a6693a17638747da
+Upstream licence : MIT
+Licence URL      : https://github.com/lobehub/lobe-icons/blob/0863807f3a6ce4d7ea23ad86a6693a17638747da/LICENSE
+
+MIT License
+
+Copyright (c) 2023 LobeHub
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Trademark notice
+----------------
+
+The brand names, logos and marks depicted by these files remain the property
+of their respective owners (DeepSeek, OpenAI, Anthropic, Google, Meta, Zhipu
+AI, xAI, Alibaba, ByteDance, Moonshot AI, MiniMax). They are bundled only to
+identify which vendor served a recorded request (nominative use) and do not
+imply any endorsement, affiliation or sponsorship.
+
+Local modifications
+-------------------
+
+1. Whitespace between tags is collapsed at build time before base64 encoding
+   (no visual change to the artwork).
+2. grok.svg and openai-color.svg: fill="currentColor" was replaced with the
+   fixed neutral colour #8a8f98, because currentColor does not inherit into an
+   <img> element.
+
+Per-file provenance is recorded in assets/model-icons/manifest.json
+(upstreamPath + modified flag for every icon).

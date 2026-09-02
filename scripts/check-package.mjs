@@ -19,6 +19,7 @@ const expected = [
   'CHANGELOG.md',
   'LICENSE',
   'README.md',
+  'assets/model-icons/LICENSE.upstream-lobe-icons.txt',
   'assets/model-icons/claude-color.svg',
   'assets/model-icons/deepseek-color.svg',
   'assets/model-icons/doubao-color.svg',

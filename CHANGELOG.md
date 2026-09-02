@@ -34,6 +34,10 @@ All notable changes to `dsh-all-usage` are documented here.
 
 - Show real vendor brand icons instead of neutral dots for models in the request log, the selected-call details, the model summary table, and the cost-settings match table. The 11 brand SVGs live in assets/model-icons/ with a manifest (provider aliases, model prefixes, exact overrides, source and licence) and are validated and embedded as data: URIs by scripts/build-client.mjs, so the runtime never reads local paths or the network. Model namespaces win over the DSH provider name so reseller and gateway routes are attributed by the model they actually served; unknown or mixed-brand rows keep the neutral fallback, and workspace colour dots plus chart legend dots are unchanged.
 
+- Harden the model brand icons: the load-failure flag is scoped to one icon identity (a shared component that later shows another brand retries instead of staying neutral), an unrecognised actualModel no longer inherits the requested model's brand, model prefixes match on token boundaries only (o10-preview and o3x stay neutral), the resolution cache is bounded, and labelled icons expose the brand through the image's accessible name instead of a title on an aria-hidden host.
+- Build-time SVG validation now decodes XML entities before checking, rejects unquoted URI attributes, external CSS url() targets, DOCTYPE/CDATA/processing instructions and every external-resource element, and lives in scripts/svg-guard.mjs so the tests exercise the exact same guard with adversarial fixtures.
+- Bundle the icon provenance required for release: the manifest pins the upstream commit, records per-file upstream paths and modification flags, and assets/model-icons/LICENSE.upstream-lobe-icons.txt ships the MIT notice, copyright, trademark disclaimer and the local modifications. The build fails if the pinned revision, licence file or per-file attribution is missing.
+
 ## [1.1.3] - 2026-09-01
 
 ### Added

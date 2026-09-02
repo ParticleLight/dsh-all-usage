@@ -1,14 +1,30 @@
 {
-  "schemaVersion": 1,
-  "note": "Brand-level model icons embedded into lib/client.js at build time as data: URIs. Runtime never reads these files or the network.",
-  "license": "Brand logos remain property of their respective owners; bundled for identification only (nominative use).",
-  "source": "https://github.com/lobehub/lobe-icons (brand SVG set), monochrome marks neutralized to #8a8f98 at import time",
+  "schemaVersion": 2,
+  "note": "Brand-level model icons embedded into lib/client.js at build time as data: URIs. The runtime never reads these files, the network, or any machine-local icon directory.",
+  "upstream": {
+    "project": "lobe-icons",
+    "repository": "https://github.com/lobehub/lobe-icons",
+    "revision": "0863807f3a6ce4d7ea23ad86a6693a17638747da",
+    "revisionUrl": "https://github.com/lobehub/lobe-icons/tree/0863807f3a6ce4d7ea23ad86a6693a17638747da",
+    "license": "MIT",
+    "licenseUrl": "https://github.com/lobehub/lobe-icons/blob/0863807f3a6ce4d7ea23ad86a6693a17638747da/LICENSE",
+    "licenseFile": "LICENSE.upstream-lobe-icons.txt",
+    "copyright": "Copyright (c) 2023 LobeHub",
+    "notice": "MIT-licensed SVG sources. Brand names, logos and trademarks remain the property of their respective owners; they are bundled solely to identify the vendor that served a request (nominative use), not to imply endorsement."
+  },
+  "modifications": [
+    "Whitespace between tags is collapsed at build time before base64 encoding (no visual change).",
+    "grok.svg and openai-color.svg: fill=\"currentColor\" replaced with the fixed neutral #8a8f98, because currentColor does not inherit into an <img> element.",
+    "openai-color.svg was taken from the vendor mark set below after the original download produced an HTTP 404 body instead of an SVG."
+  ],
   "fallbackKey": null,
   "icons": [
     {
       "key": "deepseek",
       "file": "deepseek-color.svg",
       "label": "DeepSeek",
+      "upstreamPath": "packages/static-svg/svg/deepseek-color.svg",
+      "modified": false,
       "providers": [
         "deepseek",
         "deepseek-official"
@@ -22,16 +38,18 @@
       "key": "openai",
       "file": "openai-color.svg",
       "label": "OpenAI",
+      "upstreamPath": "packages/static-svg/svg/openai.svg",
+      "modified": true,
       "providers": [
         "openai",
         "azure-openai"
       ],
       "prefixes": [
         "gpt-",
-        "o1",
-        "o3",
-        "o4",
-        "o5",
+        "o1-",
+        "o3-",
+        "o4-",
+        "o5-",
         "codex-"
       ],
       "exact": [
@@ -45,6 +63,8 @@
       "key": "claude",
       "file": "claude-color.svg",
       "label": "Anthropic Claude",
+      "upstreamPath": "packages/static-svg/svg/claude-color.svg",
+      "modified": false,
       "providers": [
         "anthropic"
       ],
@@ -57,6 +77,8 @@
       "key": "gemini",
       "file": "gemini-color.svg",
       "label": "Google Gemini",
+      "upstreamPath": "packages/static-svg/svg/gemini-color.svg",
+      "modified": false,
       "providers": [
         "google",
         "google-vertex",
@@ -72,6 +94,8 @@
       "key": "meta",
       "file": "meta-color.svg",
       "label": "Meta Llama",
+      "upstreamPath": "packages/static-svg/svg/meta-color.svg",
+      "modified": false,
       "providers": [
         "meta",
         "meta-llama"
@@ -86,6 +110,8 @@
       "key": "zhipu",
       "file": "zhipu-color.svg",
       "label": "Zhipu GLM",
+      "upstreamPath": "packages/static-svg/svg/zhipu-color.svg",
+      "modified": false,
       "providers": [
         "zhipu",
         "zhipuai",
@@ -102,6 +128,8 @@
       "key": "grok",
       "file": "grok.svg",
       "label": "xAI Grok",
+      "upstreamPath": "packages/static-svg/svg/grok.svg",
+      "modified": true,
       "providers": [
         "xai"
       ],
@@ -116,6 +144,8 @@
       "key": "qwen",
       "file": "qwen-color.svg",
       "label": "Qwen",
+      "upstreamPath": "packages/static-svg/svg/qwen-color.svg",
+      "modified": false,
       "providers": [
         "qwen",
         "alibaba",
@@ -133,6 +163,8 @@
       "key": "doubao",
       "file": "doubao-color.svg",
       "label": "Doubao",
+      "upstreamPath": "packages/static-svg/svg/doubao-color.svg",
+      "modified": false,
       "providers": [
         "doubao",
         "bytedance",
@@ -148,6 +180,8 @@
       "key": "kimi",
       "file": "kimi-color.svg",
       "label": "Moonshot Kimi",
+      "upstreamPath": "packages/static-svg/svg/kimi-color.svg",
+      "modified": false,
       "providers": [
         "moonshot",
         "moonshotai"
@@ -164,6 +198,8 @@
       "key": "minimax",
       "file": "minimax-color.svg",
       "label": "MiniMax",
+      "upstreamPath": "packages/static-svg/svg/minimax-color.svg",
+      "modified": false,
       "providers": [
         "minimax"
       ],

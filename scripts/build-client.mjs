@@ -1,25 +1,12 @@
 import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { minify } from 'terser'
+import { assertSafeSvg } from './svg-guard.mjs'
 
 const sourceUrl = new URL('../src/client.js', import.meta.url)
 const outputUrl = new URL('../lib/client.js', import.meta.url)
 const iconsUrl = new URL('../assets/model-icons/', import.meta.url)
-const MAX_ICON_BYTES = 24 * 1024
 const ICON_PLACEHOLDER = '/* __MODEL_ICON_DATA__ */ null'
-
-/** Reject anything that is not a self-contained, script-free, local SVG. */
-function assertSafeSvg(name, svg) {
-  const bytes = Buffer.byteLength(svg)
-  if (bytes === 0 || bytes > MAX_ICON_BYTES) throw new Error('model icon ' + name + ' has an unsupported size: ' + bytes + ' B')
-  if (!/^\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(svg)) throw new Error('model icon ' + name + ' is not a valid SVG document (no <svg> root)')
-  if (!/<\/svg>\s*$/i.test(svg.trim())) throw new Error('model icon ' + name + ' is missing its closing </svg> tag')
-  if (/404|not found/i.test(svg.slice(0, 200)) && !/<svg[\s>]/i.test(svg.slice(0, 200))) throw new Error('model icon ' + name + ' looks like an error page, not an SVG')
-  if (/<script|<foreignObject|javascript:|on[a-z]+\s*=/i.test(svg)) throw new Error('model icon ' + name + ' contains scripting constructs')
-  if (/(?:xlink:)?href\s*=\s*["'](?!#)/i.test(svg) || /url\(\s*['"]?(?:https?:|\/\/)/i.test(svg) || /<(?:image|use)[\s>]/i.test(svg)) throw new Error('model icon ' + name + ' references external resources')
-  if (/currentColor/i.test(svg)) throw new Error('model icon ' + name + ' uses currentColor, which does not inherit inside <img>; bake an explicit colour instead')
-  return svg
-}
 
 /** Build the icon table that the client bundle embeds (data: URIs only). */
 async function buildIconTable() {
@@ -31,6 +18,19 @@ async function buildIconTable() {
   }
   const manifest = JSON.parse(manifestRaw)
   if (manifest === null || typeof manifest !== 'object' || !Array.isArray(manifest.icons) || manifest.icons.length === 0) throw new Error('model icon manifest must list at least one icon')
+  // Provenance is a release requirement: a pinned upstream revision, the
+  // licence text that ships with the package, and per-file attribution.
+  const upstream = manifest.upstream
+  if (upstream === null || typeof upstream !== 'object') throw new Error('model icon manifest must declare its upstream provenance')
+  if (typeof upstream.revision !== 'string' || !/^[0-9a-f]{40}$/.test(upstream.revision)) throw new Error('model icon manifest must pin a full upstream commit revision')
+  if (typeof upstream.license !== 'string' || upstream.license === '' || typeof upstream.copyright !== 'string' || upstream.copyright === '') throw new Error('model icon manifest must record the upstream licence and copyright')
+  if (typeof upstream.licenseFile !== 'string' || upstream.licenseFile === '') throw new Error('model icon manifest must reference the bundled licence file')
+  try {
+    const licenceText = await readFile(new URL(upstream.licenseFile, iconsUrl), 'utf8')
+    if (!licenceText.includes(upstream.revision)) throw new Error('the bundled licence file must reference the pinned revision')
+  } catch (error) {
+    throw new Error('model icon licence file is unusable: ' + error.message)
+  }
   const present = new Set((await readdir(fileURLToPath(iconsUrl))).filter((name) => name.toLowerCase().endsWith('.svg')))
   const icons = []
   const seen = new Set()
@@ -38,6 +38,7 @@ async function buildIconTable() {
     if (entry === null || typeof entry !== 'object' || typeof entry.key !== 'string' || entry.key === '' || typeof entry.file !== 'string' || entry.file === '') throw new Error('model icon manifest entries need a key and a file')
     if (seen.has(entry.key)) throw new Error('duplicate model icon key: ' + entry.key)
     seen.add(entry.key)
+    if (typeof entry.upstreamPath !== 'string' || entry.upstreamPath === '' || typeof entry.modified !== 'boolean') throw new Error('model icon ' + entry.key + ' must record its upstream path and modification state')
     if (!present.has(entry.file)) throw new Error('model icon file is missing: ' + entry.file)
     present.delete(entry.file)
     const svg = assertSafeSvg(entry.file, await readFile(new URL(entry.file, iconsUrl), 'utf8'))
