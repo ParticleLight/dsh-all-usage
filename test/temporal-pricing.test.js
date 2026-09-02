@@ -149,6 +149,10 @@ function usageChunkEvent(time, turn, step, usage, seq) {
   }
 }
 
+async function waitForLedgerWrite() {
+  await new Promise((resolve) => setTimeout(resolve, 40))
+}
+
 async function waitForScan(app, predicate = (body) => body.scan.done) {
   let snapshot = null
   for (let i = 0; i < 200; i += 1) {
@@ -160,27 +164,31 @@ async function waitForScan(app, predicate = (body) => body.scan.done) {
 }
 
 const V4_FLASH = { providerId: 'deepseek', modelId: 'deepseek-v4-flash', displayName: 'DeepSeek V4 Flash', input: '0.22', output: '0.66', cacheRead: '0.007', cacheWrite: '0' }
-// 2026-08-03 is a Monday; 08-04 Tuesday; 08-01 Saturday; 08-02 Sunday.
-const MONDAY_PEAK = Date.UTC(2026, 7, 3, 2, 0, 0)          // 02:00 UTC peak window
-const MONDAY_OFF = Date.UTC(2026, 7, 3, 10, 30, 0)         // 10:30 UTC off-peak
-const MONDAY_EDGE_AM = Date.UTC(2026, 7, 3, 0, 59, 59)     // 00:59:59 off-peak
-const MONDAY_EDGE_START = Date.UTC(2026, 7, 3, 1, 0, 0)    // 01:00:00 peak
-const MONDAY_EDGE_END3 = Date.UTC(2026, 7, 3, 3, 59, 59)   // 03:59:59 peak
-const MONDAY_EDGE_START4 = Date.UTC(2026, 7, 3, 4, 0, 0)   // 04:00:00 off-peak
-const MONDAY_EDGE_START6 = Date.UTC(2026, 7, 3, 6, 0, 0)   // 06:00:00 peak
-const MONDAY_EDGE_END10 = Date.UTC(2026, 7, 3, 10, 0, 0)   // 10:00:00 off-peak
-const SATURDAY = Date.UTC(2026, 7, 1, 2, 0, 0)
-const SUNDAY = Date.UTC(2026, 7, 2, 2, 0, 0)
+// 2026-08-17 is a Monday (after the 2026-08-16T16:00:00Z peak-pricing
+// effective instant); 08-15 Saturday; 08-16 Sunday.
+const MONDAY_PEAK = Date.UTC(2026, 7, 17, 2, 0, 0)          // 02:00 UTC peak window
+const MONDAY_OFF = Date.UTC(2026, 7, 17, 10, 30, 0)         // 10:30 UTC off-peak
+const MONDAY_EDGE_AM = Date.UTC(2026, 7, 17, 0, 59, 59)     // 00:59:59 off-peak
+const MONDAY_EDGE_START = Date.UTC(2026, 7, 17, 1, 0, 0)    // 01:00:00 peak
+const MONDAY_EDGE_END3 = Date.UTC(2026, 7, 17, 3, 59, 59)   // 03:59:59 peak
+const MONDAY_EDGE_START4 = Date.UTC(2026, 7, 17, 4, 0, 0)   // 04:00:00 off-peak
+const MONDAY_EDGE_START6 = Date.UTC(2026, 7, 17, 6, 0, 0)   // 06:00:00 peak
+const MONDAY_EDGE_END10 = Date.UTC(2026, 7, 17, 10, 0, 0)   // 10:00:00 off-peak
+const SATURDAY = Date.UTC(2026, 7, 15, 2, 0, 0)
+const SUNDAY = Date.UTC(2026, 7, 16, 2, 0, 0)
+const DEEPSEEK_EFFECTIVE = Date.UTC(2026, 7, 16, 16, 0, 0)  // official peak pricing start
 
 function peakProfile() {
   return {
-    policyId: 'test-peak-policy',
-    sourceUrl: 'https://example.test/pricing',
-    timezone: 'UTC',
-    effectiveFrom: 0,
-    effectiveUntil: null,
-    defaultPlan: null,
-    rules: [{ id: 'peak', weekdays: [1, 2, 3, 4, 5], windows: [{ startMinute: 60, endMinute: 240 }, { startMinute: 360, endMinute: 600 }], rates: { input: '0.44', output: '1.32', cacheRead: '0.014', cacheWrite: '0' } }],
+    policies: [{
+      policyId: 'test-peak-policy',
+      sourceUrl: 'https://example.test/pricing',
+      timezone: 'UTC',
+      effectiveFrom: 0,
+      effectiveUntil: null,
+      defaultPlan: null,
+      rules: [{ id: 'peak', weekdays: [1, 2, 3, 4, 5], windows: [{ startMinute: 60, endMinute: 240 }, { startMinute: 360, endMinute: 600 }], rates: { input: '0.44', output: '1.32', cacheRead: '0.014', cacheWrite: '0' } }],
+    }],
   }
 }
 
@@ -220,7 +228,7 @@ test('temporal band rules are local-timezone independent (UTC methods only)', ()
 
 test('normalizeTemporalPricing rejects ambiguous or invalid configurations', () => {
   const base = { policyId: 'p', rules: [{ id: 'peak', weekdays: [1, 2], windows: [{ startMinute: 60, endMinute: 240 }], rates: { input: '1', output: '1', cacheRead: '1', cacheWrite: '0' } }] }
-  assert.deepEqual(normalizeTemporalPricing(base), { policyId: 'p', sourceUrl: '', timezone: 'UTC', effectiveFrom: 0, effectiveUntil: null, defaultPlan: null, rules: [{ id: 'peak', weekdays: [1, 2], windows: [{ startMinute: 60, endMinute: 240 }], rates: { input: '1', output: '1', cacheRead: '1', cacheWrite: '0' } }] })
+  assert.deepEqual(normalizeTemporalPricing(base), { policies: [{ policyId: 'p', sourceUrl: '', timezone: 'UTC', effectiveFrom: 0, effectiveUntil: null, defaultPlan: null, rules: [{ id: 'peak', weekdays: [1, 2], windows: [{ startMinute: 60, endMinute: 240 }], rates: { input: '1', output: '1', cacheRead: '1', cacheWrite: '0' } }] }] })
   assert.equal(normalizeTemporalPricing({ ...base, timezone: 'Asia/Shanghai' }), null)
   assert.equal(normalizeTemporalPricing({ ...base, policyId: '' }), null)
   assert.equal(normalizeTemporalPricing({ ...base, effectiveFrom: -1 }), null)
@@ -290,14 +298,44 @@ test('resolvePricing applies the built-in DeepSeek profile only on first-party r
 
 test('a plan whose effective window does not cover the instant fails closed', () => {
   const profile = peakProfile()
-  const gapped = { ...profile, effectiveFrom: Date.UTC(2027, 0, 1), effectiveUntil: null }
-  const resolved = { temporalProfile: { ...gapped, policyHash: 'h' }, temporalRoute: 'official', status: 'priced', rates: profile.rules[0].rates, currency: 'USD', source: 'manual', pricingModel: 'deepseek-v4-flash', providerId: 'deepseek', inputTokenSemantics: 'fresh', multiplier: '1', tiered: false, reasoningRateAvailable: false }
+  const gapped = { ...profile.policies[0], effectiveFrom: Date.UTC(2027, 0, 1), effectiveUntil: null }
+  const resolved = { temporalProfile: { policies: [{ ...gapped, policyHash: 'h' }] }, temporalRoute: 'official', status: 'priced', rates: profile.policies[0].rules[0].rates, currency: 'USD', source: 'manual', pricingModel: 'deepseek-v4-flash', providerId: 'deepseek', inputTokenSemantics: 'fresh', multiplier: '1', tiered: false, reasoningRateAvailable: false }
   const plan = temporalPlanFor(resolved, MONDAY_PEAK)
   assert.equal(plan.status, 'history-gap')
   const cost = calculateCost({ input: 1000000, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, resolved, MONDAY_PEAK, 'usage-event')
   assert.equal(cost.status, 'unsupported')
   assert.equal(cost.reason, 'temporal-price-history-unavailable')
   assert.equal(cost.total, '0')
+})
+
+test('the built-in plan starts exactly at the official 2026-08-16T16:00:00Z instant', () => {
+  const state = { catalogEntries: [{ ...V4_FLASH, source: 'models.dev', fetchedAt: 0 }], overrides: [], mappings: [], providerAliases: {} }
+  const resolved = resolvePricing({ provider: 'deepseek', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', label: 'deepseek-v4-flash', legacy: false }, state)
+  const values = { input: 1000000, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }
+  // 1 ms before the effective instant: fail closed, never today's V4 rates.
+  const beforeMs = calculateCost(values, resolved, DEEPSEEK_EFFECTIVE - 1, 'usage-event')
+  assert.equal(beforeMs.status, 'unsupported')
+  assert.equal(beforeMs.reason, 'temporal-price-history-unavailable')
+  const beforeSecond = calculateCost(values, resolved, DEEPSEEK_EFFECTIVE - 1000, 'usage-event')
+  assert.equal(beforeSecond.status, 'unsupported')
+  assert.equal(temporalBand(resolved.temporalProfile, DEEPSEEK_EFFECTIVE - 1), null)
+  // Exactly at the instant: the plan applies (08-16 is Sunday, off-peak).
+  const atMs = calculateCost(values, resolved, DEEPSEEK_EFFECTIVE, 'usage-event')
+  assert.equal(atMs.status, 'priced')
+  assert.equal(atMs.pricingBand, 'off-peak')
+  const atPlus = calculateCost(values, resolved, DEEPSEEK_EFFECTIVE + 1000, 'usage-event')
+  assert.equal(atPlus.pricingBand, 'off-peak')
+  // Weekday instants right after the effective start still respect the windows.
+  const mondayAfter = calculateCost(values, resolved, MONDAY_EDGE_START, 'usage-event')
+  assert.equal(mondayAfter.status, 'priced')
+  assert.equal(mondayAfter.pricingBand, 'peak')
+})
+
+test('vision-exp got its own availability boundary on 2026-08-21', () => {
+  const state = { catalogEntries: [{ ...V4_FLASH, modelId: 'deepseek-v4-flash-vision-exp', source: 'models.dev', fetchedAt: 0 }], overrides: [], mappings: [], providerAliases: {} }
+  const resolved = resolvePricing({ provider: 'deepseek', requestedModel: 'deepseek-v4-flash-vision-exp', actualModel: 'deepseek-v4-flash-vision-exp', label: 'deepseek-v4-flash-vision-exp', legacy: false }, state)
+  assert.equal(temporalBand(resolved.temporalProfile, Date.UTC(2026, 7, 20, 23, 59, 59)), null)
+  assert.equal(temporalBand(resolved.temporalProfile, Date.UTC(2026, 7, 21, 0, 0, 0)), 'off-peak')
 })
 
 // ---------- snapshot schema round trips ----------
@@ -415,7 +453,7 @@ test('ledger v1 snapshots are re-priced on recovery and persisted with the band'
   assert.ok(stored.pricingPolicyHash)
 })
 
-test('pricing plan updates invalidate aggregated snapshots and reuse decisions', async () => {
+test('catalog refreshes keep priced history auditable; repriceTemporal re-estimates', async () => {
   const app = await createApp({
     withStorage: true,
     workspaces: [{ id: 'ws-u', path: 'C:\\u', title: 'U' }],
@@ -432,15 +470,32 @@ test('pricing plan updates invalidate aggregated snapshots and reuse decisions',
   await waitForScan(app, (body) => body.totals.cost.pricedCalls === 1)
   let totals = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json().totals.cost
   assert.equal(totals.total, '0.22')
-  // Catalog rate change: baked into the policy hash, so prior snapshots are
-  // stale and the reconciled totals must follow the new off-peak rate.
+  // Catalog refresh with a new off-peak rate: the priced v2 snapshot keeps its
+  // event-time estimate (auditable history) instead of being rewritten.
   await postPricing(app, token, { pricing: { catalogEntries: [{ ...V4_FLASH, input: '0.25' }] }, backfill: true })
-  await waitForScan(app, (body) => body.totals.cost.total === '0.25')
+  await new Promise((resolve) => setTimeout(resolve, 60))
   totals = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json().totals.cost
-  assert.equal(totals.total, '0.25')
+  assert.equal(totals.total, '0.22')
+  // New usage after the refresh uses the current catalog rate.
+  const liveHandler = app.listeners['session/event'][0]
+  liveHandler({ id: 's-u', header: { cwd: 'C:\\u' } }, usageEvent(MONDAY_OFF, 2, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 3, 'deepseek', 'deepseek-v4-flash'))
+  for (let i = 0; i < 40; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+    totals = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json().totals.cost
+    if (totals.total === '0.47') break
+  }
+  assert.equal(totals.total, '0.47')
+  // Explicit repricing recomputes every priced v2 snapshot against the plan.
+  await postPricing(app, token, { pricing: { catalogEntries: [{ ...V4_FLASH, input: '0.25' }] }, backfill: true, repriceTemporal: true })
+  for (let i = 0; i < 60; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+    totals = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json().totals.cost
+    if (totals.total === '0.5') break
+  }
+  assert.equal(totals.total, '0.5')
   const request = makeRequest('GET', { host: '127.0.0.1:3080' })
   request.url = '/api/all-usage/query?start=' + snap.byDay[0].date + '&end=' + snap.byDay[0].date + '&utc=0'
-  assert.equal((await call(app, '/api/all-usage/query', request)).json().totals.cost.total, '0.25')
+  assert.equal((await call(app, '/api/all-usage/query', request)).json().totals.cost.total, '0.5')
 })
 
 test('reseller routes never inherit the DeepSeek band plan end to end', async () => {
@@ -511,4 +566,148 @@ test('unknown historical models never get a guessed band price (fail closed on g
   assert.equal(cost.status, 'unsupported')
   assert.equal(cost.reason, 'temporal-price-history-unavailable')
   assert.equal(cost.total, '0')
+})
+
+test('overlapping rules across different rules are rejected regardless of order', () => {
+  const base = (rates) => ({ policyId: 'p', rules: [{ id: 'a', weekdays: [1], windows: [{ startMinute: 60, endMinute: 240 }], rates }, { id: 'b', weekdays: [1], windows: [{ startMinute: 120, endMinute: 300 }], rates }] })
+  const ratesA = { input: '1', output: '1', cacheRead: '1', cacheWrite: '0' }
+  const ratesB = { input: '2', output: '2', cacheRead: '2', cacheWrite: '0' }
+  assert.equal(normalizeTemporalPricing(base(ratesA), ratesA), null)
+  assert.equal(normalizeTemporalPricing({ policyId: 'p', rules: [{ id: 'b', weekdays: [1], windows: [{ startMinute: 120, endMinute: 300 }], rates: ratesB }, { id: 'a', weekdays: [1], windows: [{ startMinute: 60, endMinute: 240 }], rates: ratesA }] }, ratesA), null)
+  // Adjacent windows are still legal (half-open [60,240) then [240,420)).
+  assert.ok(normalizeTemporalPricing({ policyId: 'p', rules: [{ id: 'a', weekdays: [1], windows: [{ startMinute: 60, endMinute: 240 }], rates: ratesA }, { id: 'b', weekdays: [1], windows: [{ startMinute: 240, endMinute: 420 }], rates: ratesB }] }, ratesA))
+})
+
+test('an invalid temporal config never silently falls back to the built-in profile', async () => {
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-inv', path: 'C:\\inv', title: 'Inv' }],
+    sessions: [{ header: { id: 's-inv', cwd: 'C:\\inv' } }],
+    events: new Map([['s-inv', [
+      usageEvent(MONDAY_PEAK, 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 1),
+    ]]]),
+  })
+  await waitForScan(app)
+  const snap = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  const token = snap.requestToken
+  // timezone other than UTC makes the whole temporal config invalid.
+  await postPricing(app, token, { pricing: { catalogEntries: [Object.assign({}, V4_FLASH, { temporalPricing: { policyId: 'bad-plan', timezone: 'Asia/Shanghai', effectiveFrom: 0, effectiveUntil: null, defaultPlan: null, rules: [{ id: 'peak', weekdays: [1, 2, 3, 4, 5], windows: [{ startMinute: 60, endMinute: 240 }], rates: { input: '0.44', output: '1.32', cacheRead: '0.014', cacheWrite: '0' } }] } })] }, backfill: true })
+  await waitForScan(app, (body) => body.totals.cost.unsupportedCalls === 1)
+  const dateText = snap.byDay[0].date
+  const request = makeRequest('GET', { host: '127.0.0.1:3080' })
+  request.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText + '&utc=0&limit=10'
+  const cost = (await call(app, '/api/all-usage/records', request)).json().items[0].cost
+  assert.equal(cost.status, 'unsupported')
+  assert.equal(cost.reason, 'temporal-config-invalid')
+  assert.equal(cost.total, '0')
+})
+
+test('entries with the same flat rates but different band plans resolve ambiguous', () => {
+  const planA = { policyId: 'plan-a', timezone: 'UTC', effectiveFrom: 0, effectiveUntil: null, defaultPlan: null, rules: [{ id: 'peak', weekdays: [1, 2, 3, 4, 5], windows: [{ startMinute: 60, endMinute: 240 }], rates: { input: '0.44', output: '1.32', cacheRead: '0.014', cacheWrite: '0' } }] }
+  const planB = { policyId: 'plan-b', timezone: 'UTC', effectiveFrom: 0, effectiveUntil: null, defaultPlan: null, rules: [{ id: 'peak', weekdays: [1, 2, 3, 4, 5], windows: [{ startMinute: 360, endMinute: 600 }], rates: { input: '0.5', output: '1.4', cacheRead: '0.02', cacheWrite: '0' } }] }
+  const state = {
+    catalogEntries: [],
+    overrides: [
+      Object.assign({}, V4_FLASH, { providerName: 'DeepSeek A', temporalPricing: planA }),
+      Object.assign({}, V4_FLASH, { providerName: 'DeepSeek B', temporalPricing: planB }),
+    ],
+    mappings: [],
+    providerAliases: {},
+  }
+  const resolved = resolvePricing({ provider: 'deepseek', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', label: 'deepseek-v4-flash', legacy: false }, state)
+  assert.equal(resolved.status, 'ambiguous')
+  assert.equal(resolved.reason, 'multiple-official-prices')
+})
+
+test('incremental ledger folds keep the request context from a previous batch after a restart', async () => {
+  const contextAt = MONDAY_PEAK
+  const first = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-ctx2', path: 'C:\\ctx2', title: 'Ctx2' }],
+    sessions: [{ header: { id: 's-ctx2', cwd: 'C:\\ctx2' } }],
+    events: new Map([['s-ctx2', [
+      { seq: 0, time: contextAt, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 1, step: 1 } },
+      { seq: 1, time: contextAt, type: 'turn/end', data: { turn: 1 } },
+    ]]]),
+    snapshots: [{ header: { id: 's-ctx2' }, revision: 'r1' }],
+  })
+  await waitForScan(first)
+  assert.ok(Array.isArray(first.storageUnit.records.sessions['s-ctx2'].contextTimes))
+  assert.equal(first.storageUnit.records.sessions['s-ctx2'].contextTimes.length, 1)
+  await waitForLedgerWrite()
+  // Restart with an appended usage tail: the context arrived in the previous
+  // batch, so the incremental fold must seed it from the persisted archive.
+  const second = await createApp({
+    withStorage: true,
+    storage: first.storageUnit,
+    workspaces: [{ id: 'ws-ctx2', path: 'C:\\ctx2', title: 'Ctx2' }],
+    sessions: [{ header: { id: 's-ctx2', cwd: 'C:\\ctx2' } }],
+    events: new Map([['s-ctx2', [
+      { seq: 0, time: contextAt, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 1, step: 1 } },
+      { seq: 1, time: contextAt, type: 'turn/end', data: { turn: 1 } },
+      usageEvent(MONDAY_OFF, 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 2),
+    ]]]),
+    snapshots: [{ header: { id: 's-ctx2' }, revision: 'r2' }],
+  })
+  await waitForScan(second)
+  const snap = (await call(second, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  const token = snap.requestToken
+  await postPricing(second, token, { pricing: { catalogEntries: [V4_FLASH] }, backfill: true })
+  await waitForScan(second, (body) => body.totals.cost.pricedCalls === 1)
+  const dateText = snap.byDay[0].date
+  const request = makeRequest('GET', { host: '127.0.0.1:3080' })
+  request.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText + '&utc=0&limit=10'
+  const cost = (await call(second, '/api/all-usage/records', request)).json().items[0].cost
+  assert.equal(cost.pricingAt, contextAt)
+  assert.equal(cost.pricingTimeSource, 'request-context')
+  assert.equal(cost.pricingBand, 'peak')
+  assert.equal(cost.total, '0.44')
+})
+
+test('a full live resync clears stale request contexts after a history rewrite', async () => {
+  let source = [
+    { seq: 0, time: MONDAY_PEAK, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 1, step: 1 } },
+    usageEvent(MONDAY_OFF, 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 1),
+  ]
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-rew', path: 'C:\\rew3', title: 'Rew3' }],
+    sessions: [{ header: { id: 's-rew3', cwd: 'C:\\rew3' } }],
+    events: new Map(),
+    readSession: async () => ({ events: source }),
+    snapshots: [{ header: { id: 's-rew3' }, revision: 'r1' }],
+  })
+  await waitForScan(app)
+  const snap = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  const token = snap.requestToken
+  await postPricing(app, token, { pricing: { catalogEntries: [V4_FLASH] }, backfill: true })
+  await waitForScan(app, (body) => body.totals.cost.pricedCalls === 1)
+  const dateText = snap.byDay[0].date
+  let request = makeRequest('GET', { host: '127.0.0.1:3080' })
+  request.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText + '&utc=0&limit=10'
+  let cost = (await call(app, '/api/all-usage/records', request)).json().items[0].cost
+  assert.equal(cost.pricingBand, 'peak')
+  assert.equal(cost.pricingTimeSource, 'request-context')
+  // History rewrite removes the request/context; a sequence gap forces a full
+  // live resync, which must drop the stale peak context.
+  source = [
+    usageEvent(MONDAY_OFF, 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 1),
+  ]
+  app.listeners['session/event'][0]({ id: 's-rew3', header: { cwd: 'C:\\rew3' } }, { seq: 7, time: MONDAY_OFF, type: 'turn/end', data: { turn: 2 } })
+  let outcome = null
+  for (let i = 0; i < 80; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+    request = makeRequest('GET', { host: '127.0.0.1:3080' })
+    request.url = '/api/all-usage/records?start=' + dateText + '&end=' + dateText + '&utc=0&limit=10'
+    const items = (await call(app, '/api/all-usage/records', request)).json().items
+    if (items.length > 0) {
+      const candidate = items[0].cost
+      outcome = candidate
+      if (candidate.pricingBand === 'off-peak') break
+    }
+  }
+  assert.ok(outcome !== null)
+  assert.equal(outcome.pricingBand, 'off-peak')
+  assert.equal(outcome.pricingTimeSource, 'usage-event')
+  assert.equal(outcome.pricingAt, MONDAY_OFF)
 })

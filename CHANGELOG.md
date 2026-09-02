@@ -14,6 +14,13 @@ All notable changes to `dsh-all-usage` are documented here.
 - Controlled DeepSeek temporal reconciliation: first-party DeepSeek snapshots are re-priced against the usage instant on baseline/backfill/sync, v1 snapshots are migrated to the v2 shape in memory and in the persisted ledger, and a plan whose effective window does not cover the instant fails closed as unsupported (temporal-price-history-unavailable) instead of guessing.
 - Route safety boundary: the band plan applies only to first-party deepseek routes or routes explicitly mapped to the DeepSeek official entry; reseller routes (OpenRouter and other gateways) keep the static official price and are labelled route-not-official.
 
+- Respect the official effective instant: the built-in DeepSeek band plan starts exactly at 2026-08-16T16:00:00Z (V4-Flash-Vision-Exp at 2026-08-21), and usage before it fails closed as unsupported instead of inheriting today's V4 rates.
+- Persist the request-context archive inside ledger records and seed incremental folds from it after a restart, so an open request whose context arrived in a previous batch keeps its peak/off-peak billing instant.
+- Clear stale request-context instants and route identity on full folds (baseline rebuilds and live resyncs), so a history rewrite that removes a request no longer leaves its band attached to later usage.
+- Keep priced v2 snapshots auditable across catalog refreshes: the policy hash no longer includes live entry rates and reconciliation never rewrites priced history; an explicit repriceTemporal=true request re-estimates every snapshot.
+- Support an ordered policy archive (policies: [...]) with non-overlapping effective windows, reject overlapping rules across rules (JSON array order can never decide a price), keep an invalid temporal config visible and fail closed instead of silently falling back to the built-in profile, and compare temporal plans in the duplicate-candidate check so conflicting band plans resolve ambiguous.
+- Include pricingAt, pricingTimeSource, band, policy id and policy hash in the reconciliation equivalence check and in the CSV audit export.
+
 ## [1.1.3] - 2026-09-01
 
 ### Added
