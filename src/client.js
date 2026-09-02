@@ -2843,8 +2843,9 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const card = (label, value, sub, delay, icon) => React.createElement('div', { className: 'uh-card', style: { animationDelay: (delay * 70) + 'ms' } },
-        React.createElement('div', { className: 'uh-card-label' }, icon ? React.createElement(LineIcon, { name: icon, size: 14 }) : null, label),
+      // brandKey renders the vendor logo (DeepSeek balance) instead of a line icon.
+      const card = (label, value, sub, delay, icon, brandKey) => React.createElement('div', { className: 'uh-card', style: { animationDelay: (delay * 70) + 'ms' } },
+        React.createElement('div', { className: 'uh-card-label' }, brandKey ? React.createElement(MemoModelIcon, { iconKey: brandKey, size: 15, showTitle: true }) : icon ? React.createElement(LineIcon, { name: icon, size: 14 }) : null, label),
         React.createElement('div', { className: 'uh-card-value' }, value),
         React.createElement('div', { className: 'uh-card-sub' }, sub),
       )
@@ -3487,7 +3488,7 @@ window.__ModuleLoader__.load({
               ),
             ),
             React.createElement('div', { className: 'uh-ios-metrics' },
-              card(tr('DeepSeek 账户余额', 'DeepSeek Account Balance'), balanceValue, balanceSub, 0, 'wallet'),
+              card(tr('DeepSeek 账户余额', 'DeepSeek Account Balance'), balanceValue, balanceSub, 0, 'wallet', 'deepseek'),
               card(scopedCountIsCalls ? tr('匹配调用次数', 'Matching Calls') : tr('总使用次数', 'Total Uses'), fmtCompact(animatedTurns), range === 'all' && !scopedCountIsCalls ? (language === 'en' ? agg.totals.sessions + ' sessions' : agg.totals.sessions + ' 个会话') : (language === 'en' ? (scopedCountIsCalls ? 'Calls in ' : 'Turns in ') + rangeLabel : rangeLabel + (scopedCountIsCalls ? '内的调用数' : '内的回合数')), 1, 'chart'),
               card(tr('连续使用', 'Current Streak'), language === 'en' ? st.streak + ' days' : st.streak + ' 天', language === 'en' ? 'Longest streak: ' + st.best + ' days' : '最长连续 ' + st.best + ' 天', 2, 'clock'),
               tokenCard,
