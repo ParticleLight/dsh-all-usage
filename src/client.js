@@ -931,8 +931,12 @@ window.__ModuleLoader__.load({
           ),
           React.createElement('div', { className: 'uh-donut-legend', role: 'list' },
             data.segments.map((segment) => React.createElement('div', { key: 'legend-' + segment.index, className: 'uh-donut-legend-row', role: 'listitem' },
-              React.createElement('span', { className: 'uh-donut-dot', style: { background: segment.color } }),
-              segment.iconKey === undefined || segment.iconKey === null ? null : React.createElement(MemoModelIcon, { iconKey: segment.iconKey, size: 16, showTitle: true }),
+              // The colour dot and the brand icon share one grid cell so the
+              // legend keeps its four-column layout (label / metrics / percent).
+              React.createElement('span', { className: 'uh-donut-legend-mark' },
+                React.createElement('span', { className: 'uh-donut-dot', style: { background: segment.color } }),
+                segment.iconKey === undefined || segment.iconKey === null ? null : React.createElement(MemoModelIcon, { iconKey: segment.iconKey, size: 16, showTitle: true }),
+              ),
               React.createElement('div', { className: 'uh-donut-legend-copy' },
                 React.createElement('strong', { title: segment.label }, segment.label),
               ),
@@ -1797,15 +1801,16 @@ window.__ModuleLoader__.load({
 .uh-donut-tooltip { position:absolute; top:0; left:0; z-index:3; display:flex; align-items:flex-start; gap:8px; max-width:190px; padding:9px 10px; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; background:color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent); box-shadow:0 10px 24px rgba(0,0,0,.22); backdrop-filter:blur(10px); color:var(--dsw-alias-label-primary); pointer-events:none; font-size:12px; line-height:1.4; transition:left .12s cubic-bezier(.22,.61,.36,1), top .12s cubic-bezier(.22,.61,.36,1); }
 .uh-donut-tooltip > div { min-width:0; display:flex; flex-direction:column; gap:4px; }
 .uh-donut-tooltip strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
-.uh-donut-tooltip span:not(.uh-donut-dot) { color:var(--dsw-alias-label-secondary); font-size:11px; }
+.uh-donut-tooltip span:not(.uh-donut-dot):not(.uh-model-icon) { color:var(--dsw-alias-label-secondary); font-size:11px; }
 .uh-donut-tooltip-cost { color:var(--dsw-alias-label-primary) !important; font-variant-numeric:tabular-nums; }
 .uh-donut-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; }
 .uh-donut-center strong { color:var(--dsw-alias-label-primary); font-size:28px; line-height:1; font-weight:750; font-variant-numeric:tabular-nums; }
 .uh-donut-center span { margin-top:5px; color:var(--dsw-alias-label-secondary); font-size:13px; }
 .uh-donut-legend { min-width:0; }
-.uh-donut-legend-row { display:grid; grid-template-columns:12px minmax(180px,1fr) minmax(250px,.8fr) 54px; gap:10px; align-items:center; min-height:58px; padding:8px 0; border-bottom:1px solid color-mix(in srgb, var(--dsw-alias-border-l1) 78%, transparent); }
+.uh-donut-legend-row { display:grid; grid-template-columns:36px minmax(180px,1fr) minmax(250px,.8fr) 54px; gap:10px; align-items:center; min-height:58px; padding:8px 0; border-bottom:1px solid color-mix(in srgb, var(--dsw-alias-border-l1) 78%, transparent); }
 .uh-donut-legend-row:last-child { border-bottom:0; }
 .uh-donut-dot { width:12px; height:12px; border-radius:50%; }
+.uh-donut-legend-mark { display:flex; align-items:center; gap:8px; min-width:0; }
 .uh-donut-legend-copy { min-width:0; display:flex; flex-direction:column; gap:5px; }
 .uh-donut-legend-copy strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dsw-alias-label-primary); font-size:13px; font-weight:650; }
 .uh-donut-legend-metrics { display:grid; grid-template-columns:minmax(120px,1fr) minmax(92px,auto); align-items:center; gap:14px; min-width:0; }
@@ -1818,7 +1823,7 @@ window.__ModuleLoader__.load({
 .uh-row, .uh-model-row { min-height:48px; border-bottom:1px solid color-mix(in srgb, var(--dsw-alias-border-l1) 72%, transparent); }
 .uh-row:last-child, .uh-model-row:last-child { border-bottom:0; }
 @media (max-width:640px) { .uh-tbl-scroll { max-height:300px; border-radius:10px; } }
-@media (max-width:640px) { .uh-hm-body { min-width:720px; } .uh-donut-legend-row { grid-template-columns:12px minmax(0,1fr) 48px; gap:8px; } .uh-donut-legend-copy { grid-column:2; grid-row:1; } .uh-donut-legend-metrics { grid-column:2 / -1; grid-row:2; grid-template-columns:minmax(0,1fr) minmax(0,auto); gap:8px; } .uh-donut-percent { grid-column:3; grid-row:1; } .uh-ios-summary-hero { grid-template-columns:1fr; min-height:0; gap:18px; padding:18px; } .uh-ios-summary-total { align-items:flex-start; } .uh-ios-summary-meta { grid-template-columns:repeat(2,minmax(0,1fr)); padding:16px 0 0; border-left:0; border-top:1px solid var(--dsw-alias-border-l1); } .uh-ios-summary-meta-stat { padding:0 12px; } .uh-ios-summary-meta-stat:first-child { padding-left:0; } .uh-ios-summary-meta-stat:last-child { padding-right:0; } .uh-ios-summary-value { font-size:31px; } .uh-ios-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .uh-ios-metric:last-child { grid-column:1 / -1; } .uh-ios-metric-value { font-size:24px; } .uh-donut-layout { grid-template-columns:1fr; gap:12px; } .uh-donut-visual { width:min(100%,250px); } }
+@media (max-width:640px) { .uh-hm-body { min-width:720px; } .uh-donut-legend-row { grid-template-columns:36px minmax(0,1fr) 48px; gap:8px; } .uh-donut-legend-copy { grid-column:2; grid-row:1; } .uh-donut-legend-metrics { grid-column:2 / -1; grid-row:2; grid-template-columns:minmax(0,1fr) minmax(0,auto); gap:8px; } .uh-donut-percent { grid-column:3; grid-row:1; } .uh-ios-summary-hero { grid-template-columns:1fr; min-height:0; gap:18px; padding:18px; } .uh-ios-summary-total { align-items:flex-start; } .uh-ios-summary-meta { grid-template-columns:repeat(2,minmax(0,1fr)); padding:16px 0 0; border-left:0; border-top:1px solid var(--dsw-alias-border-l1); } .uh-ios-summary-meta-stat { padding:0 12px; } .uh-ios-summary-meta-stat:first-child { padding-left:0; } .uh-ios-summary-meta-stat:last-child { padding-right:0; } .uh-ios-summary-value { font-size:31px; } .uh-ios-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .uh-ios-metric:last-child { grid-column:1 / -1; } .uh-ios-metric-value { font-size:24px; } .uh-donut-layout { grid-template-columns:1fr; gap:12px; } .uh-donut-visual { width:min(100%,250px); } }
 @keyframes uh-cell-in { from { opacity:0; transform:scale(.4); } to { opacity:1; transform:scale(1); } }
 @keyframes uh-glow { 0% { box-shadow:0 0 0 0 rgba(46,160,67,.5); } 70% { box-shadow:0 0 0 5px rgba(46,160,67,0); } 100% { box-shadow:0 0 0 0 rgba(46,160,67,0); } }
 @keyframes uh-card-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
