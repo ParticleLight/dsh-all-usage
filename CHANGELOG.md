@@ -32,6 +32,8 @@ All notable changes to `dsh-all-usage` are documented here.
 - An authoritative live resync (full snapshot or a snapshot that provably contains the triggering event with a monotonic sequence) rebuilds the session's ledger record from the snapshot, replaces it in state and persists it, so a restart after a live history rewrite cannot resurrect deleted usage; persist failures keep explicit dirty/recovery state and surface as resync-ledger-persist-failed.
 - Live resync authority is now proof-based: snapshots that only have a higher tail, or events without a usable sequence, are treated as lagging (upsert the event, stay pending, align on the follow-up resync) instead of being destructively replaced.
 
+- Show real vendor brand icons instead of neutral dots for models in the request log, the selected-call details, the model summary table, and the cost-settings match table. The 11 brand SVGs live in assets/model-icons/ with a manifest (provider aliases, model prefixes, exact overrides, source and licence) and are validated and embedded as data: URIs by scripts/build-client.mjs, so the runtime never reads local paths or the network. Model namespaces win over the DSH provider name so reseller and gateway routes are attributed by the model they actually served; unknown or mixed-brand rows keep the neutral fallback, and workspace colour dots plus chart legend dots are unchanged.
+
 ## [1.1.3] - 2026-09-01
 
 ### Added

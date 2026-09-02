@@ -161,6 +161,77 @@ window.__ModuleLoader__.load({
       }
       return React.createElement('svg', { className: 'uh-line-icon ' + (props.className || ''), width: size, height: size, viewBox: '0 0 24 24', 'aria-hidden': true }, paths[props.name] || paths.chart)
     }
+    // Model brand icons are embedded by scripts/build-client.mjs at build time
+    // (data: URIs only, no runtime file or network access). The placeholder is
+    // replaced with the validated icon table; a plain source checkout keeps the
+    // neutral fallback dot.
+    const MODEL_ICONS = /* __MODEL_ICON_DATA__ */ null
+    const MODEL_ICON_TABLE = Array.isArray(MODEL_ICONS) ? MODEL_ICONS : []
+    const MODEL_ICON_BY_KEY = new Map(MODEL_ICON_TABLE.map((icon) => [icon.key, icon]))
+    const MODEL_ICON_CACHE = new Map()
+    function normalizeIconModel(value) {
+      if (typeof value !== 'string') return ''
+      let text = value.trim().toLowerCase()
+      const slash = text.lastIndexOf('/')
+      if (slash >= 0) text = text.slice(slash + 1)
+      return text.split(':')[0].replace(/@/g, '-').trim()
+    }
+    function iconForProvider(provider) {
+      const normalized = typeof provider === 'string' ? provider.trim().toLowerCase() : ''
+      if (normalized === '') return null
+      for (const icon of MODEL_ICON_TABLE) if (icon.providers.includes(normalized)) return icon
+      return null
+    }
+    function iconForModel(model) {
+      const normalized = normalizeIconModel(model)
+      if (normalized === '') return null
+      for (const icon of MODEL_ICON_TABLE) if (icon.exact.includes(normalized)) return icon
+      let best = null
+      let bestLength = 0
+      for (const icon of MODEL_ICON_TABLE) {
+        for (const prefix of icon.prefixes) {
+          if (prefix !== '' && normalized.startsWith(prefix) && prefix.length > bestLength) { best = icon; bestLength = prefix.length }
+        }
+      }
+      return best
+    }
+    /**
+     * Resolve one row to a brand icon. Model namespaces win over the DSH
+     * provider name so reseller and gateway routes (openrouter, siliconflow,
+     * custom gateways) are attributed by the model they actually served; an
+     * unknown or conflicting row keeps the neutral fallback.
+     */
+    function resolveModelIcon(row) {
+      if (MODEL_ICON_TABLE.length === 0 || row === null || typeof row !== 'object') return null
+      const actual = typeof row.actualModel === 'string' ? row.actualModel : ''
+      const requested = typeof row.requestedModel === 'string' ? row.requestedModel : ''
+      const label = typeof row.model === 'string' ? row.model : ''
+      const provider = typeof row.provider === 'string' ? row.provider : ''
+      const cacheKey = actual + '\u0000' + requested + '\u0000' + label + '\u0000' + provider
+      if (MODEL_ICON_CACHE.has(cacheKey)) return MODEL_ICON_CACHE.get(cacheKey)
+      const labelModel = label.includes(' / ') ? label.slice(label.indexOf(' / ') + 3) : label
+      let icon = iconForModel(actual) || iconForModel(requested)
+      if (icon === null) {
+        const providerIcon = iconForProvider(provider)
+        const labelIcon = iconForModel(labelModel)
+        // A provider-only match must not contradict the model namespace.
+        icon = providerIcon !== null && (labelIcon === null || labelIcon === providerIcon) ? providerIcon : labelIcon
+      }
+      MODEL_ICON_CACHE.set(cacheKey, icon)
+      return icon
+    }
+    /** Icon for an aggregate row: only when every member maps to one brand. */
+    function resolveAggregateModelIcon(rows) {
+      if (!Array.isArray(rows) || rows.length === 0) return null
+      let icon = null
+      for (const row of rows) {
+        const candidate = resolveModelIcon(row)
+        if (candidate === null) return null
+        if (icon === null) icon = candidate
+        else if (icon !== candidate) return null
+      }
+      return icon
+    }
     function chineseMagnitude(n, language) {
       if (language === 'en' || typeof n !== 'number' || !Number.isFinite(n) || n < 10000) return ''
       const value = n >= 100000000 ? n / 100000000 : n / 10000
@@ -588,13 +659,21 @@ window.__ModuleLoader__.load({
     function aggregateModelRows(rows, view, unknownProvider, unknownModel) {
       if (view === 'route') return rows.slice()
       const grouped = new Map()
+      const members = new Map()
       for (const row of rows) {
         const parts = modelParts(row, unknownProvider, unknownModel)
         const key = view === 'model' ? parts.model : parts.provider
         let item = grouped.get(key)
-        if (item === undefined) { item = { model: key, provider: view === 'provider' ? key : parts.provider, calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: emptyCostAggregate() }; grouped.set(key, item) }
+        if (item === undefined) { item = { model: key, provider: view === 'provider' ? key : parts.provider, calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: emptyCostAggregate() }; grouped.set(key, item); members.set(key, []) }
+        members.get(key).push(row)
         item.calls += row.calls; item.input += row.input; item.output += row.output; item.cacheRead += row.cacheRead; item.cacheWrite += row.cacheWrite; item.reasoning += row.reasoning
         addCostAggregate(item.cost, row.cost)
+      }
+      // A grouped row only carries a brand icon when every member maps to the
+      // same brand; mixed attribution keeps the neutral fallback.
+      for (const [key, item] of grouped) {
+        const icon = resolveAggregateModelIcon(members.get(key))
+        item.iconKey = icon === null ? null : icon.key
       }
       return Array.from(grouped.values())
     }
@@ -1151,6 +1230,19 @@ window.__ModuleLoader__.load({
     }
     const MemoUsagePricingDialog = React.memo(UsagePricingDialog, (previous, next) => previous.revision === next.revision)
 
+    function ModelIcon(props) {
+      const size = Number.isFinite(props.size) ? props.size : 18
+      const icon = props.iconKey !== undefined && props.iconKey !== null ? MODEL_ICON_BY_KEY.get(props.iconKey) || null : resolveModelIcon(props.row)
+      const [failed, setFailed] = React.useState(false)
+      const style = { width: size, height: size, minWidth: size }
+      if (icon === null || failed) {
+        return React.createElement('span', { className: 'uh-model-icon uh-model-icon-fallback' + (props.className ? ' ' + props.className : ''), style, 'aria-hidden': true })
+      }
+      return React.createElement('span', { className: 'uh-model-icon' + (props.className ? ' ' + props.className : ''), style, 'aria-hidden': true, title: props.showTitle === true ? icon.label : undefined },
+        React.createElement('img', { src: icon.href, alt: '', width: size, height: size, loading: 'lazy', decoding: 'async', draggable: false, onError: () => setFailed(true) }),
+      )
+    }
+    const MemoModelIcon = React.memo(ModelIcon)
     function UsageRecordsPanel(props) {
       const language = props.language === 'en' ? 'en' : 'zh'
       const tr = (zh, en) => language === 'en' ? en : zh
@@ -1178,7 +1270,9 @@ window.__ModuleLoader__.load({
           ),
           rows.map((row) => React.createElement('div', { key: row.id, className: 'uh-record-grid uh-record-row' + (selected && selected.id === row.id ? ' uh-on' : ''), role: 'button', tabIndex: 0, 'aria-pressed': selected && selected.id === row.id, onClick: () => select(row.id), onKeyDown: (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(row.id) } } },
             React.createElement('div', { className: 'uh-record-time' }, auditTime(row, false)),
-            React.createElement('div', { className: 'uh-record-model', title: row.model || '' }, row.model || tr('未知模型', 'Unknown model'), row.requestedModel && row.actualModel && row.requestedModel !== row.actualModel ? React.createElement('small', {}, row.requestedModel + ' → ' + row.actualModel) : null),
+            React.createElement('div', { className: 'uh-record-model', title: row.model || '' },
+              React.createElement('span', { className: 'uh-model-label' }, React.createElement(MemoModelIcon, { row, size: 16 }), React.createElement('span', { className: 'uh-model-text' }, row.model || tr('未知模型', 'Unknown model'))),
+              row.requestedModel && row.actualModel && row.requestedModel !== row.actualModel ? React.createElement('small', {}, row.requestedModel + ' → ' + row.actualModel) : null),
             React.createElement('div', { className: 'uh-record-num' }, (row.turn === null || row.turn === undefined ? '—' : row.turn) + ' / ' + (row.step === null || row.step === undefined ? '—' : row.step)),
             React.createElement('div', { className: 'uh-record-num' }, fmtCompact(auditToken(row, 'input'))),
             React.createElement('div', { className: 'uh-record-num' }, fmtCompact(auditToken(row, 'cacheRead'))),
@@ -1195,7 +1289,7 @@ window.__ModuleLoader__.load({
         selected ? React.createElement('div', { className: 'uh-record-detail' },
           React.createElement('div', { className: 'uh-record-detail-head' }, React.createElement('strong', {}, tr('选中调用', 'Selected call')), React.createElement('span', { className: 'uh-note' }, auditTime(selected, true))),
           React.createElement('div', { className: 'uh-record-detail-meta' },
-            React.createElement('span', {}, (selected.provider || tr('未知供应商', 'Unknown provider')) + ' / ' + (selected.actualModel || selected.requestedModel || selected.model || tr('未知模型', 'Unknown model'))),
+            React.createElement('span', { className: 'uh-model-label' }, React.createElement(MemoModelIcon, { row: selected, size: 16, showTitle: true }), React.createElement('span', {}, (selected.provider || tr('未知供应商', 'Unknown provider')) + ' / ' + (selected.actualModel || selected.requestedModel || selected.model || tr('未知模型', 'Unknown model')))),
             React.createElement('span', {}, 'turn ' + (selected.turn === null || selected.turn === undefined ? '—' : selected.turn) + ' · step ' + (selected.step === null || selected.step === undefined ? '—' : selected.step)),
             React.createElement('span', {}, tr('来源：', 'Source: ') + auditSource(selected)),
             React.createElement('span', {}, tr('计价模型：', 'Pricing model: ') + (selected.cost && selected.cost.pricingModel ? selected.cost.pricingModel : tr('未计价', 'unpriced'))),
@@ -1457,6 +1551,11 @@ window.__ModuleLoader__.load({
 .uh-record-row:last-child > div { border-bottom:0; }
 .uh-record-time, .uh-record-num { color:var(--dsw-alias-label-secondary); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .uh-record-num { text-align:right; }
+.uh-model-icon { display:inline-flex; align-items:center; justify-content:center; flex:none; vertical-align:middle; }
+.uh-model-icon img { display:block; width:100%; height:100%; object-fit:contain; }
+.uh-model-icon-fallback { border-radius:50%; background:var(--dsw-alias-fill-tertiary, rgba(128,128,128,.22)); box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l1, rgba(128,128,128,.3)); }
+.uh-model-label { display:flex; align-items:center; gap:7px; min-width:0; }
+.uh-model-label .uh-model-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
 .uh-record-model { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:550; }
 .uh-record-model small { display:block; overflow:hidden; color:var(--dsw-alias-label-secondary); font-size:10px; font-weight:400; text-overflow:ellipsis; white-space:nowrap; }
 .uh-record-source { color:var(--dsw-alias-label-secondary); white-space:nowrap; }
@@ -2872,7 +2971,7 @@ window.__ModuleLoader__.load({
         const rate = rateOf(m.input, m.cacheRead)
         return React.createElement('div', { key: m.identityKey || m.model, className: 'uh-model-row uh-row' },
           React.createElement('div', { className: 'uh-row-title-wrap' },
-            React.createElement('div', { className: 'uh-ws-title', title: m.model }, m.model),
+            React.createElement('div', { className: 'uh-ws-title uh-model-label', title: m.model }, React.createElement(MemoModelIcon, { iconKey: m.iconKey, row: m, size: 18, showTitle: true }), React.createElement('span', { className: 'uh-model-text' }, m.model)),
           ),
           React.createElement('div', { className: 'uh-num' }, fmtCompact(m.calls)),
           React.createElement('div', { className: 'uh-num' }, fmtCompact(m.input)),
@@ -2952,7 +3051,7 @@ window.__ModuleLoader__.load({
                 const schedule = hasTierSchedule ? [Object.assign({ type: 'context', size: 0 }, model.rates)].concat(tiers) : []
                 return React.createElement(React.Fragment, { key: model.identityKey },
                   React.createElement('tr', {},
-                    React.createElement('td', { className: 'uh-pricing-model-name', title: model.model }, model.model || tr('未知模型', 'Unknown model')),
+                    React.createElement('td', { className: 'uh-pricing-model-name', title: model.model }, React.createElement('span', { className: 'uh-model-label' }, React.createElement(MemoModelIcon, { row: model, size: 16 }), React.createElement('span', { className: 'uh-model-text' }, model.model || tr('未知模型', 'Unknown model')))),
                     React.createElement('td', { title: model.reason || '' }, React.createElement('span', { className: 'uh-pricing-status uh-pricing-status-' + (model.status || 'unpriced') }, pricingStatusLabel(model.status || 'unpriced', language))),
                     React.createElement('td', { className: 'uh-pricing-model-target', title: model.pricingModel || '' }, model.pricingModel || tr('未匹配', 'No match')),
                     React.createElement('td', {}, React.createElement('span', { className: 'uh-pricing-tier-badge' + (model.tiered === true ? '' : ' uh-flat'), title: model.temporalPolicyId || '' }, tierLabel + (temporalLabel !== '' ? ' · ' + temporalLabel : ''))),

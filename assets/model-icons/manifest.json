@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 1,
+  "note": "Brand-level model icons embedded into lib/client.js at build time as data: URIs. Runtime never reads these files or the network.",
+  "license": "Brand logos remain property of their respective owners; bundled for identification only (nominative use).",
+  "source": "https://github.com/lobehub/lobe-icons (brand SVG set), monochrome marks neutralized to #8a8f98 at import time",
+  "fallbackKey": null,
+  "icons": [
+    {
+      "key": "deepseek",
+      "file": "deepseek-color.svg",
+      "label": "DeepSeek",
+      "providers": [
+        "deepseek",
+        "deepseek-official"
+      ],
+      "prefixes": [
+        "deepseek-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "openai",
+      "file": "openai-color.svg",
+      "label": "OpenAI",
+      "providers": [
+        "openai",
+        "azure-openai"
+      ],
+      "prefixes": [
+        "gpt-",
+        "o1",
+        "o3",
+        "o4",
+        "o5",
+        "codex-"
+      ],
+      "exact": [
+        "o1",
+        "o3",
+        "o4",
+        "o5"
+      ]
+    },
+    {
+      "key": "claude",
+      "file": "claude-color.svg",
+      "label": "Anthropic Claude",
+      "providers": [
+        "anthropic"
+      ],
+      "prefixes": [
+        "claude-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "gemini",
+      "file": "gemini-color.svg",
+      "label": "Google Gemini",
+      "providers": [
+        "google",
+        "google-vertex",
+        "vertex"
+      ],
+      "prefixes": [
+        "gemini-",
+        "gemma-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "meta",
+      "file": "meta-color.svg",
+      "label": "Meta Llama",
+      "providers": [
+        "meta",
+        "meta-llama"
+      ],
+      "prefixes": [
+        "llama-",
+        "meta-llama"
+      ],
+      "exact": []
+    },
+    {
+      "key": "zhipu",
+      "file": "zhipu-color.svg",
+      "label": "Zhipu GLM",
+      "providers": [
+        "zhipu",
+        "zhipuai",
+        "zai",
+        "bigmodel"
+      ],
+      "prefixes": [
+        "glm-",
+        "chatglm-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "grok",
+      "file": "grok.svg",
+      "label": "xAI Grok",
+      "providers": [
+        "xai"
+      ],
+      "prefixes": [
+        "grok-"
+      ],
+      "exact": [
+        "grok"
+      ]
+    },
+    {
+      "key": "qwen",
+      "file": "qwen-color.svg",
+      "label": "Qwen",
+      "providers": [
+        "qwen",
+        "alibaba",
+        "dashscope",
+        "bailian"
+      ],
+      "prefixes": [
+        "qwen",
+        "qwq-",
+        "qvq-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "doubao",
+      "file": "doubao-color.svg",
+      "label": "Doubao",
+      "providers": [
+        "doubao",
+        "bytedance",
+        "volcengine",
+        "ark"
+      ],
+      "prefixes": [
+        "doubao-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "kimi",
+      "file": "kimi-color.svg",
+      "label": "Moonshot Kimi",
+      "providers": [
+        "moonshot",
+        "moonshotai"
+      ],
+      "prefixes": [
+        "kimi-",
+        "moonshot-"
+      ],
+      "exact": [
+        "kimi"
+      ]
+    },
+    {
+      "key": "minimax",
+      "file": "minimax-color.svg",
+      "label": "MiniMax",
+      "providers": [
+        "minimax"
+      ],
+      "prefixes": [
+        "minimax-",
+        "abab"
+      ],
+      "exact": []
+    }
+  ]
+}
