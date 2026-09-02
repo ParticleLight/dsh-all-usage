@@ -715,6 +715,105 @@ test('a full live resync clears stale request contexts after a history rewrite',
   assert.equal(outcome.pricingTimeSource, 'usage-event')
   assert.equal(outcome.pricingAt, MONDAY_OFF)
 })
+test('an authoritative resync rewrites the persisted ledger and restart agrees', async () => {
+  let source = [
+    { seq: 0, time: MONDAY_OFF, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 1, step: 1 } },
+    usageEvent(MONDAY_OFF, 1, 1, { inputTokens: 1000000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 1),
+  ]
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-led', path: 'C:\\led', title: 'Led' }],
+    sessions: [{ header: { id: 's-led', cwd: 'C:\\led' } }],
+    events: new Map(),
+    readSession: async () => ({ events: source }),
+    snapshots: [{ header: { id: 's-led' }, revision: 'r1' }],
+  })
+  await waitForScan(app)
+  const snap = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  const token = snap.requestToken
+  await postPricing(app, token, { pricing: { catalogEntries: [V4_FLASH] }, backfill: true })
+  await waitForScan(app, (body) => body.totals.cost.pricedCalls === 1)
+  await waitForLedgerWrite()
+  assert.equal(app.storageUnit.records.sessions['s-led'].usage.length, 1)
+  source = [
+    { seq: 3, time: MONDAY_OFF, type: 'turn/end', data: { turn: 1 } },
+  ]
+  app.listeners['session/event'][0]({ id: 's-led', header: { cwd: 'C:\\led' } }, { seq: 3, time: MONDAY_OFF, type: 'turn/end', data: { turn: 1 } })
+  let result = null
+  for (let i = 0; i < 100; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+    const body = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+    if (body.totals.input === 0) { result = body; break }
+  }
+  assert.ok(result !== null)
+  await waitForLedgerWrite()
+  const stored = app.storageUnit.records.sessions['s-led']
+  assert.equal(stored.usage.length, 0)
+  assert.equal(stored.lastSeq, 3)
+  const second = await createApp({
+    withStorage: true,
+    storage: app.storageUnit,
+    workspaces: [{ id: 'ws-led', path: 'C:\\led', title: 'Led' }],
+    sessions: [{ header: { id: 's-led', cwd: 'C:\\led' } }],
+    events: new Map(),
+    readSession: async () => ({ events: source }),
+    snapshots: [{ header: { id: 's-led' }, revision: 'r1' }],
+  })
+  await waitForScan(second)
+  const restarted = (await call(second, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.equal(restarted.totals.input, 0)
+  assert.equal(restarted.totals.cost.pricedCalls, 0)
+})
+
+test('a snapshot that omits the triggering event never replaces the aggregate', async () => {
+  let source = [
+    { seq: 0, time: MONDAY_OFF, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 1, step: 1 } },
+  ]
+  const app = await createApp({
+    workspaces: [{ id: 'ws-omit', path: 'C:\\omit', title: 'Omit' }],
+    sessions: [{ header: { id: 's-omit', cwd: 'C:\\omit' } }],
+    events: new Map(),
+    readSession: async () => ({ events: source }),
+  })
+  await waitForScan(app)
+  source = [
+    { seq: 0, time: MONDAY_OFF, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 1, step: 1 } },
+    usageEvent(MONDAY_OFF, 1, 1, { inputTokens: 60, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 1),
+    usageEvent(MONDAY_OFF, 3, 1, { inputTokens: 150, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 3),
+  ]
+  app.listeners['session/event'][0]({ id: 's-omit', header: { cwd: 'C:\\omit' } }, usageEvent(MONDAY_OFF, 2, 1, { inputTokens: 200, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 2))
+  let total = null
+  for (let i = 0; i < 100; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+    const body = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+    if (body.totals.input === 410) { total = 410; break }
+  }
+  assert.equal(total, 410)
+})
+
+test('an event without a usable seq never triggers a destructive replacement', async () => {
+  const source = [
+    { seq: 0, time: MONDAY_OFF, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 1, step: 1 } },
+    usageEvent(MONDAY_OFF, 1, 1, { inputTokens: 60, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 1),
+  ]
+  const app = await createApp({
+    workspaces: [{ id: 'ws-noseq', path: 'C:\\noseq', title: 'Noseq' }],
+    sessions: [{ header: { id: 's-noseq', cwd: 'C:\\noseq' } }],
+    events: new Map([['s-noseq', source]]),
+  })
+  await waitForScan(app)
+  const event = usageEvent(MONDAY_OFF, 2, 1, { inputTokens: 200, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, undefined)
+  delete event.seq
+  app.listeners['session/event'][0]({ id: 's-noseq', header: { cwd: 'C:\\noseq' } }, event)
+  let total = null
+  for (let i = 0; i < 60; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+    const body = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+    if (body.totals.input === 260) { total = 260; break }
+  }
+  assert.equal(total, 260)
+})
+
 
 test('an authoritative live resync removes usage deleted by a rewritten history', async () => {
   let source = [
@@ -977,4 +1076,49 @@ test('context archives evict true LRU and stay bounded across restart', async ()
   const secondArchiveKeys = second.storageUnit.records.sessions['s-lru'].contextTimes.map((entry) => entry.key)
   assert.equal(secondArchiveKeys.length, 512)
   assert.ok(secondArchiveKeys.includes('context:1:1'))
+})
+test('a baseline tail rolled back by a live fallback still reconciles on the follow-up resync', async () => {
+  let source = [
+    { seq: 0, time: MONDAY_OFF, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 1, step: 1 } },
+    usageEvent(MONDAY_OFF, 1, 1, { inputTokens: 30, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 1),
+  ]
+  const app = await createApp({
+    workspaces: [{ id: 'ws-roll', path: 'C:\\roll', title: 'Roll' }],
+    sessions: [{ header: { id: 's-roll', cwd: 'C:\\roll' } }],
+    events: new Map(),
+    readSession: async () => ({ events: source }),
+  })
+  await waitForScan(app)
+  // A live tail event arrives while the snapshot is behind: it is folded as a
+  // fallback and the session goes into pending alignment.
+  app.listeners['session/event'][0]({ id: 's-roll', header: { cwd: 'C:\\roll' } }, usageEvent(MONDAY_OFF, 2, 1, { inputTokens: 40, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 5))
+  for (let i = 0; i < 40; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+    const body = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+    if (body.totals.input === 70) break
+  }
+  // The full history later arrives with a DIFFERENT seq 5 (turn/end, no usage),
+  // so the old live cursor must not keep the aggregate at 70: the follow-up
+  // resync rebuilds from the authoritative snapshot and lands back on 30.
+  source = [
+    { seq: 0, time: MONDAY_OFF, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-v4-flash', turn: 1, step: 1 } },
+    usageEvent(MONDAY_OFF, 1, 1, { inputTokens: 30, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 1),
+    { seq: 5, time: MONDAY_OFF, type: 'turn/end', data: { turn: 1 } },
+  ]
+  let total = null
+  for (let i = 0; i < 40; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    const body = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+    if (body.totals.input === 30) { total = 30; break }
+  }
+  assert.equal(total, 30)
+  // After alignment the cursor follows the new tail: seq 6 folds directly.
+  app.listeners['session/event'][0]({ id: 's-roll', header: { cwd: 'C:\\roll' } }, usageEvent(MONDAY_OFF, 2, 1, { inputTokens: 50, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, 6))
+  let aligned = null
+  for (let i = 0; i < 40; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+    const body = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+    if (body.totals.input === 80) { aligned = 80; break }
+  }
+  assert.equal(aligned, 80)
 })
