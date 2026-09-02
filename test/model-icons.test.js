@@ -31,6 +31,22 @@ vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__iconHelpers = { no
 const { normalizeIconModel, iconForModel, iconForProvider, resolveModelIcon, resolveAggregateModelIcon } = context.__iconHelpers
 const keyOf = (row) => { const icon = resolveModelIcon(row); return icon === null ? null : icon.key }
 
+// Mirror of aggregateModelRows' icon attribution: provider views resolve by
+// provider name only, model views require every member to share one brand.
+function aggregateRows(rows, view) {
+  const groups = new Map()
+  for (const row of rows) {
+    const label = view === 'provider' ? row.provider : String(row.actualModel || row.requestedModel || row.model)
+    if (!groups.has(label)) groups.set(label, [])
+    groups.get(label).push(row)
+  }
+  return Array.from(groups, ([model, members]) => {
+    const icon = view === 'provider' ? iconForProvider(model) : resolveAggregateModelIcon(members)
+    return { model, iconKey: icon === null ? null : icon.key }
+  })
+}
+
+
 test('the manifest ships one valid entry per bundled brand icon', () => {
   assert.equal(manifest.schemaVersion, 1)
   assert.equal(manifest.icons.length, 11)
@@ -115,6 +131,22 @@ test('aggregate rows only carry an icon when every member is one brand', () => {
   ])
   assert.equal(withUnknown, null)
   assert.equal(resolveAggregateModelIcon([]), null)
+})
+
+test('provider aggregates use provider icons and never inherit a model brand', () => {
+  const rows = [
+    { provider: 'openrouter', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', model: 'openrouter / deepseek-v4-flash', calls: 1, input: 10, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+    { provider: 'openrouter', requestedModel: 'gpt-5.6-luna', actualModel: 'gpt-5.6-luna', model: 'openrouter / gpt-5.6-luna', calls: 1, input: 10, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+    { provider: 'deepseek-official', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', model: 'deepseek-official / deepseek-v4-flash', calls: 1, input: 10, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+  ]
+  const byProvider = aggregateRows(rows, 'provider')
+  // A gateway serving several vendors stays neutral even though one of its rows
+  // would resolve to a DeepSeek model icon.
+  assert.equal(byProvider.find((row) => row.model === 'openrouter').iconKey, null)
+  assert.equal(byProvider.find((row) => row.model === 'deepseek-official').iconKey, 'deepseek')
+  const byModel = aggregateRows(rows, 'model')
+  assert.equal(byModel.find((row) => row.model === 'deepseek-v4-flash').iconKey, 'deepseek')
+  assert.equal(byModel.find((row) => row.model === 'gpt-5.6-luna').iconKey, 'openai')
 })
 
 test('longer model prefixes win over shorter ones', () => {

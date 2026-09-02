@@ -236,6 +236,33 @@ test('uses structured identity instead of splitting display labels', () => {
   assert.equal(grouped[0].calls, 3)
 })
 
+test('grouped rows expose a resolved iconKey slot for the brand icon layer', () => {
+  const rows = [{ provider: 'p', requestedModel: 'm', actualModel: 'm', model: 'p / m', calls: 1, input: 10, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }]
+  // Without an embedded icon table (plain source checkout) every row resolves to
+  // the neutral fallback, but the slot must exist for both views.
+  assert.equal(aggregateModelRows(rows, 'provider', 'Unknown provider', 'Unknown model')[0].iconKey, null)
+  assert.equal(aggregateModelRows(rows, 'model', 'Unknown provider', 'Unknown model')[0].iconKey, null)
+})
+
+test('donut segments carry the resolved brand and keep aggregates neutral', () => {
+  const items = [
+    { label: 'gpt-5.6-luna', value: 30, iconKey: 'openai' },
+    { label: 'deepseek-v4-flash', value: 20, iconKey: 'deepseek' },
+    { label: 'house-model', value: 10, iconKey: null },
+    { label: 'extra-a', value: 5, iconKey: null },
+    { label: 'extra-b', value: 4, iconKey: null },
+    { label: 'extra-c', value: 3, iconKey: null },
+  ]
+  const donut = buildDonutSegments(items, 'Other')
+  assert.equal(donut.segments[0].iconKey, 'openai')
+  assert.equal(donut.segments[1].iconKey, 'deepseek')
+  assert.equal(donut.segments[2].iconKey, null)
+  assert.equal(donut.segments.find((segment) => segment.other === true).iconKey, null)
+  // Series without an iconKey stay undefined so legacy callers render no icon.
+  assert.equal(buildDonutSegments([{ label: 'ws-main', value: 5 }], 'Other').segments[0].iconKey, undefined)
+})
+
+
 test('uses the selected language calendar bucket for custom ranges', () => {
   const stats = {
     byDay: [day('2026-05-02', 2, 20)],

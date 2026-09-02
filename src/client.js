@@ -669,10 +669,12 @@ window.__ModuleLoader__.load({
         item.calls += row.calls; item.input += row.input; item.output += row.output; item.cacheRead += row.cacheRead; item.cacheWrite += row.cacheWrite; item.reasoning += row.reasoning
         addCostAggregate(item.cost, row.cost)
       }
-      // A grouped row only carries a brand icon when every member maps to the
-      // same brand; mixed attribution keeps the neutral fallback.
+      // Provider aggregates are attributed by the provider name alone, so a
+      // reseller or gateway (which serves many vendors) never inherits a model
+      // brand. Model aggregates only carry a brand when every member maps to
+      // the same one; mixed attribution keeps the neutral fallback.
       for (const [key, item] of grouped) {
-        const icon = resolveAggregateModelIcon(members.get(key))
+        const icon = view === 'provider' ? iconForProvider(key) : resolveAggregateModelIcon(members.get(key))
         item.iconKey = icon === null ? null : icon.key
       }
       return Array.from(grouped.values())
@@ -795,6 +797,8 @@ window.__ModuleLoader__.load({
         label: item && item.label !== undefined ? String(item.label) : '',
         value: Number(item && item.value),
         color: item && typeof item.color === 'string' && item.color !== '' ? item.color : DONUT_COLORS[index % DONUT_COLORS.length],
+        // The caller resolves the brand (undefined = no icon for this series).
+        iconKey: item && item.iconKey !== undefined ? item.iconKey : undefined,
         cost: costAggregate(item),
       })).filter((item) => item.label !== '' && Number.isFinite(item.value) && item.value > 0).sort((a, b) => b.value - a.value)
       const total = normalized.reduce((sum, item) => sum + item.value, 0)
@@ -805,7 +809,7 @@ window.__ModuleLoader__.load({
       if (remainder > 0) {
         const remainderCost = emptyCostAggregate()
         for (const item of remainderItems) addCostAggregate(remainderCost, item.cost)
-        segments.push({ label: otherLabel + ' (' + (normalized.length - topLimit) + ')', value: remainder, color: '#b8c2cf', cost: remainderCost, other: true })
+        segments.push({ label: otherLabel + ' (' + (normalized.length - topLimit) + ')', value: remainder, color: '#b8c2cf', iconKey: null, cost: remainderCost, other: true })
       }
       let angle = -Math.PI / 2
       return {
@@ -913,6 +917,7 @@ window.__ModuleLoader__.load({
             ),
             activeSegment ? React.createElement('div', { ref: tooltipRef, className: 'uh-donut-tooltip', style: { visibility: 'hidden' } },
               React.createElement('span', { className: 'uh-donut-dot', style: { background: activeSegment.color } }),
+              activeSegment.iconKey === undefined || activeSegment.iconKey === null ? null : React.createElement(MemoModelIcon, { iconKey: activeSegment.iconKey, size: 15 }),
               React.createElement('div', {},
                 React.createElement('strong', {}, activeSegment.label),
                 React.createElement('span', {}, tokenDisplay(activeSegment.value, language) + ' · ' + percentText(activeSegment.percentage)),
@@ -927,6 +932,7 @@ window.__ModuleLoader__.load({
           React.createElement('div', { className: 'uh-donut-legend', role: 'list' },
             data.segments.map((segment) => React.createElement('div', { key: 'legend-' + segment.index, className: 'uh-donut-legend-row', role: 'listitem' },
               React.createElement('span', { className: 'uh-donut-dot', style: { background: segment.color } }),
+              segment.iconKey === undefined || segment.iconKey === null ? null : React.createElement(MemoModelIcon, { iconKey: segment.iconKey, size: 16, showTitle: true }),
               React.createElement('div', { className: 'uh-donut-legend-copy' },
                 React.createElement('strong', { title: segment.label }, segment.label),
               ),
@@ -1232,7 +1238,10 @@ window.__ModuleLoader__.load({
 
     function ModelIcon(props) {
       const size = Number.isFinite(props.size) ? props.size : 18
-      const icon = props.iconKey !== undefined && props.iconKey !== null ? MODEL_ICON_BY_KEY.get(props.iconKey) || null : resolveModelIcon(props.row)
+      // An explicit null iconKey means the caller already resolved 'no brand'
+      // (e.g. a provider aggregate for a reseller): never fall back to guessing
+      // a brand from the row's model namespace in that case.
+      const icon = props.iconKey === null ? null : props.iconKey !== undefined ? MODEL_ICON_BY_KEY.get(props.iconKey) || null : resolveModelIcon(props.row)
       const [failed, setFailed] = React.useState(false)
       const style = { width: size, height: size, minWidth: size }
       if (icon === null || failed) {
@@ -2429,7 +2438,7 @@ window.__ModuleLoader__.load({
       }, [queryScope, queryUsable, queryResult, activeDayRows, stats, range, useUtc, activeCustomRangeKey])
       const trendAnimationKey = queryUsable && queryResult ? queryKey + ':' + (queryVersion(queryResult) || 'query') : queryKey
       const pricingRenderRevision = React.useMemo(() => ({}), [pricingOpen, pricingDraft, pricingLoading, pricingSaving, pricingSyncing, pricingSyncSaving, pricingError, currentPricing, pricingSummary, pricingUsedModels, pricingUsedModelOptions, pricingUsedModelOpen, pricingOverrideOpen, pricingUsedModelSearchText, pricingOverrideSearchText, pricingModelSearchOpen, pricingModelSearchOptions, stats, language])
-      const modelDonutItems = React.useMemo(() => modelRows.map((row, index) => ({ label: row.model, value: wsTotal(row), cost: row.cost, color: DONUT_COLORS[index % DONUT_COLORS.length] })), [modelRows])
+      const modelDonutItems = React.useMemo(() => modelRows.map((row, index) => ({ label: row.model, value: wsTotal(row), cost: row.cost, color: DONUT_COLORS[index % DONUT_COLORS.length], iconKey: modelView === 'route' ? (() => { const icon = resolveModelIcon(row); return icon === null ? null : icon.key })() : (row.iconKey === undefined ? null : row.iconKey) })), [modelRows, modelView])
       const workspaceDonutItems = React.useMemo(() => rows.map((row, index) => ({ label: wsTitle(row.workspaceId), value: wsTotal(row), cost: row.cost, color: DONUT_COLORS[index % DONUT_COLORS.length] })), [rows, wsTitle])
       const toggleTrendSeries = React.useCallback((key) => {
         setTrendVisible((prev) => {
