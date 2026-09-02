@@ -29,6 +29,9 @@ All notable changes to `dsh-all-usage` are documented here.
 - Include pricingAt and pricingTimeSource in the live/incremental reuse check, so audit metadata refreshes when the request instant or its source changes even within one band.
 - Use real LRU eviction (delete + set) for the bounded request-context archive, applying the same 512-entry cap to the live fold, the persisted ledger, and deserialization.
 
+- An authoritative live resync (full snapshot or a snapshot that provably contains the triggering event with a monotonic sequence) rebuilds the session's ledger record from the snapshot, replaces it in state and persists it, so a restart after a live history rewrite cannot resurrect deleted usage; persist failures keep explicit dirty/recovery state and surface as resync-ledger-persist-failed.
+- Live resync authority is now proof-based: snapshots that only have a higher tail, or events without a usable sequence, are treated as lagging (upsert the event, stay pending, align on the follow-up resync) instead of being destructively replaced.
+
 ## [1.1.3] - 2026-09-01
 
 ### Added
