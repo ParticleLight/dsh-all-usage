@@ -269,6 +269,8 @@ test('resolvePricing applies the built-in DeepSeek profile only on first-party r
   const state = { catalogEntries: [{ ...V4_FLASH, source: 'models.dev', fetchedAt: 0 }], overrides: [], mappings: [], providerAliases: {} }
   const official = resolvePricing({ provider: 'deepseek', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', label: 'deepseek-v4-flash', legacy: false }, state)
   assert.equal(official.temporalRoute, 'official')
+  const officialNamed = resolvePricing({ provider: 'deepseek-official', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', label: 'deepseek-official / deepseek-v4-flash', legacy: false }, state)
+  assert.equal(officialNamed.temporalRoute, 'official')
   const reseller = resolvePricing({ provider: 'openrouter', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', label: 'openrouter / deepseek-v4-flash', legacy: false }, state)
   assert.equal(reseller.temporalRoute, 'other')
   const plan = temporalPlanFor(reseller, MONDAY_PEAK)
