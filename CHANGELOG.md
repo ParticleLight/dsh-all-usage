@@ -38,6 +38,14 @@ All notable changes to `dsh-all-usage` are documented here.
 - Build-time SVG validation now decodes XML entities before checking, rejects unquoted URI attributes, external CSS url()/image-set() and @import targets (including escaped/commented/CDO-CDC/namespaced <svg:style> forms), DOCTYPE/CDATA/processing instructions and every external-resource element; the CSS checks run only on style attributes and <style> bodies so icon text and comments stay inert. It lives in scripts/svg-guard.mjs so the tests exercise the exact same guard with adversarial fixtures.
 - Bundle the icon provenance required for release: the manifest pins the upstream commit, records per-file upstream paths and modification flags, and assets/model-icons/LICENSE.upstream-lobe-icons.txt ships the MIT notice, copyright, trademark disclaimer and the local modifications. The build fails if the pinned revision, licence file or per-file attribution is missing.
 
+## [1.1.4] - 2026-09-03
+
+### Fixed
+
+- Hardened the model-icon build guard after an independent audit: the CSS checks now reject CDO/CDC-adjacent `@import`, external `@import` inside namespaced `<svg:style>` elements, CSS-escaped `url(` identifiers and external `image-set()` targets, all matching Blink's own tokenizer. Style-attribute `url(...)` references are checked on both the raw and entity-decoded document so `&quot;` quoting cannot split a payload while encoded `@import` is still caught after decoding.
+- CSS `url()`/`image-set()` checks now run only on style attributes and `<style>` bodies, so provenance comments, `<text>` content and CSS comments stay inert (no false positives); the adversarial fixtures assert the rejection reason instead of accepting any error.
+- The model filter dropdown now renders the vendor brand icon for each model option (actual model first, neutral fallback for unknown/private models) instead of the generic line icon, and the three usage-dashboard screenshots were refreshed to the current UI.
+
 ## [1.1.3] - 2026-09-01
 
 ### Added
@@ -227,6 +235,7 @@ This release reduces historical scan work, storage write amplification, and Dash
 - Allowed same-origin browser balance GET requests that omit `Origin` while retaining token protection.
 - Standardized English date buckets, range filters, streaks, heatmap dates, and export timestamps on UTC.
 
+[1.1.4]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.4
 [1.1.3]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.3
 [1.1.2]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.2
 [1.1.0]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.0
