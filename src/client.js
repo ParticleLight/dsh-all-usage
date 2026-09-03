@@ -1371,6 +1371,12 @@ window.__ModuleLoader__.load({
         if (typeof props.onChange === 'function') props.onChange(next)
         setOpen(false)
       }
+      const renderIcon = (option) => {
+        const iconKey = option === undefined || option === null || option.iconKey === undefined || option.iconKey === null ? null : option.iconKey
+        return iconKey === null
+          ? React.createElement(LineIcon, { name: props.icon || 'chart', size: 14 })
+          : React.createElement(MemoModelIcon, { iconKey, size: 14 })
+      }
       return React.createElement('div', { className: 'uh-language-menu uh-filter-menu' + (props.className ? ' ' + props.className : '') + (open ? ' uh-open' : ''), ref: menuRef, onKeyDown: (event) => { if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); setOpen(false) } } },
         React.createElement('button', {
           type: 'button',
@@ -1381,7 +1387,7 @@ window.__ModuleLoader__.load({
           'aria-expanded': open,
           onClick: () => setOpen((current) => !current),
         },
-          React.createElement(LineIcon, { name: props.icon || 'chart', size: 14 }),
+          renderIcon(selected),
           React.createElement('span', { className: 'uh-filter-label' }, selected ? selected.label : props.label),
           React.createElement(LineIcon, { name: 'chevron', size: 13, className: 'uh-language-caret' }),
         ),
@@ -1397,7 +1403,7 @@ window.__ModuleLoader__.load({
               className: 'uh-language-option' + (active ? ' uh-on' : ''),
               onClick: () => choose(optionValue),
             },
-              React.createElement(LineIcon, { name: props.icon || 'chart', size: 14 }),
+              renderIcon(option),
               React.createElement('span', { className: 'uh-filter-option-label' }, option.label),
               active ? React.createElement(LineIcon, { name: 'check', size: 14, className: 'uh-language-option-check' }) : null,
             )
@@ -3473,7 +3479,7 @@ window.__ModuleLoader__.load({
             className: 'uh-filter-model',
             icon: 'cache',
             value: modelFilter || '',
-            options: [{ value: '', label: tr('全部模型', 'All models') }].concat(modelOptions.map((value) => ({ value, label: value }))),
+            options: [{ value: '', label: tr('全部模型', 'All models') }].concat(modelOptions.map((value) => { const icon = resolveModelIcon({ actualModel: value, requestedModel: value }); return { value, label: value, iconKey: icon === null ? null : icon.key } })),
             onChange: (value) => chooseModel(value),
           }),
           (wsFilter !== null || providerFilter !== null || modelFilter !== null) ? React.createElement('button', { type: 'button', className: 'uh-filter-clear', onClick: clearFilters }, tr('清除筛选', 'Clear filters')) : null,

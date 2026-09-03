@@ -188,17 +188,58 @@ test('the SVG guard rejects encoded and unquoted external references', () => {
     ['inline handler', '<svg onload=alert(1)></svg>'],
     ['javascript uri', '<svg><a href="javascript:alert(1)">x</a></svg>'],
     ['data uri paint', '<svg><path fill="data:image/png;base64,AAA"/></svg>'],
+    ['quoted css import', '<svg><style>@import \"https://attacker.invalid/x.css\";</style></svg>'],
+    ['unquoted css import', '<svg><style>@import //attacker.invalid/x.css;</style></svg>'],
+    ['relative css import', '<svg><style>@import \"/vendor.css\";</style></svg>'],
+    ['encoded css import', '<svg><style>@import &quot;https://attacker.invalid/x.css&quot;;</style></svg>'],
+    ['css url import', '<svg><style>@import url(https://attacker.invalid/x.css);</style></svg>'],
+    ['comment separated import', '<svg><style>@import/**/\"https://attacker.invalid/x.css\";</style></svg>'],
+    ['escaped import', '<svg><style>@\\69 mport \"https://attacker.invalid/x.css\";</style></svg>'],
+    ['escaped middle import', '<svg><style>@im\\70 ort \"https://attacker.invalid/x.css\";</style></svg>'],
+    ['continued import', '<svg><style>@im\\\nport \"https://attacker.invalid/x.css\";</style></svg>'],
+    ['CDO import', '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><style><!--@import \"https://attacker.invalid/x.css\";--></style><rect width=\"16\" height=\"16\" fill=\"#000\"/></svg>'],
+    ['CDC import', '<svg xmlns=\"http://www.w3.org/2000/svg\"><style>a{}-->&#64;import \"https://attacker.invalid/x.css\";</style><rect width=\"16\" height=\"16\" fill=\"#000\"/></svg>'],
+    ['namespaced svg:style import', '<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:svg=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><svg:style>@import \"https://attacker.invalid/x.css\";</svg:style><rect width=\"16\" height=\"16\" fill=\"#000\"/></svg>'],
+    ['escaped url identifier', '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><style>#a{background-image:\\75 rl(\"https://attacker.invalid/p.png\")}</style><rect id=\"a\" width=\"16\" height=\"16\" fill=\"#000\"/></svg>'],
+    ['escaped url in style attribute', '<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"16\" height=\"16\" fill=\"#000\" style=\"background-image:\\75 rl(/p.png)\"/></svg>'],
+    ['image-set external', '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><style>#a{background-image:image-set(\"https://attacker.invalid/p.png\" 1x)}</style><rect id=\"a\" width=\"16\" height=\"16\" fill=\"#000\"/></svg>'],
     ['doctype', '<!DOCTYPE svg><svg></svg>'],
     ['currentColor', '<svg fill="currentColor"></svg>'],
     ['error page body', '404: Not Found'],
     ['unclosed root', '<svg><path/>'],
   ]
   for (const [name, svg] of cases) {
-    assert.throws(() => assertSafeSvg(name, svg), Error, name + ' must be rejected')
+    // Assert the reason so these cases cannot be rejected by an unrelated rule
+    // (size, root, DOCTYPE) and stay warnings that never exercise CSS checks.
+    assert.throws(() => assertSafeSvg(name, svg), (error) => {
+      const message = String(error && error.message)
+      const cssCases = name.includes('import') || name.includes('url') || name.includes('url identifier') || name.includes('image-set')
+      if (cssCases) return /@import|external CSS resource/.test(message)
+      // Fixtures without a valid <svg> root are rejected by the structural
+      // check before their own rule fires; that is still a correct rejection.
+      if (name === 'doctype' || name === 'error page body' || name === 'unclosed root') return /DOCTYPE|not a valid SVG document|closing/.test(message)
+      return /external resource|external URI|disallowed|scripting|DOCTYPE|currentColor|not an SVG|closing/.test(message)
+    }, name + ' must be rejected by the expected check')
   }
   // Entities are decoded repeatedly so nested encodings cannot hide a payload.
   assert.equal(decodeEntities('&#104;ref &quot;x&quot;'), 'href "x"')
   assert.equal(decodeEntities('&amp;#104;ref'), 'href')
+})
+
+test('the SVG guard permits local styles, comments and non-CSS text', () => {
+  const svg = '<svg><defs><linearGradient id="paint"/></defs><style>/* @import "https://example.invalid/x.css" */ .mark{fill:url(#paint);content:"@import"}</style><path class="mark"/></svg>'
+  assert.equal(assertSafeSvg('local-style', svg), svg)
+  const styledPath = '<svg><path style="fill:url(#paint)"/></svg>'
+  assert.equal(assertSafeSvg('style-attribute', styledPath), styledPath)
+  // SVG data (text, XML comments) is not CSS and must never be checked for url().
+  const text = '<svg><text>@import "https://example.invalid/x.css"</text></svg>'
+  assert.equal(assertSafeSvg('text-content', text), text)
+  assert.equal(assertSafeSvg('text-url', '<svg><text x="0" y="8" fill="#000">url(https://x.example)</text></svg>'), '<svg><text x="0" y="8" fill="#000">url(https://x.example)</text></svg>')
+  assert.equal(assertSafeSvg('xml-comment-url', '<svg xmlns="http://www.w3.org/2000/svg"><!-- source url(https://lobehub.com/icons) --><path d="M0 0h4v4H0z" fill="#000"/></svg>'), '<svg xmlns="http://www.w3.org/2000/svg"><!-- source url(https://lobehub.com/icons) --><path d="M0 0h4v4H0z" fill="#000"/></svg>')
+  assert.equal(assertSafeSvg('css-comment-url', '<svg xmlns="http://www.w3.org/2000/svg"><style>/* was url(https://cdn.example/x.png) */ .a{fill:#000}</style><path class="a" d="M0 0h4v4H0z"/></svg>'), '<svg xmlns="http://www.w3.org/2000/svg"><style>/* was url(https://cdn.example/x.png) */ .a{fill:#000}</style><path class="a" d="M0 0h4v4H0z"/></svg>')
+  // Escape-decoded @ is literal text, not an at-rule (Blink treats \40 import as inert).
+  const escapedAt = '<svg xmlns="http://www.w3.org/2000/svg"><style>.a{content:"\\40 import"}</style><path class="a" d="M0 0h4v4H0z"/></svg>'
+  assert.equal(assertSafeSvg('escaped-at', escapedAt), escapedAt)
 })
 
 test('every bundled icon passes the same guard the build uses', async () => {
@@ -234,6 +275,20 @@ test('an unrecognised actual model never inherits the requested brand', () => {
   assert.equal(keyOf({ provider: 'openrouter', actualModel: '', requestedModel: 'deepseek-v4-flash' }), 'deepseek')
   // A recognised actual model still wins over a different requested brand.
   assert.equal(keyOf({ provider: 'openrouter', actualModel: 'claude-opus-4.7', requestedModel: 'gpt-4o' }), 'claude')
+})
+
+test('model filter options resolve to brand icons the same way rows do', () => {
+  const optionKey = (model) => { const icon = resolveModelIcon({ actualModel: model, requestedModel: model }); return icon === null ? null : icon.key }
+  assert.equal(optionKey('claude-opus-5-thinking'), 'claude')
+  assert.equal(optionKey('deepseek-ai/DeepSeek-V4-Flash'), 'deepseek')
+  assert.equal(optionKey('deepseek-v4-flash-free'), 'deepseek')
+  assert.equal(optionKey('gpt-5.6-luna'), 'openai')
+  assert.equal(optionKey('grok-4.6'), 'grok')
+  assert.equal(optionKey('nemotron-3-ultra-free'), null)
+  assert.equal(optionKey('x-preview-f-free'), null)
+  // The neutral option (empty value) renders the plain line icon, never a brand.
+  const neutral = resolveModelIcon({ actualModel: '', requestedModel: '' })
+  assert.equal(neutral, null)
 })
 
 test('longer model prefixes win over shorter ones', () => {

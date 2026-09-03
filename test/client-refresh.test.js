@@ -151,7 +151,9 @@ test('keeps provider and model filters independent', () => {
   assert.ok(source.includes('const modelFilterValue = (row) =>'))
   assert.ok(source.includes('const rangeOnlyAgg = React.useMemo(() => rangeAgg(stats, range, useUtc, activeCustomRange)'))
   assert.ok(source.includes('const modelOptions = Array.from(new Set(rangeModelOptions.map(modelFilterValue)))'))
-  assert.ok(source.includes('modelOptions.map((value) => ({ value, label: value }))'))
+  assert.ok(source.includes('modelOptions.map((value) => { const icon = resolveModelIcon({ actualModel: value, requestedModel: value }); return { value, label: value, iconKey: icon === null ? null : icon.key } })'))
+  assert.ok(source.includes('option.iconKey === undefined || option.iconKey === null'))
+  assert.ok(source.includes('React.createElement(MemoModelIcon, { iconKey, size: 14 })'))
   assert.doesNotMatch(source, /selected.provider !== next.*setModelFilter(null)/)
 })
 
