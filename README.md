@@ -11,7 +11,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 ### 功能
 
 - **热力图**：53 周使用热力图；按工作区筛选并查看每日回合与 Token 明细
-- **模型统计**：支持混合查看、按模型合并、按供应商汇总三种维度，展示调用次数、各类 Token 与缓存命中率
+- **模型统计**：支持混合查看、按模型合并、按供应商汇总三种维度，展示调用次数、各类 Token 与缓存命中率；模型行与筛选下拉显示真实厂商品牌 SVG 图标（未知/混牌保持中性）
 - **摘要与工作区**：Token 用量、缓存命中、估算成本、账户余额、连续使用、工作区 Token 分布和明细
 - **成本统计**：从 models.dev 同步模型价格；按输入、输出、缓存读取和缓存写入四个桶计算，保存价格快照，明确区分已计价、免费模型和未计价调用
 - **导出**：按当前时间范围和模型聚合方式导出 CSV
@@ -101,6 +101,12 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 - [成本计算问题 / Cost calculation issue](.github/ISSUE_TEMPLATE/cost-calculation.md)
 
 ### 最近更新
+
+**v1.1.4**
+
+- **模型品牌图标**：请求日志、选中调用详情、模型统计表、成本设置匹配表、环形图图例与模型筛选下拉现在显示真实厂商品牌 SVG（DeepSeek、OpenAI、Claude、Gemini、Meta、Zhipu、xAI、Qwen、Doubao、Kimi、MiniMax）；模型命名空间优先于 DSH 供应商名，未知或混牌行保持中性。图标在构建期以 data URI 内嵌并由 scripts/svg-guard.mjs 校验（实体解码、CSS 转义/CDO/命名空间、url()/image-set() 均覆盖，注释与文本不误杀），运行时零网络请求。
+- **构建安全加固**：补齐 CDO/CDC 邻接 at-import、命名空间 style 元素、CSS 转义 url() 与外部 image-set() 四类绕过，并把 CSS 检查收窄到 style 属性与 style 体；对抗用例现在断言拒绝原因。
+- 三张用量仪表盘截图刷新为当前 UI。
 
 **v1.1.3**
 
@@ -197,7 +203,7 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, est
 ### Features
 
 - **Heatmap**: a 53-week activity heatmap with workspace filters and daily turn/token details
-- **Model analytics**: mixed view, model-merged view, and provider summary with calls, token categories, and cache hit rate
+- **Model analytics**: mixed view, model-merged view, and provider summary with calls, token categories, and cache hit rate; model rows and the model filter dropdown render vendor brand SVG icons (neutral for unknown or mixed brands)
 - **Summary and workspaces**: processed tokens, cache hits, estimated cost, account balance, usage streaks, workspace distribution, and details
 - **Cost statistics**: sync model prices from models.dev, calculate four cost buckets, persist price snapshots, and distinguish priced, free, ambiguous, and unpriced calls
 - **CSV export**: export data using the selected time range and aggregation mode
@@ -287,6 +293,12 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 - [Cost calculation issue / 成本计算问题](.github/ISSUE_TEMPLATE/cost-calculation.md)
 
 ### Latest Update
+
+**v1.1.4**
+
+- **Vendor brand icons**: request logs, selected-call details, the model summary table, the cost-settings match table, donut legends, and the model filter dropdown now render real vendor brand SVGs (DeepSeek, OpenAI, Claude, Gemini, Meta, Zhipu, xAI, Qwen, Doubao, Kimi, MiniMax); the model namespace wins over the DSH provider name, and unknown or mixed-brand rows stay neutral. Icons are embedded as data URIs at build time and validated by scripts/svg-guard.mjs (entity decoding, CSS escapes/CDO/namespaced styles, url()/image-set() all covered, comments and text stay inert), with zero runtime network access.
+- **Build hardening**: per the independent audit, closed four bypass classes (CDO/CDC-adjacent at-import, namespaced style elements, CSS-escaped url(), external image-set()) and scoped the CSS checks to style attributes and bodies; adversarial fixtures now assert the rejection reason.
+- Refreshed the three usage-dashboard screenshots to the current UI.
 
 **v1.1.3**
 
