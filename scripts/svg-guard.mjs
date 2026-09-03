@@ -55,6 +55,83 @@ function cssUrlTargets(decoded) {
   return targets
 }
 
+/** Consume one CSS escape and return its decoded value plus next index. */
+function consumeCssEscape(source, index) {
+  let next = index + 1
+  if (next >= source.length) return { value: '', next }
+  const first = source[next]
+  if (first === '\r') return { value: '', next: next + (source[next + 1] === '\n' ? 2 : 1) }
+  if (first === '\n' || first === '\f') return { value: '', next: next + 1 }
+  const hex = source.slice(next).match(/^[0-9a-f]{1,6}/i)
+  if (hex !== null) {
+    next += hex[0].length
+    if (source[next] === '\r') next += source[next + 1] === '\n' ? 2 : 1
+    else if (/[\t\n\f\r ]/.test(source[next] || '')) next += 1
+    const code = Number.parseInt(hex[0], 16)
+    return { value: Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : String.fromCharCode(0xfffd), next }
+  }
+  return { value: first, next: next + 1 }
+}
+
+/** Normalize CSS comments, strings and escapes before checking at-rules. */
+function normalizeCssForImportCheck(css) {
+  let output = ''
+  let quote = ''
+  for (let index = 0; index < css.length;) {
+    const char = css[index]
+    if (quote !== '') {
+      if (char === '\\') {
+        index = consumeCssEscape(css, index).next
+        output += ' '
+        continue
+      }
+      if (char === quote) quote = ''
+      output += ' '
+      index += 1
+      continue
+    }
+    if (char === '/' && css[index + 1] === '*') {
+      const commentEnd = css.indexOf('*/', index + 2)
+      index = commentEnd < 0 ? css.length : commentEnd + 2
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      output += ' '
+      index += 1
+      continue
+    }
+    if (char === '\\') {
+      const escaped = consumeCssEscape(css, index)
+      // An escaped @ is literal text, not an at-rule introducer.
+      output += escaped.value === '@' ? ' ' : escaped.value
+      index = escaped.next
+      continue
+    }
+    output += char
+    index += 1
+  }
+  return output
+}
+
+/** Extract CSS-bearing content instead of treating SVG text as CSS. */
+function cssSources(decoded) {
+  const sources = attributeValues(decoded, ['style']).map(({ value }) => value)
+  const pattern = /<style\b[^>]*>([\s\S]*?)(?:<\/style\s*>|$)/gi
+  let match = pattern.exec(decoded)
+  while (match !== null) {
+    sources.push(match[1])
+    match = pattern.exec(decoded)
+  }
+  return sources
+}
+
+/** CSS imports are unnecessary for an embedded, self-contained icon. */
+function hasCssImport(decoded) {
+  const pattern = /(?:^|[^a-z0-9_-])@import(?:[^a-z0-9_-]|$)/i
+  return cssSources(decoded).some((css) => pattern.test(normalizeCssForImportCheck(css)))
+}
+
 /**
  * Reject anything that is not a self-contained, script-free, offline SVG.
  * Checks run on the entity-decoded document so encoded payloads cannot slip
@@ -84,6 +161,7 @@ export function assertSafeSvg(name, svg) {
   for (const target of cssUrlTargets(decoded)) {
     if (!target.startsWith('#')) fail('references an external CSS resource: url(' + target.slice(0, 60) + ')')
   }
+  if (hasCssImport(decoded)) fail('contains an external CSS @import rule')
   if (/currentColor/i.test(decoded)) fail('uses currentColor, which does not inherit inside <img>; bake an explicit colour instead')
   if (/404|not found/i.test(decoded.slice(0, 200)) && !/<svg[\s>]/i.test(decoded.slice(0, 200))) fail('looks like an error page, not an SVG')
   return svg

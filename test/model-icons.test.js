@@ -188,6 +188,15 @@ test('the SVG guard rejects encoded and unquoted external references', () => {
     ['inline handler', '<svg onload=alert(1)></svg>'],
     ['javascript uri', '<svg><a href="javascript:alert(1)">x</a></svg>'],
     ['data uri paint', '<svg><path fill="data:image/png;base64,AAA"/></svg>'],
+    ['quoted css import', '<svg><style>@import \"https://attacker.invalid/x.css\";</style></svg>'],
+    ['unquoted css import', '<svg><style>@import //attacker.invalid/x.css;</style></svg>'],
+    ['relative css import', '<svg><style>@import \"/vendor.css\";</style></svg>'],
+    ['encoded css import', '<svg><style>@import &quot;https://attacker.invalid/x.css&quot;;</style></svg>'],
+    ['css url import', '<svg><style>@import url(https://attacker.invalid/x.css);</style></svg>'],
+    ['comment separated import', '<svg><style>@import/**/\"https://attacker.invalid/x.css\";</style></svg>'],
+    ['escaped import', '<svg><style>@\\69 mport \"https://attacker.invalid/x.css\";</style></svg>'],
+    ['escaped middle import', '<svg><style>@im\\70 ort \"https://attacker.invalid/x.css\";</style></svg>'],
+    ['continued import', '<svg><style>@im\\\nport \"https://attacker.invalid/x.css\";</style></svg>'],
     ['doctype', '<!DOCTYPE svg><svg></svg>'],
     ['currentColor', '<svg fill="currentColor"></svg>'],
     ['error page body', '404: Not Found'],
@@ -199,6 +208,15 @@ test('the SVG guard rejects encoded and unquoted external references', () => {
   // Entities are decoded repeatedly so nested encodings cannot hide a payload.
   assert.equal(decodeEntities('&#104;ref &quot;x&quot;'), 'href "x"')
   assert.equal(decodeEntities('&amp;#104;ref'), 'href')
+})
+
+test('the SVG guard permits local styles and non-CSS text', () => {
+  const svg = '<svg><defs><linearGradient id="paint"/></defs><style>/* @import "https://example.invalid/x.css" */ .mark{fill:url(#paint);content:"@import"}</style><path class="mark"/></svg>'
+  assert.equal(assertSafeSvg('local-style', svg), svg)
+  const styledPath = '<svg><path style="fill:url(#paint)"/></svg>'
+  assert.equal(assertSafeSvg('style-attribute', styledPath), styledPath)
+  const text = '<svg><text>@import "https://example.invalid/x.css"</text></svg>'
+  assert.equal(assertSafeSvg('text-content', text), text)
 })
 
 test('every bundled icon passes the same guard the build uses', async () => {
@@ -234,6 +252,20 @@ test('an unrecognised actual model never inherits the requested brand', () => {
   assert.equal(keyOf({ provider: 'openrouter', actualModel: '', requestedModel: 'deepseek-v4-flash' }), 'deepseek')
   // A recognised actual model still wins over a different requested brand.
   assert.equal(keyOf({ provider: 'openrouter', actualModel: 'claude-opus-4.7', requestedModel: 'gpt-4o' }), 'claude')
+})
+
+test('model filter options resolve to brand icons the same way rows do', () => {
+  const optionKey = (model) => { const icon = resolveModelIcon({ actualModel: model, requestedModel: model }); return icon === null ? null : icon.key }
+  assert.equal(optionKey('claude-opus-5-thinking'), 'claude')
+  assert.equal(optionKey('deepseek-ai/DeepSeek-V4-Flash'), 'deepseek')
+  assert.equal(optionKey('deepseek-v4-flash-free'), 'deepseek')
+  assert.equal(optionKey('gpt-5.6-luna'), 'openai')
+  assert.equal(optionKey('grok-4.6'), 'grok')
+  assert.equal(optionKey('nemotron-3-ultra-free'), null)
+  assert.equal(optionKey('x-preview-f-free'), null)
+  // The neutral option (empty value) renders the plain line icon, never a brand.
+  const neutral = resolveModelIcon({ actualModel: '', requestedModel: '' })
+  assert.equal(neutral, null)
 })
 
 test('longer model prefixes win over shorter ones', () => {
