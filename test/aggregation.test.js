@@ -167,6 +167,32 @@ async function waitForLedgerWrite() {
   await new Promise((resolve) => setTimeout(resolve, 40))
 }
 
+test('manual workspace refresh rereads the registry and remaps an existing session', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const workspaces = []
+  const session = { header: { id: 's-refresh-workspace', cwd: 'C:\\refreshable' } }
+  const app = await createApp({
+    withStorage: true,
+    workspaces,
+    sessions: [session],
+    events: new Map([['s-refresh-workspace', [
+      { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+      usageEvent(eventTime, 1, 1, { inputTokens: 13, outputTokens: 2 }, 2),
+    ]]]),
+  })
+  let snapshot = (await waitForScan(app)).json()
+  assert.equal(snapshot.totals.input, 13)
+  assert.ok(snapshot.workspaces.some((item) => item.id.startsWith('unregistered:')))
+  workspaces.push({ id: 'ws-refreshable', path: 'C:\\refreshable', title: 'Refreshable' })
+  const request = makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': snapshot.requestToken }, '{}')
+  const refreshed = await call(app, '/api/all-usage/workspaces/refresh', request)
+  assert.equal(refreshed.status, 202)
+  snapshot = (await waitForScan(app)).json()
+  assert.equal(snapshot.totals.input, 13)
+  assert.ok(snapshot.workspaces.some((item) => item.id === 'ws-refreshable' && item.title === 'Refreshable'))
+  assert.equal(snapshot.workspaces.some((item) => item.id.startsWith('unregistered:')), false)
+})
+
 test('includes sessions whose cwd is not registered under a stable private workspace bucket', async () => {
   const eventTime = Date.now() - 60 * 1000
   const app = await createApp({
