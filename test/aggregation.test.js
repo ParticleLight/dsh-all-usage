@@ -167,6 +167,57 @@ async function waitForLedgerWrite() {
   await new Promise((resolve) => setTimeout(resolve, 40))
 }
 
+test('includes sessions whose cwd is not registered under a stable private workspace bucket', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [],
+    sessions: [{ header: { id: 's-unregistered-scan', cwd: 'D:\\SnowDesktop_Source' } }],
+    events: new Map([['s-unregistered-scan', [
+      { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+      usageEvent(eventTime, 1, 1, { inputTokens: 17, outputTokens: 23, cacheReadTokens: 29 }, 2),
+      { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
+    ]]]),
+  })
+  const snapshot = (await waitForScan(app)).json()
+  assert.equal(snapshot.totals.input, 17)
+  assert.equal(snapshot.totals.output, 23)
+  assert.equal(snapshot.totals.cacheRead, 29)
+  assert.equal(snapshot.totals.turns, 1)
+  const synthetic = snapshot.workspaces.find((workspace) => workspace.id.startsWith('unregistered:'))
+  assert.ok(synthetic)
+  assert.match(synthetic.title, /^未注册工作区 · [0-9a-f]{8}$/)
+  assert.equal(synthetic.path, '')
+  assert.ok(snapshot.perWorkspace.some((row) => row.workspaceId === synthetic.id && row.input === 17))
+})
+
+test('live unregistered sessions persist and recover through the synthetic workspace bucket', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const first = await createApp({ withStorage: true, workspaces: [], sessions: [], events: new Map() })
+  const session = { id: 's-unregistered-live', header: { cwd: 'G:\\AIagent\\DSH\\TuckPane' } }
+  const live = first.listeners['session/event'][0]
+  live(session, { seq: 0, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } })
+  live(session, usageEvent(eventTime, 1, 1, { inputTokens: 31, outputTokens: 7, cacheReadTokens: 11 }, 1))
+  for (let index = 0; index < 40; index += 1) await new Promise((resolve) => setImmediate(resolve))
+  assert.equal((await call(first, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json().totals.input, 31)
+  await first.listeners['session/flush'][0]({ ...session, events: [
+    { seq: 0, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 31, outputTokens: 7, cacheReadTokens: 11 }, 1),
+  ] })
+  await waitForLedgerWrite()
+  const stored = Object.values(first.storageUnit.records.sessions).find((record) => record.sessionId === session.id)
+  assert.ok(stored)
+  assert.match(stored.workspaceId, /^unregistered:/)
+  assert.equal(stored.usage.length, 1)
+
+  const second = await createApp({ withStorage: true, storage: first.storageUnit, workspaces: [], sessions: [], events: new Map() })
+  const recovered = (await waitForScan(second)).json()
+  assert.equal(recovered.totals.input, 31)
+  assert.equal(recovered.totals.output, 7)
+  assert.equal(recovered.totals.cacheRead, 11)
+  assert.ok(recovered.workspaces.some((workspace) => workspace.id === stored.workspaceId && workspace.path === ''))
+})
+
 test('seeds unchanged sessions from the ledger and replaces retried steps without double-counting', async () => {
   const eventTime = Date.now() - 60 * 1000
   const events = [

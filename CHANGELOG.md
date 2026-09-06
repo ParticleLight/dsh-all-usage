@@ -6,6 +6,7 @@ All notable changes to `dsh-all-usage` are documented here.
 
 ### Added
 
+- Include sessions whose cwd is not present in the registered workspace list under a stable privacy-preserving `unregistered:<hash>` workspace bucket. Baseline scans, live events, flushes, ledger recovery, filters and snapshots now use the same fallback; the UI shows only `未注册工作区 · <short-hash>` and never exposes the full cwd.
 - DeepSeek peak/off-peak billing as a first-class, versioned **temporal pricing plan**: the cost schema is v2, and each cost snapshot records the billing instant, its time source (request-context / usage-event), the UTC band (peak / off-peak), the policy id, and a policy hash. Request logs show the band and UTC billing time, and the cost settings panel marks which usage models follow the DeepSeek band plan.
 - Built-in first-party DeepSeek profiles (deepseek-v4-flash, deepseek-v4-flash-vision-exp, deepseek-v4-pro) with explicit per-band rates for the UTC windows 01:00-04:00 and 06:00-10:00 on weekdays; the peak rates are stored as data, never derived as an automatic discount rule.
 - UTC band boundaries are half-open: 00:59:59 off-peak, 01:00:00 peak, 03:59:59 peak, 04:00:00 off-peak, 06:00:00 peak, 10:00:00 off-peak; weekends are off-peak. Band selection uses UTC fields only, so viewer timezones, DST, and fractional-hour zones cannot change a result.
