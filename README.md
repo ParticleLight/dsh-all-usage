@@ -30,11 +30,12 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 ### 兼容性与已知限制
 
 - **运行环境**：需要 Node.js `>=22 <25`；CI 会在 Node 22 和 Node 24 上运行测试、语法检查和 npm 包内容检查。
-- **DSH 兼容**：`package.json` 声明 DSH runtime `>=0.1.1-rc.1 <0.1.2`，已使用 `0.1.1-rc.2` 和 `0.1.1-rc.1` 的真实 Cordis 服务链验证。
+- **DSH 兼容**：`package.json` 声明 DSH runtime `>=0.1.1-rc.1 <0.1.2`，已使用 `0.1.1-rc.2` 和 `0.1.1-rc.1` 的真实 Cordis 服务链验证；`0.1.2-rc.1` 已通过本人实际使用验证兼容，但尚未纳入 CI smoke 矩阵。
 - **Web 服务依赖**：Host 将 `webServer` 声明为必需依赖，确保服务晚挂载时由 DSH 等待后再执行插件；该包面向 DSH Web profile，不提供无 WebServer 的 headless 路由。HTTP 守卫还会检查真实 socket peer，反向代理只有在连接本身来自 loopback 时才会被接受。
 
 | DSH runtime | Node.js 支持 | 真实 Cordis smoke | 结论 |
 | --- | --- | --- | --- |
+| `0.1.2-rc.1` | `>=22 <25` | 通过（本人实际使用验证，未纳入 CI） | 已实际验证兼容 |
 | `0.1.1-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（当前 Node 24） | 已声明、已验证 |
 | `0.1.1-rc.1` | `>=22 <25`，CI 覆盖 22/24 | 通过（当前 Node 24） | 已声明、已验证 |
 | 其他版本 | `>=22 <25` | 未测试 | 不在已验证矩阵内 |
@@ -222,11 +223,12 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, est
 ### Compatibility and Known Limitations
 
 - **Runtime**: Node.js `>=22 <25` is required. CI runs the test suite, syntax checks, and package-content checks on Node 22 and Node 24.
-- **DSH compatibility**: `package.json` declares DSH runtime `>=0.1.1-rc.1 <0.1.2`; the real Cordis service chain is verified on `0.1.1-rc.2` and `0.1.1-rc.1`.
+- **DSH compatibility**: `package.json` declares DSH runtime `>=0.1.1-rc.1 <0.1.2`; the real Cordis service chain is verified on `0.1.1-rc.2` and `0.1.1-rc.1`. `0.1.2-rc.1` has also been verified compatible through the maintainer's real-world use, but is not yet covered by the CI smoke matrix.
 - **Web service dependency**: the Host declares `webServer` as a required dependency, so DSH waits for a late-mounted service before applying the plugin; this package targets the DSH Web profile and does not expose routes without WebServer. The HTTP guard also checks the actual socket peer, so a reverse proxy is accepted only when the connection itself is loopback.
 
 | DSH runtime | Node.js support | Real Cordis smoke | Conclusion |
 | --- | --- | --- | --- |
+| `0.1.2-rc.1` | `>=22 <25` | Passed through maintainer use (not in CI) | Verified compatible in real-world use |
 | `0.1.1-rc.2` | `>=22 <25`, CI covers 22/24 | Passed (current Node 24) | Declared and verified |
 | `0.1.1-rc.1` | `>=22 <25`, CI covers 22/24 | Passed (current Node 24) | Declared and verified |
 | Other versions | `>=22 <25` | Not tested | Outside the verified matrix |
