@@ -45,7 +45,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **中断请求**：上游请求被中断时可能只有 `assistant/chunk` 的 usage，没有最终 `assistant/message`；本插件会保留该 chunk 用量。同一 `turn / step` 后续出现最终 message 时，message 会替换 chunk。若上游完全没有 usage 事件，则无法从响应内容精确恢复 Token。
 - **估算成本**：成本是基于 models.dev 价格和 DSH usage 桶的估算，不是供应商账单；目录不可用或模型没有官方匹配时不会猜测价格，而是显示未计价。缓存读取、缓存写入和 reasoning 的口径取决于 DSH 上游事件。
 - **分层价格**：models.dev 的 tiered/context-dependent 价格按本次请求的输入上下文（fresh input + cache read + cache write）选择对应档位；阈值边界遵循目录定义，无法验证的异常 tier 仍显示为 unsupported。
-- **工作区边界**：能按 cwd 映射到已注册工作区的会话使用原工作区；现存但未注册的目录归入稳定的“未注册工作区”桶（客户端不暴露完整 cwd）；已删除目录的旧 ledger 不再恢复；会话尚未成功 flush 前删除或损坏的日志无法由独立账本恢复。
+- **工作区边界**：只有 cwd 能映射到 DSH 已注册工作区的会话才进入统计；未注册 cwd（包括已存在但未在 registry 中登记的目录）会被忽略；点击“刷新工作区”可重新读取 registry，重启 DSH Web 也会触发读取。会话尚未成功 flush 前删除或损坏的日志无法由独立账本恢复。
 
 ### 本地统计与官方账单
 
@@ -54,7 +54,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - 本地统计读取 DSH 的 `assistant/chunk`、最终 `assistant/message` 和其他会话事件，按同一 `turn / step` 去重和替换；官方账单可能按供应商自己的请求、分词器、舍入、折扣、免费额度和结算周期计算。
 - 失败请求只要留下 usage chunk，就会进入本地统计；供应商是否对该失败请求收费，应以官方账单为准。
 - 价格来自 models.dev 的公开模型目录和本地显式覆盖；目录价格、供应商实际价格、区域费率和账单折扣可能不同。成本字段应理解为估算值。
-- 本地统计包含已注册工作区和现存未注册目录的稳定工作区桶；已删除目录的旧 ledger 不再恢复，并可能因日志损坏、清理或上游没有发出 usage 而少于官方账单。
+- 本地统计只包含已注册工作区；未注册 cwd 与已删除目录的旧 ledger 不进入统计，并可能因日志损坏、清理或上游没有发出 usage 而少于官方账单。
 
 ### 可复现事件示例
 
@@ -238,7 +238,7 @@ An unlisted DSH version is not necessarily incompatible. Include the DSH, Node.j
 - **Interrupted requests**: an interrupted upstream request may emit only `assistant/chunk` usage and never produce a final `assistant/message`; that chunk is retained. A later final message for the same turn/step replaces it. If the upstream emits no usage event at all, exact token usage cannot be reconstructed from response text.
 - **Estimated cost**: cost is an estimate based on models.dev rates and DSH usage buckets, not a provider invoice. Unavailable catalogs and unmatched models remain unpriced instead of receiving guessed rates. Cache reads, cache writes, and reasoning follow the buckets reported by the upstream DSH event.
 - **Tiered prices**: models.dev context-tiered entries select the applicable rate from the request input context (fresh input plus cache read/write tokens); malformed schedules remain unsupported.
-- **Workspace boundary**: sessions whose cwd maps to a registered workspace keep that workspace; existing but unregistered directories use a stable unregistered-workspace bucket without exposing the full cwd to the client. Old ledger rows for deleted directories are not recovered; data deleted or corrupted before a successful session flush cannot be recovered from the separate ledger.
+- **Workspace boundary**: only sessions whose cwd maps to a DSH-registered workspace are included. Unregistered cwds, including existing directories absent from the registry, are ignored; click Refresh workspaces to reread the registry, or restart DSH Web. Data deleted or corrupted before a successful session flush cannot be recovered from the separate ledger.
 
 ### Local Statistics vs Official Billing
 
@@ -247,7 +247,7 @@ This plugin reports replayable statistics from local DSH event logs; it is not a
 - Local statistics read DSH `assistant/chunk`, final `assistant/message`, and related session events, then deduplicate and replace samples by logical `turn / step`. Official billing may use a provider tokenizer, rounding rules, discounts, free quotas, and billing periods.
 - A failed request is included locally whenever it leaves a usage chunk; whether the provider charged for that failed request must be checked against the official bill.
 - Prices come from the public models.dev catalog and local explicit overrides. Catalog prices can differ from provider prices, regional rates, and invoice discounts, so the cost field is an estimate.
-- Local statistics include registered workspaces and stable buckets for existing unregistered directories; old ledger rows for deleted directories are not recovered, and totals can still be lower than the official bill when logs are damaged, cleaned up, or the upstream emits no usage event.
+- Local statistics include registered workspaces only; unregistered cwds and old ledger rows for deleted directories are excluded, and totals can still be lower than the official bill when logs are damaged, cleaned up, or the upstream emits no usage event.
 
 ### Reproducible Event Examples
 

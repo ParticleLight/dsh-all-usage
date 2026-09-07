@@ -167,7 +167,7 @@ async function waitForLedgerWrite() {
   await new Promise((resolve) => setTimeout(resolve, 40))
 }
 
-test('manual workspace refresh rereads the registry and remaps an existing session', async () => {
+test('manual workspace refresh rereads the registry and remaps a session initially outside the registry', async () => {
   const eventTime = Date.now() - 60 * 1000
   const workspaces = []
   const cwd = process.cwd()
@@ -182,8 +182,8 @@ test('manual workspace refresh rereads the registry and remaps an existing sessi
     ]]]),
   })
   let snapshot = (await waitForScan(app)).json()
-  assert.equal(snapshot.totals.input, 13)
-  assert.ok(snapshot.workspaces.some((item) => item.id.startsWith('unregistered:')))
+  assert.equal(snapshot.totals.input, 0)
+  assert.equal(snapshot.workspaces.some((item) => item.id.startsWith('unregistered:')), false)
   workspaces.push({ id: 'ws-refreshable', path: cwd, title: 'Refreshable' })
   const request = makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': snapshot.requestToken }, '{}')
   const refreshed = await call(app, '/api/all-usage/workspaces/refresh', request)
@@ -194,7 +194,7 @@ test('manual workspace refresh rereads the registry and remaps an existing sessi
   assert.equal(snapshot.workspaces.some((item) => item.id.startsWith('unregistered:')), false)
 })
 
-test('includes sessions whose cwd is not registered under a stable private workspace bucket', async () => {
+test('does not include sessions whose cwd is not registered', async () => {
   const eventTime = Date.now() - 60 * 1000
   const app = await createApp({
     withStorage: true,
@@ -207,18 +207,14 @@ test('includes sessions whose cwd is not registered under a stable private works
     ]]]),
   })
   const snapshot = (await waitForScan(app)).json()
-  assert.equal(snapshot.totals.input, 17)
-  assert.equal(snapshot.totals.output, 23)
-  assert.equal(snapshot.totals.cacheRead, 29)
-  assert.equal(snapshot.totals.turns, 1)
-  const synthetic = snapshot.workspaces.find((workspace) => workspace.id.startsWith('unregistered:'))
-  assert.ok(synthetic)
-  assert.match(synthetic.title, /^未注册工作区 · [0-9a-f]{8}$/)
-  assert.equal(synthetic.path, '')
-  assert.ok(snapshot.perWorkspace.some((row) => row.workspaceId === synthetic.id && row.input === 17))
+  assert.equal(snapshot.totals.input, 0)
+  assert.equal(snapshot.totals.output, 0)
+  assert.equal(snapshot.totals.cacheRead, 0)
+  assert.equal(snapshot.totals.turns, 0)
+  assert.equal(snapshot.workspaces.some((workspace) => workspace.id.startsWith('unregistered:')), false)
 })
 
-test('live unregistered sessions persist and recover through the synthetic workspace bucket', async () => {
+test('live sessions outside the registry are ignored until their workspace is registered', async () => {
   const eventTime = Date.now() - 60 * 1000
   const first = await createApp({ withStorage: true, workspaces: [], sessions: [], events: new Map() })
   const session = { id: 's-unregistered-live', header: { cwd: process.cwd() } }
@@ -226,23 +222,13 @@ test('live unregistered sessions persist and recover through the synthetic works
   live(session, { seq: 0, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } })
   live(session, usageEvent(eventTime, 1, 1, { inputTokens: 31, outputTokens: 7, cacheReadTokens: 11 }, 1))
   for (let index = 0; index < 40; index += 1) await new Promise((resolve) => setImmediate(resolve))
-  assert.equal((await call(first, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json().totals.input, 31)
+  assert.equal((await call(first, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json().totals.input, 0)
   await first.listeners['session/flush'][0]({ ...session, events: [
     { seq: 0, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
     usageEvent(eventTime, 1, 1, { inputTokens: 31, outputTokens: 7, cacheReadTokens: 11 }, 1),
   ] })
   await waitForLedgerWrite()
-  const stored = Object.values(first.storageUnit.records.sessions).find((record) => record.sessionId === session.id)
-  assert.ok(stored)
-  assert.match(stored.workspaceId, /^unregistered:/)
-  assert.equal(stored.usage.length, 1)
-
-  const second = await createApp({ withStorage: true, storage: first.storageUnit, workspaces: [], sessions: [], events: new Map() })
-  const recovered = (await waitForScan(second)).json()
-  assert.equal(recovered.totals.input, 31)
-  assert.equal(recovered.totals.output, 7)
-  assert.equal(recovered.totals.cacheRead, 11)
-  assert.ok(recovered.workspaces.some((workspace) => workspace.id === stored.workspaceId && workspace.path === ''))
+  assert.equal(Object.values(first.storageUnit.records.sessions).some((record) => record.sessionId === session.id), false)
 })
 
 test('does not recover a legacy synthetic ledger row after its cwd is deleted', async () => {
