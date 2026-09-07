@@ -2,11 +2,22 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
-## [Unreleased]
+## [1.1.5] - 2026-09-07
 
 ### Added
 
 - Workspace registries are now kept fresh by an automatic **probe**: all-usage listens to DSH's `domain/changed` event for the workspace domain and, on any durable registry write (create/delete/rename/reorder/archive/attach/detach), rereads `workspaceRegistry.list()`. The sync is incremental — only added workspaces are scanned (the sessions that belong to them) and removed workspaces have their sessions subtracted via inverse folding, while unchanged workspaces reuse their computed aggregates and ledger with zero rescan. The manual Refresh workspaces control, its `POST /api/all-usage/workspaces/refresh` route, and the refresh-workspaces client button were removed. Usage remains intentionally restricted to registered workspaces; unregistered cwds are ignored.
+
+### Fixed
+
+- Usage is strictly limited to DSH-registered workspaces: sessions whose cwd does not map to `workspaceRegistry.list()` (including existing directories absent from the registry) are ignored, and legacy `unregistered:` ledger rows are never resurrected as history.
+- Ledger rows whose persisted `sourceCwd` no longer maps to a registered workspace (for example the session directory was removed) are skipped during recovery instead of being restored as stale data; the workspace source path is now persisted with every ledger record so restart recovery can validate ownership.
+
+
+## [1.1.4] - 2026-09-03
+
+### Added
+
 - DeepSeek peak/off-peak billing as a first-class, versioned **temporal pricing plan**: the cost schema is v2, and each cost snapshot records the billing instant, its time source (request-context / usage-event), the UTC band (peak / off-peak), the policy id, and a policy hash. Request logs show the band and UTC billing time, and the cost settings panel marks which usage models follow the DeepSeek band plan.
 - Built-in first-party DeepSeek profiles (deepseek-v4-flash, deepseek-v4-flash-vision-exp, deepseek-v4-pro) with explicit per-band rates for the UTC windows 01:00-04:00 and 06:00-10:00 on weekdays; the peak rates are stored as data, never derived as an automatic discount rule.
 - UTC band boundaries are half-open: 00:59:59 off-peak, 01:00:00 peak, 03:59:59 peak, 04:00:00 off-peak, 06:00:00 peak, 10:00:00 off-peak; weekends are off-peak. Band selection uses UTC fields only, so viewer timezones, DST, and fractional-hour zones cannot change a result.
@@ -38,8 +49,6 @@ All notable changes to `dsh-all-usage` are documented here.
 - Harden the model brand icons: the load-failure flag is scoped to one icon identity (a shared component that later shows another brand retries instead of staying neutral), an unrecognised actualModel no longer inherits the requested model's brand, model prefixes match on token boundaries only (o10-preview and o3x stay neutral), the resolution cache is bounded, and labelled icons expose the brand through the image's accessible name instead of a title on an aria-hidden host.
 - Build-time SVG validation now decodes XML entities before checking, rejects unquoted URI attributes, external CSS url()/image-set() and @import targets (including escaped/commented/CDO-CDC/namespaced <svg:style> forms), DOCTYPE/CDATA/processing instructions and every external-resource element; the CSS checks run only on style attributes and <style> bodies so icon text and comments stay inert. It lives in scripts/svg-guard.mjs so the tests exercise the exact same guard with adversarial fixtures.
 - Bundle the icon provenance required for release: the manifest pins the upstream commit, records per-file upstream paths and modification flags, and assets/model-icons/LICENSE.upstream-lobe-icons.txt ships the MIT notice, copyright, trademark disclaimer and the local modifications. The build fails if the pinned revision, licence file or per-file attribution is missing.
-
-## [1.1.4] - 2026-09-03
 
 ### Fixed
 
@@ -236,6 +245,7 @@ This release reduces historical scan work, storage write amplification, and Dash
 - Allowed same-origin browser balance GET requests that omit `Origin` while retaining token protection.
 - Standardized English date buckets, range filters, streaks, heatmap dates, and export timestamps on UTC.
 
+[1.1.5]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.5
 [1.1.4]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.4
 [1.1.3]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.3
 [1.1.2]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.2
