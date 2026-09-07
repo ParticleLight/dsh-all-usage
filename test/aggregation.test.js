@@ -170,7 +170,8 @@ async function waitForLedgerWrite() {
 test('manual workspace refresh rereads the registry and remaps an existing session', async () => {
   const eventTime = Date.now() - 60 * 1000
   const workspaces = []
-  const session = { header: { id: 's-refresh-workspace', cwd: 'C:\\refreshable' } }
+  const cwd = process.cwd()
+  const session = { header: { id: 's-refresh-workspace', cwd } }
   const app = await createApp({
     withStorage: true,
     workspaces,
@@ -183,7 +184,7 @@ test('manual workspace refresh rereads the registry and remaps an existing sessi
   let snapshot = (await waitForScan(app)).json()
   assert.equal(snapshot.totals.input, 13)
   assert.ok(snapshot.workspaces.some((item) => item.id.startsWith('unregistered:')))
-  workspaces.push({ id: 'ws-refreshable', path: 'C:\\refreshable', title: 'Refreshable' })
+  workspaces.push({ id: 'ws-refreshable', path: cwd, title: 'Refreshable' })
   const request = makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': snapshot.requestToken }, '{}')
   const refreshed = await call(app, '/api/all-usage/workspaces/refresh', request)
   assert.equal(refreshed.status, 202)
@@ -198,7 +199,7 @@ test('includes sessions whose cwd is not registered under a stable private works
   const app = await createApp({
     withStorage: true,
     workspaces: [],
-    sessions: [{ header: { id: 's-unregistered-scan', cwd: 'D:\\SnowDesktop_Source' } }],
+    sessions: [{ header: { id: 's-unregistered-scan', cwd: process.cwd() } }],
     events: new Map([['s-unregistered-scan', [
       { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
       usageEvent(eventTime, 1, 1, { inputTokens: 17, outputTokens: 23, cacheReadTokens: 29 }, 2),
@@ -220,7 +221,7 @@ test('includes sessions whose cwd is not registered under a stable private works
 test('live unregistered sessions persist and recover through the synthetic workspace bucket', async () => {
   const eventTime = Date.now() - 60 * 1000
   const first = await createApp({ withStorage: true, workspaces: [], sessions: [], events: new Map() })
-  const session = { id: 's-unregistered-live', header: { cwd: 'G:\\AIagent\\DSH\\TuckPane' } }
+  const session = { id: 's-unregistered-live', header: { cwd: process.cwd() } }
   const live = first.listeners['session/event'][0]
   live(session, { seq: 0, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } })
   live(session, usageEvent(eventTime, 1, 1, { inputTokens: 31, outputTokens: 7, cacheReadTokens: 11 }, 1))
@@ -242,6 +243,17 @@ test('live unregistered sessions persist and recover through the synthetic works
   assert.equal(recovered.totals.output, 7)
   assert.equal(recovered.totals.cacheRead, 11)
   assert.ok(recovered.workspaces.some((workspace) => workspace.id === stored.workspaceId && workspace.path === ''))
+})
+
+test('does not recover a legacy synthetic ledger row after its cwd is deleted', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const identity = { identityKey: 'deepseek / deepseek-chat', provider: 'deepseek', requestedModel: 'deepseek-chat', actualModel: 'deepseek-chat', label: 'deepseek / deepseek-chat', legacy: false }
+  const ledger = { version: 3, sessionId: 's-deleted-cwd', workspaceId: 'unregistered:deadbeefdeadbeef', lastSeq: 2, updatedAt: Date.now(), turns: [{ key: 's-deleted-cwd:turn:1', seq: 1, time: eventTime, workspaceId: 'unregistered:deadbeefdeadbeef', turn: 1, identity }], usage: [{ key: 's-deleted-cwd:step:1:1', seq: 2, time: eventTime, workspaceId: 'unregistered:deadbeefdeadbeef', identity, modelId: 'deepseek-chat', values: { input: 77, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: { status: 'unpriced', pricingMode: 'official-model', currency: 'USD', source: 'none', pricingModel: 'deepseek-chat', providerId: null, inputTokenSemantics: 'fresh', multiplier: '1', rates: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, breakdown: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, baseTotal: '0', total: '0', tiered: false } }], lastIdentity: identity }
+  const app = await createApp({ withStorage: true, ledgerSeed: { 's-deleted-cwd': ledger }, workspaces: [], sessions: [], events: new Map() })
+  const snapshot = (await waitForScan(app)).json()
+  assert.equal(snapshot.totals.input, 0)
+  assert.equal(snapshot.totals.turns, 0)
+  assert.equal(snapshot.workspaces.some((workspace) => workspace.id === 'unregistered:deadbeefdeadbeef'), false)
 })
 
 test('seeds unchanged sessions from the ledger and replaces retried steps without double-counting', async () => {
