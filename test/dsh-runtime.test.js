@@ -146,7 +146,7 @@ async function runRuntimeSmoke(runtime) {
     assert.equal(root.get('workspaceRegistry').constructor.name, 'WorkspaceRegistry')
     assert.equal(root.get('sessionQuery').constructor.name, 'SessionQueryEngine')
     assert.equal(webServer.constructor.name, 'WebServer')
-    for (const path of ['/api/all-usage', '/api/all-usage/status', '/api/all-usage/query', '/api/all-usage/records', '/api/all-usage/pricing', '/api/all-usage/pricing/models', '/api/all-usage/pricing/sync', '/api/all-usage/workspaces/refresh', '/api/all-usage/balance', '/api/all-usage/alias']) assert.equal(webServer.exact.has(path), true, 'real webServer must register ' + path)
+    for (const path of ['/api/all-usage', '/api/all-usage/status', '/api/all-usage/query', '/api/all-usage/records', '/api/all-usage/pricing', '/api/all-usage/pricing/models', '/api/all-usage/pricing/sync', '/api/all-usage/balance', '/api/all-usage/alias']) assert.equal(webServer.exact.has(path), true, 'real webServer must register ' + path)
     const eventHooksAfterLoad = {
       event: hookCount(root, 'session/event'),
       flush: hookCount(root, 'session/flush'),
@@ -204,8 +204,8 @@ async function runRuntimeSmoke(runtime) {
     assert.ok(exactBeforeDispose >= 9)
     await root.loader.remove(allUsageId)
     await root.loader.await()
-    assert.equal(webServer.exact.size, exactBeforeDispose - 10)
-    for (const path of ['/api/all-usage', '/api/all-usage/status', '/api/all-usage/query', '/api/all-usage/records', '/api/all-usage/pricing', '/api/all-usage/pricing/models', '/api/all-usage/pricing/sync', '/api/all-usage/workspaces/refresh', '/api/all-usage/balance', '/api/all-usage/alias']) assert.equal(webServer.exact.has(path), false, 'dispose must remove ' + path)
+    assert.equal(webServer.exact.size, exactBeforeDispose - 9)
+    for (const path of ['/api/all-usage', '/api/all-usage/status', '/api/all-usage/query', '/api/all-usage/records', '/api/all-usage/pricing', '/api/all-usage/pricing/models', '/api/all-usage/pricing/sync', '/api/all-usage/balance', '/api/all-usage/alias']) assert.equal(webServer.exact.has(path), false, 'dispose must remove ' + path)
     assert.equal(hookCount(root, 'session/event'), eventHooksAfterLoad.event - 1)
     assert.equal(hookCount(root, 'session/flush'), eventHooksAfterLoad.flush - 1)
     assert.equal(hookCount(root, 'session/disposed'), eventHooksAfterLoad.disposed - 1)

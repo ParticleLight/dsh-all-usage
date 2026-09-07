@@ -45,7 +45,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **中断请求**：上游请求被中断时可能只有 `assistant/chunk` 的 usage，没有最终 `assistant/message`；本插件会保留该 chunk 用量。同一 `turn / step` 后续出现最终 message 时，message 会替换 chunk。若上游完全没有 usage 事件，则无法从响应内容精确恢复 Token。
 - **估算成本**：成本是基于 models.dev 价格和 DSH usage 桶的估算，不是供应商账单；目录不可用或模型没有官方匹配时不会猜测价格，而是显示未计价。缓存读取、缓存写入和 reasoning 的口径取决于 DSH 上游事件。
 - **分层价格**：models.dev 的 tiered/context-dependent 价格按本次请求的输入上下文（fresh input + cache read + cache write）选择对应档位；阈值边界遵循目录定义，无法验证的异常 tier 仍显示为 unsupported。
-- **工作区边界**：只有 cwd 能映射到 DSH 已注册工作区的会话才进入统计；未注册 cwd（包括已存在但未在 registry 中登记的目录）会被忽略；点击“刷新工作区”可重新读取 registry，重启 DSH Web 也会触发读取。会话尚未成功 flush 前删除或损坏的日志无法由独立账本恢复。
+- **工作区边界**：只有 cwd 能映射到 DSH 已注册工作区的会话才进入统计；未注册 cwd（包括已存在但未在 registry 中登记的目录）会被忽略。工作区注册列表通过 DSH 的 `domain/changed` 探针自动同步：注册表一有改动就重读并只对新增/删除的工作区做增量处理，未变化的已有工作区直接复用已计算账本，不会全量重扫。会话尚未成功 flush 前删除或损坏的日志无法由独立账本恢复。
 
 ### 本地统计与官方账单
 
@@ -238,7 +238,7 @@ An unlisted DSH version is not necessarily incompatible. Include the DSH, Node.j
 - **Interrupted requests**: an interrupted upstream request may emit only `assistant/chunk` usage and never produce a final `assistant/message`; that chunk is retained. A later final message for the same turn/step replaces it. If the upstream emits no usage event at all, exact token usage cannot be reconstructed from response text.
 - **Estimated cost**: cost is an estimate based on models.dev rates and DSH usage buckets, not a provider invoice. Unavailable catalogs and unmatched models remain unpriced instead of receiving guessed rates. Cache reads, cache writes, and reasoning follow the buckets reported by the upstream DSH event.
 - **Tiered prices**: models.dev context-tiered entries select the applicable rate from the request input context (fresh input plus cache read/write tokens); malformed schedules remain unsupported.
-- **Workspace boundary**: only sessions whose cwd maps to a DSH-registered workspace are included. Unregistered cwds, including existing directories absent from the registry, are ignored; click Refresh workspaces to reread the registry, or restart DSH Web. Data deleted or corrupted before a successful session flush cannot be recovered from the separate ledger.
+- **Workspace boundary**: only sessions whose cwd maps to a DSH-registered workspace are included. Unregistered cwds, including existing directories absent from the registry, are ignored. The registry is kept fresh by a `domain/changed` probe: any durable workspace-domain write triggers a reread, and only added/removed workspaces are reprocessed incrementally — unchanged workspaces reuse their computed aggregates and ledger. Data deleted or corrupted before a successful session flush cannot be recovered from the separate ledger.
 
 ### Local Statistics vs Official Billing
 

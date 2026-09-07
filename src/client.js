@@ -1578,7 +1578,6 @@ window.__ModuleLoader__.load({
 .uh-trend-legend-item { display:inline-flex; align-items:center; gap:3px; border:0; border-radius:7px; padding:3px 6px; background:transparent; color:var(--dsw-alias-label-secondary); font:inherit; font-size:11px; cursor:pointer; transition:color .15s ease; }
 .uh-trend-legend-item:hover { background:var(--dsw-alias-bg-layer-2); color:var(--dsw-alias-label-primary); }
 .uh-trend-legend-item.uh-on { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
-.uh-workspace-refresh-note { margin: 6px 0 8px; color:var(--dsw-alias-label-secondary); font-size:11px; line-height:1.45; }
 .uh-filter-bar { position:relative; z-index:10; display:flex; align-items:center; flex-wrap:wrap; gap:7px; }
 .uh-filter-clear { border:0; background:transparent; color:var(--dsw-alias-label-secondary); font:inherit; font-size:11px; cursor:pointer; text-decoration:underline; }
 .uh-query-note { color:var(--dsw-alias-label-secondary); font-size:11px; }
@@ -1920,14 +1919,6 @@ window.__ModuleLoader__.load({
         return r.json()
       })
     }
-    const refreshWorkspacesRpc = (writeToken) => fetch('/api/all-usage/workspaces/refresh', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-all-usage-request-token': writeToken },
-      body: '{}',
-    }).then((r) => {
-      if (!r.ok) { const error = new Error('HTTP ' + r.status); error.status = r.status; throw error }
-      return r.json()
-    })
     const getBalance = (force, requestToken) => fetch('/api/all-usage/balance' + (force ? '?force=1' : ''), { headers: { accept: 'application/json', 'x-all-usage-request-token': requestToken } }).then((r) => {
       if (!r.ok) throw new Error('HTTP ' + r.status)
       return r.json()
@@ -2009,8 +2000,6 @@ window.__ModuleLoader__.load({
       const [stats, setStats] = React.useState(null)
       const [status, setStatus] = React.useState(null)
       const [statsError, setStatsError] = React.useState('')
-      const [workspaceRefreshing, setWorkspaceRefreshing] = React.useState(false)
-      const [workspaceRefreshError, setWorkspaceRefreshError] = React.useState('')
       const [lastStatsAt, setLastStatsAt] = React.useState(0)
       const [balance, setBalance] = React.useState(null)
       const [range, setRange] = React.useState(() => usageUiState.range || 'today')
@@ -2373,16 +2362,6 @@ window.__ModuleLoader__.load({
         return undefined
       }, [detailSelection && usageScopeKey(detailSelection.scope), detailView])
       const onRefresh = React.useCallback(() => { refreshRef.current() }, [])
-      const onRefreshWorkspaces = React.useCallback(() => {
-        if (workspaceRefreshing || stats === null || typeof stats.requestToken !== 'string' || stats.requestToken === '') return
-        setWorkspaceRefreshing(true)
-        setWorkspaceRefreshError('')
-        refreshWorkspacesRpc(stats.requestToken).then(() => {
-          refreshRef.current()
-        }, () => {
-          setWorkspaceRefreshError('failed')
-        }).finally(() => setWorkspaceRefreshing(false))
-      }, [workspaceRefreshing, stats])
       const toggleFilter = React.useCallback((id) => {
         setWsFilter((prev) => (prev === id ? null : id))
       }, [])
@@ -3473,10 +3452,8 @@ window.__ModuleLoader__.load({
             ),
             React.createElement('button', { className: 'uh-refresh', title: tr('导出当前时间范围与模型查看模式的 CSV 数据', 'Export CSV data for the current time range and model view'), onClick: exportCsv }, React.createElement(LineIcon, { name: 'export', size: 14 }), tr('导出数据', 'Export Data')),
             React.createElement('button', { className: 'uh-refresh uh-icon-button', title: tr('刷新统计数据', 'Refresh usage statistics'), 'aria-label': tr('刷新统计数据', 'Refresh usage statistics'), onClick: onRefresh }, React.createElement(LineIcon, { name: 'refresh', size: 16 })),
-            React.createElement('button', { className: 'uh-refresh', title: tr('重新读取工作区并重扫会话', 'Reload workspaces and rescan sessions'), onClick: onRefreshWorkspaces, disabled: workspaceRefreshing }, React.createElement(LineIcon, { name: 'refresh', size: 14 }), workspaceRefreshing ? tr('读取工作区中…', 'Reading workspaces…') : tr('刷新工作区', 'Refresh workspaces')),
           ),
         ),
-        React.createElement('div', { className: 'uh-workspace-refresh-note' }, workspaceRefreshError !== '' ? tr('刷新工作区失败，请重启 DSH Web 后重试。', 'Workspace refresh failed; restart DSH Web and try again.') : tr('未注册工作区可能是索引尚未刷新。点击“刷新工作区”重新读取，也可重启 DSH Web；默认不实时读取以避免性能开销。', 'A workspace may be unregistered because the index is stale. Click “Refresh workspaces” or restart DSH Web; the registry is not read on every event to avoid overhead.')),
         React.createElement('div', { className: 'uh-filter-bar', role: 'group', 'aria-label': tr('统一筛选', 'Unified filters') },
           React.createElement(UsageFilterMenu, {
             label: tr('全部工作区', 'All workspaces'),

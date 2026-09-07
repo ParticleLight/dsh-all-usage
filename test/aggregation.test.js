@@ -167,16 +167,22 @@ async function waitForLedgerWrite() {
   await new Promise((resolve) => setTimeout(resolve, 40))
 }
 
-test('manual workspace refresh rereads the registry and remaps a session initially outside the registry', async () => {
+async function emitWorkspaceChange(app, change) {
+  for (const handler of app.listeners['domain/changed'] || []) handler(change)
+  // The probe debounces ~300ms before re-reading the registry.
+  await new Promise((resolve) => setTimeout(resolve, 450))
+}
+
+test('workspace registry change is probed automatically and remaps a session initially outside the registry', async () => {
   const eventTime = Date.now() - 60 * 1000
   const workspaces = []
   const cwd = process.cwd()
-  const session = { header: { id: 's-refresh-workspace', cwd } }
+  const session = { header: { id: 's-probe-workspace', cwd } }
   const app = await createApp({
     withStorage: true,
     workspaces,
     sessions: [session],
-    events: new Map([['s-refresh-workspace', [
+    events: new Map([['s-probe-workspace', [
       { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
       usageEvent(eventTime, 1, 1, { inputTokens: 13, outputTokens: 2 }, 2),
     ]]]),
@@ -184,14 +190,59 @@ test('manual workspace refresh rereads the registry and remaps a session initial
   let snapshot = (await waitForScan(app)).json()
   assert.equal(snapshot.totals.input, 0)
   assert.equal(snapshot.workspaces.some((item) => item.id.startsWith('unregistered:')), false)
-  workspaces.push({ id: 'ws-refreshable', path: cwd, title: 'Refreshable' })
-  const request = makeRequest('POST', { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': snapshot.requestToken }, '{}')
-  const refreshed = await call(app, '/api/all-usage/workspaces/refresh', request)
-  assert.equal(refreshed.status, 202)
-  snapshot = (await waitForScan(app)).json()
+  // The manual refresh route is gone: only the registry probe keeps the index fresh.
+  assert.equal(app.routes.has('/api/all-usage/workspaces/refresh'), false)
+  workspaces.push({ id: 'ws-probed', path: cwd, title: 'Probed' })
+  await emitWorkspaceChange(app, { domain: 'workspace', table: 'workspaces', operation: 'put', key: 'ws-probed', value: {} })
+  snapshot = (await waitForScan(app, (body) => body.scan.done && body.totals.input === 13)).json()
   assert.equal(snapshot.totals.input, 13)
-  assert.ok(snapshot.workspaces.some((item) => item.id === 'ws-refreshable' && item.title === 'Refreshable'))
+  assert.ok(snapshot.workspaces.some((item) => item.id === 'ws-probed' && item.title === 'Probed'))
   assert.equal(snapshot.workspaces.some((item) => item.id.startsWith('unregistered:')), false)
+})
+
+test('unchanged registry change reuses aggregation without rescan', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    withStorage: true,
+    workspaces: [{ id: 'ws-steady', path: process.cwd(), title: 'Steady' }],
+    sessions: [{ header: { id: 's-steady', cwd: process.cwd() } }],
+    events: new Map([['s-steady', [
+      { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+      usageEvent(eventTime, 1, 1, { inputTokens: 41, outputTokens: 5 }, 2),
+    ]]]),
+  })
+  const snapshot = (await waitForScan(app)).json()
+  assert.equal(snapshot.totals.input, 41)
+  const readsAfterBaseline = app.readCalls.get('s-steady') || 0
+  // A title-only workspace write probes the registry but must not rescan:
+  // unchanged workspaces keep their aggregates and ledger untouched.
+  await emitWorkspaceChange(app, { domain: 'workspace', table: 'workspaces', operation: 'put', key: 'ws-steady', value: {} })
+  assert.equal((app.readCalls.get('s-steady') || 0), readsAfterBaseline)
+  const steady = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.equal(steady.totals.input, 41)
+  assert.equal(steady.workspaces.some((item) => item.id === 'ws-steady' && item.title === 'Steady'), true)
+})
+
+test('removed workspace subtracts its session from totals', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const workspaces = [{ id: 'ws-gone', path: process.cwd(), title: 'Gone' }]
+  const app = await createApp({
+    withStorage: true,
+    workspaces,
+    sessions: [{ header: { id: 's-gone', cwd: process.cwd() } }],
+    events: new Map([['s-gone', [
+      { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+      usageEvent(eventTime, 1, 1, { inputTokens: 53, outputTokens: 9 }, 2),
+    ]]]),
+  })
+  let snapshot = (await waitForScan(app)).json()
+  assert.equal(snapshot.totals.input, 53)
+  workspaces.length = 0
+  await emitWorkspaceChange(app, { domain: 'workspace', table: 'workspaces', operation: 'deleted', key: 'ws-gone' })
+  snapshot = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.equal(snapshot.totals.input, 0)
+  assert.equal(snapshot.totals.turns, 0)
+  assert.equal(snapshot.workspaces.some((item) => item.id === 'ws-gone'), false)
 })
 
 test('does not include sessions whose cwd is not registered', async () => {
