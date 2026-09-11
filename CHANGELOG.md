@@ -2,6 +2,16 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [1.1.8] - 2026-09-11
+
+### Fixed
+
+- README.md still quoted the pre-0.1.5 compatibility declaration (`>=0.1.1-rc.1 <0.1.2`) and a verification matrix that stopped at 0.1.1, contradicting the shipped `package.json` after v1.1.6 and v1.1.7. Both language sections now record the corrected per-tuple range and list `0.1.5-rc.1` in the verified matrix.
+
+### Changed
+
+- The CI runtime smoke matrix now covers `0.1.5-rc.1` alongside `0.1.1-rc.2` and `0.1.1-rc.1`, and selects the Cordis/loader/timer line per runtime version (0.1.5-rc.1 ships cordis 4.0.2 / loader 1.0.3 / timer 1.1.4) instead of pinning a single hard-coded set.
+
 ## [1.1.7] - 2026-09-11
 
 ### Fixed
