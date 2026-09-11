@@ -2,6 +2,12 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- The declared DSH runtime compatibility range now carries an explicit prerelease branch per tuple (`>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0`). node-semver only lets a prerelease version satisfy a range when a comparator shares its `major.minor.patch` tuple and itself carries a prerelease tag, so the previous broad-looking `>=0.1.1-rc.1 <0.1.6` silently reported `0.1.5-rc.1` — the runtime this release targets — as unsupported.
+
 ## [1.1.6] - 2026-09-11
 
 ### Fixed
