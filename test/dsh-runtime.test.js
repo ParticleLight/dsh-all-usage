@@ -9,8 +9,15 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const RUNTIME_ROOT = process.env.DSH_RUNTIME_ROOT || 'F:\\dsh-web\\runtime'
 const requestedRuntimeVersion = process.env.DSH_RUNTIME_VERSION
-const RUNTIME_VERSIONS = requestedRuntimeVersion ? [requestedRuntimeVersion] : ['0.1.1-rc.2', '0.1.1-rc.1']
+const RUNTIME_VERSIONS = requestedRuntimeVersion ? [requestedRuntimeVersion] : ['0.1.5-rc.1', '0.1.1-rc.2', '0.1.1-rc.1']
 const REQUIRE_RUNTIME_SMOKE = process.env.DSH_REQUIRE_RUNTIME_SMOKE === '1'
+// Each DSH runtime pins its own Cordis/loader/timer line; an unknown runtime
+// falls back to any installed version so a new release still gets smoke-tested.
+const RUNTIME_PROFILES = {
+  '0.1.1-rc.1': { cordis: '4.0.1', loader: '1.0.2', timer: '1.1.3' },
+  '0.1.1-rc.2': { cordis: '4.0.1', loader: '1.0.2', timer: '1.1.3' },
+  '0.1.5-rc.1': { cordis: '4.0.2', loader: '1.0.3', timer: '1.1.4' },
+}
 
 async function findPackage(packageName, version) {
   const pnpmRoot = join(RUNTIME_ROOT, 'node_modules', '.pnpm')
@@ -41,10 +48,11 @@ async function findPackage(packageName, version) {
 }
 
 async function locateRuntime(version) {
+  const profile = RUNTIME_PROFILES[version] || {}
   const required = {
-    cordis: ['@deepseek-ai/cordis', '4.0.1'],
-    loader: ['@deepseek-ai/cordis-plugin-loader', '1.0.2'],
-    timer: ['@deepseek-ai/cordis-plugin-timer', '1.1.3'],
+    cordis: ['@deepseek-ai/cordis', profile.cordis],
+    loader: ['@deepseek-ai/cordis-plugin-loader', profile.loader],
+    timer: ['@deepseek-ai/cordis-plugin-timer', profile.timer],
     session: ['@deepseek-ai/dsh-session', version],
     sessionQuery: ['@deepseek-ai/dsh-session-query', version],
     sessionPersistenceJsonl: ['@deepseek-ai/dsh-session-persistence-jsonl', version],
@@ -62,6 +70,37 @@ async function locateRuntime(version) {
 
 async function importEntry(packageDir, relativePath = 'lib/index.js') {
   return import(pathToFileURL(join(packageDir, relativePath)).href)
+}
+
+// DSH 0.1.5 replaced the Session `events` getter with `snapshotEvents()`.
+function readSessionEvents(session) {
+  if (session === null || session === undefined) return []
+  if (Array.isArray(session.events)) return session.events
+  if (typeof session.snapshotEvents === 'function') {
+    const snapshot = session.snapshotEvents()
+    if (Array.isArray(snapshot)) return snapshot
+  }
+  return []
+}
+
+// The ledger write is debounced and asynchronous, so poll the shards until the
+// flushed session row lands instead of racing the writer.
+async function waitForLedgerRecord(scratch, sessionId) {
+  const dir = join(scratch, 'storages')
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    let files = []
+    try { files = await readdir(dir) } catch (error) { files = [] }
+    for (const file of files) {
+      if (!file.startsWith('all_usage_ledger_')) continue
+      try {
+        const raw = JSON.parse(await readFile(join(dir, file), 'utf8'))
+        const row = raw && raw.tables && raw.tables.sessions && raw.tables.sessions[sessionId]
+        if (row !== undefined && row !== null) return row
+      } catch (error) { /* shard still being written */ }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  return null
 }
 
 function hookCount(ctx, name) {
@@ -184,10 +223,10 @@ async function runRuntimeSmoke(runtime) {
       usage: { inputTokens: 12, outputTokens: 18, cacheReadTokens: 4, cacheWriteTokens: 2, reasoningTokens: 2 },
     }, { surfaceOp: 'append' })
     session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
-    assert.deepEqual(session.events.map((event) => event.type), ['request/context', 'assistant/chunk', 'assistant/message', 'turn/end'])
+    assert.deepEqual(readSessionEvents(session).map((event) => event.type), ['request/context', 'assistant/chunk', 'assistant/message', 'turn/end'])
     assert.equal(await sessions.flush(session), true)
     const measured = await waitForSnapshot(webServer, (body) => body.scan && body.scan.done === true && body.totals.input === 12 && body.totals.output === 18 && body.totals.cacheRead === 4 && body.totals.cacheWrite === 2 && body.totals.reasoning === 2)
-    const diagnostic = { snapshot: measured.body === null ? null : { scan: measured.body.scan, sync: measured.body.sync, totals: measured.body.totals, perModel: measured.body.perModel }, sessionHeader: session.header, eventTypes: session.events.map((event) => ({ type: event.type, seq: event.seq })), workspaces: root.get('workspaceRegistry').list().map((item) => ({ id: item.id, path: item.path, sessionIds: item.sessionIds })) }
+    const diagnostic = { snapshot: measured.body === null ? null : { scan: measured.body.scan, sync: measured.body.sync, totals: measured.body.totals, perModel: measured.body.perModel }, sessionHeader: session.header, eventTypes: readSessionEvents(session).map((event) => ({ type: event.type, seq: event.seq })), workspaces: root.get('workspaceRegistry').list().map((item) => ({ id: item.id, path: item.path, sessionIds: item.sessionIds })) }
     if (!measured.response) throw new Error('real firehose did not reach expected totals: ' + JSON.stringify(diagnostic))
     assert.equal(measured.body.totals.input, 12)
     assert.equal(measured.body.totals.output, 18)
@@ -199,6 +238,12 @@ async function runRuntimeSmoke(runtime) {
     const storageFiles = await readdir(join(scratch, 'storages'))
     assert.equal(storageFiles.includes('all_usage_ledger.json'), false)
     assert.ok(storageFiles.some((file) => /^all_usage_ledger_\d{2}\.json$/.test(file)))
+    // A runtime that stops exposing the live event log must not persist an
+    // empty record: the flushed session has to keep its sequence and usage.
+    const ledgerRow = await waitForLedgerRecord(scratch, 'runtime-smoke-session')
+    assert.ok(ledgerRow, 'the persisted ledger must contain the flushed session')
+    assert.equal(ledgerRow.lastSeq, 3)
+    assert.ok(Array.isArray(ledgerRow.usage) && ledgerRow.usage.length > 0, 'the persisted ledger must keep the flushed usage')
 
     const exactBeforeDispose = webServer.exact.size
     assert.ok(exactBeforeDispose >= 9)
