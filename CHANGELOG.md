@@ -2,6 +2,17 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [1.1.6] - 2026-09-11
+
+### Fixed
+
+- DSH 0.1.5 compatibility: that runtime replaced the Session `events` getter with `snapshotEvents()`, so the live flush path read an empty event log and folded every flushed session into an empty ledger record (`lastSeq: -1`, no turns, no usage). The dashboard stayed correct because live totals come from the `session/event` hook, but the durable "usage survives session deletion" guarantee silently degraded and restart lost the zero-rescan fast path. Event access now prefers `session.events` and falls back to `session.snapshotEvents()`, leaving 0.1.1 behaviour unchanged.
+- The runtime smoke test now asserts the persisted ledger keeps the flushed session's sequence and usage, and covers 0.1.5-rc.1 alongside the 0.1.1 line, so this regression cannot return unnoticed.
+
+### Changed
+
+- Declared DSH runtime compatibility widened to `>=0.1.1-rc.1 <0.1.6`, with `0.1.5-rc.1` added to the verified list; the runtime smoke test pins the Cordis/loader/timer lines per runtime version.
+
 ## [1.1.5] - 2026-09-07
 
 ### Added

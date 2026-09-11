@@ -7,7 +7,7 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const dshCompatibility = packageJson.dsh && packageJson.dsh.compatibility
 if (!packageJson.engines || packageJson.engines.node !== '>=22 <25') throw new Error('package.json must declare Node.js engines >=22 <25')
-if (!dshCompatibility || dshCompatibility.runtime !== '>=0.1.1-rc.1 <0.1.2' || !Array.isArray(dshCompatibility.verified) || !dshCompatibility.verified.includes('0.1.1-rc.2') || !dshCompatibility.verified.includes('0.1.1-rc.1')) throw new Error('package.json must declare the verified DSH compatibility range')
+if (!dshCompatibility || dshCompatibility.runtime !== '>=0.1.1-rc.1 <0.1.6' || !Array.isArray(dshCompatibility.verified) || !dshCompatibility.verified.includes('0.1.5-rc.1') || !dshCompatibility.verified.includes('0.1.1-rc.2') || !dshCompatibility.verified.includes('0.1.1-rc.1')) throw new Error('package.json must declare the verified DSH compatibility range')
 const packPath = process.argv[2]
 const raw = packPath === undefined
   ? execFileSync(process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : 'npm', process.platform === 'win32' ? ['/d', '/s', '/c', 'npm.cmd pack --dry-run --json'] : ['pack', '--dry-run', '--json'], { cwd: root, encoding: 'utf8' })
