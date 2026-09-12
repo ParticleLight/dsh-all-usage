@@ -47,7 +47,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **中断请求**：上游请求被中断时可能只有 `assistant/chunk` 的 usage，没有最终 `assistant/message`；本插件会保留该 chunk 用量。同一 `turn / step` 后续出现最终 message 时，message 会替换 chunk。若上游完全没有 usage 事件，则无法从响应内容精确恢复 Token。
 - **估算成本**：成本是基于 models.dev 价格和 DSH usage 桶的估算，不是供应商账单；目录不可用或模型没有官方匹配时不会猜测价格，而是显示未计价。缓存读取、缓存写入和 reasoning 的口径取决于 DSH 上游事件。
 - **分层价格**：models.dev 的 tiered/context-dependent 价格按本次请求的输入上下文（fresh input + cache read + cache write）选择对应档位；阈值边界遵循目录定义，无法验证的异常 tier 仍显示为 unsupported。
-- **工作区边界**：只有 cwd 能映射到 DSH 已注册工作区的会话才进入统计；未注册 cwd（包括已存在但未在 registry 中登记的目录）会被忽略。工作区注册列表通过 DSH 的 `domain/changed` 探针自动同步：注册表一有改动就重读并只对新增/删除的工作区做增量处理，未变化的已有工作区直接复用已计算账本，不会全量重扫。会话尚未成功 flush 前删除或损坏的日志无法由独立账本恢复。
+- **工作区边界**：只有 cwd 能映射到 DSH 已注册工作区的会话才进入统计；未注册 cwd（包括已存在但未在 registry 中登记的目录）会被忽略。工作区注册列表通过 DSH 的 `domain/changed` 探针自动同步：注册表一有改动就重读并只对新增/删除的工作区做增量处理，未变化的已有工作区直接复用已计算账本，不会全量重扫。会话尚未成功 flush 前删除或损坏的日志无法由独立账本恢复。工作区被删除时历史用量不会丢失：它会被保留并汇总为一行「已删除」。
 
 ### 本地统计与官方账单
 
@@ -56,7 +56,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - 本地统计读取 DSH 的 `assistant/chunk`、最终 `assistant/message` 和其他会话事件，按同一 `turn / step` 去重和替换；官方账单可能按供应商自己的请求、分词器、舍入、折扣、免费额度和结算周期计算。
 - 失败请求只要留下 usage chunk，就会进入本地统计；供应商是否对该失败请求收费，应以官方账单为准。
 - 价格来自 models.dev 的公开模型目录和本地显式覆盖；目录价格、供应商实际价格、区域费率和账单折扣可能不同。成本字段应理解为估算值。
-- 本地统计只包含已注册工作区；未注册 cwd 与已删除目录的旧 ledger 不进入统计，并可能因日志损坏、清理或上游没有发出 usage 而少于官方账单。
+- 本地统计只包含已注册工作区；未注册 cwd 的旧 ledger 不进入统计。**已删除工作区**的历史用量会保留并汇总为一行「已删除」，删除工作区不会让历史统计变小。统计仍可能因日志损坏、清理或上游没有发出 usage 而少于官方账单。
 
 ### 可复现事件示例
 
@@ -107,8 +107,9 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 **v1.1.5**
 
+- **删除工作区不再丢数据**：工作区被删除后，已记录的用量不再从统计中移除，而是与其它已删工作区一起汇总为一行「已删除」（含尚未落账的实时用量）；磁盘账本行保留原工作区 id 与 cwd，因此可逆、可在重启后重建同一个桶。
 - **工作区注册探针**：自动跟随 DSH 工作区注册表（`domain/changed` 事件）；只对新增/删除的工作区增量重扫，未变化工作区直接复用账本，零全量重扫。移除了手动“刷新工作区”按钮与其 `POST /api/all-usage/workspaces/refresh` 路由。
-- **严格注册边界**：统计只包含 cwd 能映射到已注册工作区的会话；未登记目录（即使存在）与历史 `unregistered:` 账本行不再进入统计，已删除目录的旧账本行在恢复时跳过（`sourceCwd` 现在随每条账本持久化以校验归属）。
+- **严格注册边界**：统计只包含 cwd 能映射到已注册工作区的会话；未登记目录（即使存在）与历史 `unregistered:` 账本行不再进入统计。已删除工作区的**历史**用量保留（汇总为「已删除」行），但其目录不会再接纳新会话。
 
 **v1.1.4**
 
@@ -183,7 +184,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 - 使用次数与 Token 来自 DSH 会话日志；`session/flush` 只在存在新的相关事件时重建并将派生账本写入异步队列，同一 session 的 pending record 会合并，插件退出时 drain；插件激活时会回填日志与账本历史，插件卸载/重启后已成功持久化的数据不丢
 - 按日范围统计会保留全部可读取历史会话的有使用记录日期；热力图仅作为最近 53 周的固定视图窗口
-- 会话删除后，已成功 flush 的用量仍从独立账本恢复；会话销毁提示和周期对账只负责触发重建，不会删除账本记录
+- 会话删除后，已成功 flush 的用量仍从独立账本恢复；工作区删除同样不会丢数据——其历史用量汇总为一行「已删除」（含未落账的实时用量）。会话销毁提示和周期对账只负责触发重建，不会删除账本记录
 - 同一会话的同一 `turn / step` 只保留一份最终 usage；重试或替换消息会替换旧贡献，不重复累计
 - 输入 Token 按「未含缓存命中」计（缓存命中 / 写入独立成桶）；全 0 用量的重放事件不会覆盖已记录的真实用量，纯缓存命中的请求仍会计入
 - 轻量状态接口只公开 Host 实例、统计 revision、扫描进度与同步计数，不公开会话 ID、工作区路径、提示词或回复正文；完整快照仅在状态变化或手动刷新时获取
@@ -256,7 +257,7 @@ This plugin reports replayable statistics from local DSH event logs; it is not a
 - Local statistics read DSH `assistant/chunk`, final `assistant/message`, and related session events, then deduplicate and replace samples by logical `turn / step`. Official billing may use a provider tokenizer, rounding rules, discounts, free quotas, and billing periods.
 - A failed request is included locally whenever it leaves a usage chunk; whether the provider charged for that failed request must be checked against the official bill.
 - Prices come from the public models.dev catalog and local explicit overrides. Catalog prices can differ from provider prices, regional rates, and invoice discounts, so the cost field is an estimate.
-- Local statistics include registered workspaces only; unregistered cwds and old ledger rows for deleted directories are excluded, and totals can still be lower than the official bill when logs are damaged, cleaned up, or the upstream emits no usage event.
+- Local statistics include registered workspaces only; old ledger rows for unregistered cwds are excluded. Usage recorded for a **deleted workspace** is kept and summed into one "Deleted" row, so removing a workspace never shrinks historical totals. Totals can still be lower than the official bill when logs are damaged, cleaned up, or the upstream emits no usage event.
 
 ### Reproducible Event Examples
 
@@ -307,8 +308,9 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 
 **v1.1.5**
 
+- **Deleting a workspace no longer loses data**: usage already recorded for a removed workspace is no longer subtracted; it is summed with every other removed workspace into one "Deleted" row (including usage folded from the live feed that had not been persisted yet). Persisted ledger rows keep their original workspace id and cwd, so the mapping stays reversible and the same bucket is rebuilt after a restart.
 - **Workspace registry probe**: all-usage follows DSH's workspace registry automatically through the `domain/changed` event; only added/removed workspaces are reprocessed incrementally while unchanged workspaces reuse their ledger with zero rescan. The manual Refresh workspaces control and its `POST /api/all-usage/workspaces/refresh` route were removed.
-- **Strict registration boundary**: only sessions whose cwd maps to a registered workspace are counted; unregistered directories (even existing ones) and legacy `unregistered:` ledger rows never re-enter statistics, and ledger rows for deleted directories are skipped on recovery (`sourceCwd` is now persisted with every ledger record so ownership can be validated after a restart).
+- **Strict registration boundary**: only sessions whose cwd maps to a registered workspace are counted; unregistered directories (even existing ones) and legacy `unregistered:` ledger rows never re-enter statistics. Usage already recorded for a deleted workspace is kept in the "Deleted" row, but its directory never accepts new sessions again.
 
 **v1.1.4**
 
@@ -373,7 +375,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 
 ### Data semantics
 
-- Calls and tokens come from DSH session logs; `session/flush` rebuilds and queues the derived ledger only when related events are dirty, coalescing the latest pending record per session and draining on plugin disposal. Readable logs and ledger history are backfilled when the plugin activates, so successfully persisted data survives reloads or session deletion
+- Calls and tokens come from DSH session logs; `session/flush` rebuilds and queues the derived ledger only when related events are dirty, coalescing the latest pending record per session and draining on plugin disposal. Readable logs and ledger history are backfilled when the plugin activates, so successfully persisted data survives reloads or session deletion; deleting a workspace likewise keeps its history, summed into one "Deleted" row together with usage that had not reached the ledger yet
 - Day-level range data retains every readable historical session date with tracked usage; the heatmap is only a fixed latest-53-week view
 - After a session is deleted, successfully flushed usage is restored from the separate ledger; disposal hints and periodic reconciliation trigger rebuilds without deleting ledger rows
 - For each session and logical `turn / step`, only the final usage contribution is kept; retries or replaced messages do not double-count

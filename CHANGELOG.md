@@ -2,6 +2,18 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [1.1.9] - 2026-09-12
+
+### Fixed
+
+- Deleting a workspace no longer erases its recorded usage. The registry probe used to call `removeSession()` for every session of a deregistered workspace and drop their ledger rows, and recovery skipped any row whose `sourceCwd` no longer mapped to a registered workspace; together they destroyed history the durable ledger had already recorded. (v1.1.6 fixed a different path — the DSH 0.1.5 `session.events` removal that wrote empty ledger records.)
+
+### Changed
+
+- Usage from every removed workspace is now summed into a single **Deleted** row instead of vanishing, and one row per dead workspace is no longer created. Retiring a workspace re-keys the live aggregate in place through the new `aggregation.retargetSession()`, so usage folded from the live feed that had not reached the ledger yet survives too.
+- Persisted ledger rows keep their original workspace id and cwd: retargeting happens on the in-memory copy only, the bucket is re-derived from the ledger after every restart, and a row with no usage never advertises the bucket.
+- The strict registration boundary is unchanged — sessions in unregistered or deleted directories are still excluded from new statistics — and legacy `unregistered:` rows are still never resurrected. Re-registering a workspace keeps its old history in the Deleted row while new sessions count under the live workspace.
+
 ## [1.1.8] - 2026-09-11
 
 ### Fixed
