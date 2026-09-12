@@ -105,25 +105,10 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 ### 最近更新
 
-**v1.1.5**
+**v1.1.9**
 
-- **删除工作区不再丢数据**：工作区被删除后，已记录的用量不再从统计中移除，而是与其它已删工作区一起汇总为一行「已删除」（含尚未落账的实时用量）；磁盘账本行保留原工作区 id 与 cwd，因此可逆、可在重启后重建同一个桶。
-- **工作区注册探针**：自动跟随 DSH 工作区注册表（`domain/changed` 事件）；只对新增/删除的工作区增量重扫，未变化工作区直接复用账本，零全量重扫。移除了手动“刷新工作区”按钮与其 `POST /api/all-usage/workspaces/refresh` 路由。
-- **严格注册边界**：统计只包含 cwd 能映射到已注册工作区的会话；未登记目录（即使存在）与历史 `unregistered:` 账本行不再进入统计。已删除工作区的**历史**用量保留（汇总为「已删除」行），但其目录不会再接纳新会话。
-
-**v1.1.4**
-
-- **模型品牌图标**：请求日志、选中调用详情、模型统计表、成本设置匹配表、环形图图例与模型筛选下拉现在显示真实厂商品牌 SVG（DeepSeek、OpenAI、Claude、Gemini、Meta、Zhipu、xAI、Qwen、Doubao、Kimi、MiniMax）；模型命名空间优先于 DSH 供应商名，未知或混牌行保持中性。图标在构建期以 data URI 内嵌并由 scripts/svg-guard.mjs 校验（实体解码、CSS 转义/CDO/命名空间、url()/image-set() 均覆盖，注释与文本不误杀），运行时零网络请求。
-- **构建安全加固**：补齐 CDO/CDC 邻接 at-import、命名空间 style 元素、CSS 转义 url() 与外部 image-set() 四类绕过，并把 CSS 检查收窄到 style 属性与 style 体；对抗用例现在断言拒绝原因。
-- 三张用量仪表盘截图刷新为当前 UI。
-
-**v1.1.3**
-
-- 成本统计支持经验证的 context-tiered 官方费率、可展开费率表和显式价格覆盖。
-- **性能优化**：账本采用稳定分片、dirty flush 合并和 revision 快路径；查询、趋势和固定 53 周热力图改用写入时聚合索引，减少历史扫描、存储写放大和 Dashboard 重渲染。
-- 定价目录、价格同步、模型检索和映射编辑强化确定性与并发刷新边界。
-- 加强非法序列、旧账本、工作区重建、滞后 persistence revision 与复合账本键的恢复保护。
-- 增加 Node 22/24、DSH rc.1/rc.2 runtime smoke、脱敏 fixture replay 和包内容发布门禁。
+- **删除工作区不再丢数据**：工作区被删除后，已记录的用量不再从统计中移除，而是与其它已删工作区一起汇总为一行「已删除」（含尚未落账的实时用量）；磁盘账本行保留原工作区 id 与 cwd，因此映射可逆、重启后会重建同一个桶。
+- 严格注册边界不变：未登记目录与历史 `unregistered:` 账本行仍不进入统计，已删除工作区的目录也不会再接纳新会话。
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -306,25 +291,10 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 
 ### Latest Update
 
-**v1.1.5**
+**v1.1.9**
 
-- **Deleting a workspace no longer loses data**: usage already recorded for a removed workspace is no longer subtracted; it is summed with every other removed workspace into one "Deleted" row (including usage folded from the live feed that had not been persisted yet). Persisted ledger rows keep their original workspace id and cwd, so the mapping stays reversible and the same bucket is rebuilt after a restart.
-- **Workspace registry probe**: all-usage follows DSH's workspace registry automatically through the `domain/changed` event; only added/removed workspaces are reprocessed incrementally while unchanged workspaces reuse their ledger with zero rescan. The manual Refresh workspaces control and its `POST /api/all-usage/workspaces/refresh` route were removed.
-- **Strict registration boundary**: only sessions whose cwd maps to a registered workspace are counted; unregistered directories (even existing ones) and legacy `unregistered:` ledger rows never re-enter statistics. Usage already recorded for a deleted workspace is kept in the "Deleted" row, but its directory never accepts new sessions again.
-
-**v1.1.4**
-
-- **Vendor brand icons**: request logs, selected-call details, the model summary table, the cost-settings match table, donut legends, and the model filter dropdown now render real vendor brand SVGs (DeepSeek, OpenAI, Claude, Gemini, Meta, Zhipu, xAI, Qwen, Doubao, Kimi, MiniMax); the model namespace wins over the DSH provider name, and unknown or mixed-brand rows stay neutral. Icons are embedded as data URIs at build time and validated by scripts/svg-guard.mjs (entity decoding, CSS escapes/CDO/namespaced styles, url()/image-set() all covered, comments and text stay inert), with zero runtime network access.
-- **Build hardening**: per the independent audit, closed four bypass classes (CDO/CDC-adjacent at-import, namespaced style elements, CSS-escaped url(), external image-set()) and scoped the CSS checks to style attributes and bodies; adversarial fixtures now assert the rejection reason.
-- Refreshed the three usage-dashboard screenshots to the current UI.
-
-**v1.1.3**
-
-- Added validated context-tiered official pricing, expandable rate schedules, and explicit price overrides.
-- **Performance optimizations**: the durable ledger uses stable shards, dirty-flush coalescing, and revision reuse; scoped queries, trends, and the fixed 53-week heatmap use ingest-time aggregates to reduce historical scans, storage write amplification, and Dashboard rerenders.
-- Hardened deterministic pricing catalogs, pricing sync, official-model search, and mapping refresh races.
-- Strengthened recovery for invalid sequences, legacy ledgers, recreated workspaces, lagging persistence revisions, and composite ledger keys.
-- Added Node 22/24, DSH rc.1/rc.2 runtime smoke, redacted fixture replay, and package-content release gates.
+- **Deleting a workspace no longer loses data**: usage already recorded for a removed workspace is no longer subtracted; it is merged with every other removed workspace into one "Deleted" row, including usage folded from the live feed that had not reached the ledger yet. Persisted ledger rows keep their original workspace id and cwd, so the mapping is reversible and the same bucket is rebuilt after a restart.
+- The strict registration boundary is unchanged: unregistered directories and legacy `unregistered:` ledger rows still stay out of statistics, and a deleted workspace's directory never accepts new sessions again.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 
