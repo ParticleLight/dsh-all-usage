@@ -8,6 +8,18 @@ const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const dshCompatibility = packageJson.dsh && packageJson.dsh.compatibility
 if (!packageJson.engines || packageJson.engines.node !== '>=22 <25') throw new Error('package.json must declare Node.js engines >=22 <25')
 if (!dshCompatibility || dshCompatibility.runtime !== '>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0' || !Array.isArray(dshCompatibility.verified) || !dshCompatibility.verified.includes('0.1.5-rc.1') || !dshCompatibility.verified.includes('0.1.1-rc.2') || !dshCompatibility.verified.includes('0.1.1-rc.1')) throw new Error('package.json must declare the verified DSH compatibility range')
+// The README quotes the declared range and lists the verified runtimes in both
+// language sections. That drifted once already — v1.1.6 and v1.1.7 shipped a
+// README still claiming `<0.1.2` while package.json had moved on — so the gate
+// compares the documentation against the declaration it mirrors.
+const readme = readFileSync(join(root, 'README.md'), 'utf8')
+const quotedRanges = [...readme.matchAll(/DSH runtime `([^`]+)`/g)].map((match) => match[1])
+if (quotedRanges.length < 2) throw new Error('README.md must quote the declared DSH runtime range in both the Chinese and the English section')
+for (const range of quotedRanges) {
+  if (range !== dshCompatibility.runtime) throw new Error(`README.md quotes DSH runtime "${range}" but package.json declares "${dshCompatibility.runtime}"`)
+}
+const undocumented = dshCompatibility.verified.filter((version) => !readme.includes(version))
+if (undocumented.length > 0) throw new Error(`README.md does not mention the verified DSH runtime(s): ${undocumented.join(', ')}`)
 const packPath = process.argv[2]
 const raw = packPath === undefined
   ? execFileSync(process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : 'npm', process.platform === 'win32' ? ['/d', '/s', '/c', 'npm.cmd pack --dry-run --json'] : ['pack', '--dry-run', '--json'], { cwd: root, encoding: 'utf8' })
