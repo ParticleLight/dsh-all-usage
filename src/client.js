@@ -1151,7 +1151,9 @@ window.__ModuleLoader__.load({
         const aliases = props.aliases && typeof props.aliases === 'object' ? props.aliases : {}
         workspaces.forEach((workspace, index) => {
           const alias = aliases[workspace.id]
-          titles.set(workspace.id, typeof alias === 'string' && alias !== '' ? alias : (workspace.title || tr('未知工作区', 'Unknown workspace')))
+          const isBucket = workspace.retiredBucket === true
+          const workspaceLabel = isBucket ? tr('已删除', 'Deleted') : (typeof alias === 'string' && alias !== '' ? alias : (workspace.title || tr('未知工作区', 'Unknown workspace')))
+          titles.set(workspace.id, workspace.deleted === true && !isBucket ? workspaceLabel + tr('（已删除）', ' (deleted)') : workspaceLabel)
           indexes.set(workspace.id, index)
         })
         return { titles, indexes }
@@ -1228,7 +1230,7 @@ window.__ModuleLoader__.load({
       return React.createElement('div', { className: 'uh-panel' },
         React.createElement('div', { className: 'uh-section-title' }, React.createElement(LineIcon, { name: 'calendar', size: 16 }), tr('使用热力图', 'Usage Heatmap')),
         React.createElement('div', { className: 'uh-hm-head' },
-          React.createElement('div', { className: 'uh-chips' }, workspaces.map((workspace, index) => React.createElement('button', { key: workspace.id, className: 'uh-chip' + (selectedWorkspace === workspace.id ? ' uh-on' : ''), onClick: () => selectWorkspace(workspace.id), title: workspace.path },
+          React.createElement('div', { className: 'uh-chips' }, workspaces.map((workspace, index) => React.createElement('button', { key: workspace.id, className: 'uh-chip' + (selectedWorkspace === workspace.id ? ' uh-on' : ''), onClick: () => selectWorkspace(workspace.id), title: workspace.path || (workspace.retiredBucket === true ? tr('已删除', 'Deleted') : '') },
             React.createElement('span', { className: 'uh-dot', style: { background: wsColor(index) } }),
             React.createElement('span', { className: 'uh-chip-title' }, workspaceLookup.titles.get(workspace.id)),
           ))),
@@ -2451,9 +2453,10 @@ window.__ModuleLoader__.load({
       const wsIndex = workspaceLookup.indexes
       const wsTitle = React.useCallback((id) => {
         const alias = aliases[id]
-        if (typeof alias === 'string' && alias !== '') return alias
         const meta = wsById.get(id)
-        return meta ? meta.title : (language === 'en' ? 'Unknown workspace' : '未知工作区')
+        if (meta !== undefined && meta.retiredBucket === true) return language === 'en' ? 'Deleted' : '已删除'
+        const base = typeof alias === 'string' && alias !== '' ? alias : (meta && meta.title ? meta.title : (language === 'en' ? 'Unknown workspace' : '未知工作区'))
+        return meta !== undefined && meta.deleted === true ? base + (language === 'en' ? ' (deleted)' : '（已删除）') : base
       }, [aliases, wsById, language])
       const fullHistoryDayMap = React.useMemo(() => {
         const result = new Map()
@@ -3047,7 +3050,7 @@ window.__ModuleLoader__.load({
             : React.createElement('div', { className: 'uh-alias-list' },
               workspaces.map((w, i) => React.createElement('div', { key: w.id, className: 'uh-alias-item' },
                 React.createElement('span', { className: 'uh-dot', style: { background: wsColor(i) } }),
-                React.createElement('span', { className: 'uh-alias-folder', title: w.path }, w.title || w.path),
+                React.createElement('span', { className: 'uh-alias-folder', title: w.path || w.id }, (w.retiredBucket === true ? tr('已删除', 'Deleted') : (w.title || w.path || w.id)) + (w.deleted === true && w.retiredBucket !== true ? tr('（已删除）', ' (deleted)') : '')),
                 React.createElement('input', {
                   className: 'uh-alias-input',
                   value: aliasDrafts[w.id] !== undefined ? aliasDrafts[w.id] : '',

@@ -223,7 +223,7 @@ test('unchanged registry change reuses aggregation without rescan', async () => 
   assert.equal(steady.workspaces.some((item) => item.id === 'ws-steady' && item.title === 'Steady'), true)
 })
 
-test('removed workspace subtracts its session from totals', async () => {
+test('removed workspace keeps its recorded usage and is labelled deleted', async () => {
   const eventTime = Date.now() - 60 * 1000
   const workspaces = [{ id: 'ws-gone', path: process.cwd(), title: 'Gone' }]
   const app = await createApp({
@@ -237,12 +237,18 @@ test('removed workspace subtracts its session from totals', async () => {
   })
   let snapshot = (await waitForScan(app)).json()
   assert.equal(snapshot.totals.input, 53)
+  const before = snapshot.totals
   workspaces.length = 0
   await emitWorkspaceChange(app, { domain: 'workspace', table: 'workspaces', operation: 'deleted', key: 'ws-gone' })
   snapshot = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
-  assert.equal(snapshot.totals.input, 0)
-  assert.equal(snapshot.totals.turns, 0)
+  // The ledger's promise: deregistering a workspace must not erase what it
+  // already recorded. Its usage moves into the shared deleted bucket.
+  assert.equal(snapshot.totals.input, before.input)
+  assert.equal(snapshot.totals.turns, before.turns)
   assert.equal(snapshot.workspaces.some((item) => item.id === 'ws-gone'), false)
+  const bucket = snapshot.workspaces.find((item) => item.retiredBucket === true)
+  assert.notEqual(bucket, undefined)
+  assert.equal(bucket.deleted, true)
 })
 
 test('does not include sessions whose cwd is not registered', async () => {
@@ -291,6 +297,71 @@ test('does not recover a legacy synthetic ledger row after its cwd is deleted', 
   assert.equal(snapshot.totals.input, 0)
   assert.equal(snapshot.totals.turns, 0)
   assert.equal(snapshot.workspaces.some((workspace) => workspace.id === 'unregistered:deadbeefdeadbeef'), false)
+})
+
+test('recovers a ledger row whose workspace was deleted, keeping usage and labelling it', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const identity = { identityKey: 'deepseek / deepseek-chat', provider: 'deepseek', requestedModel: 'deepseek-chat', actualModel: 'deepseek-chat', label: 'deepseek / deepseek-chat', legacy: false }
+  const workspaceId = 'ws-deleted-1'
+  const ledger = { version: 3, sessionId: 's-deleted-ws', workspaceId, sourceCwd: 'C:\\gone', lastSeq: 2, updatedAt: Date.now(), turns: [{ key: 's-deleted-ws:turn:1', seq: 1, time: eventTime, workspaceId, turn: 1, identity }], usage: [{ key: 's-deleted-ws:step:1:1', seq: 2, time: eventTime, workspaceId, identity, modelId: 'deepseek-chat', values: { input: 77, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: { status: 'unpriced', pricingMode: 'official-model', currency: 'USD', source: 'none', pricingModel: 'deepseek-chat', providerId: null, inputTokenSemantics: 'fresh', multiplier: '1', rates: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, breakdown: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, baseTotal: '0', total: '0', tiered: false } }], lastIdentity: identity }
+  // The workspace is gone from the registry: its recorded usage must survive in
+  // the shared deleted bucket instead of vanishing with the workspace.
+  const app = await createApp({ withStorage: true, ledgerSeed: { 's-deleted-ws': ledger }, workspaces: [], sessions: [], events: new Map() })
+  const snapshot = (await waitForScan(app)).json()
+  assert.equal(snapshot.totals.input, 77)
+  assert.equal(snapshot.totals.turns, 1)
+  assert.equal(snapshot.workspaces.some((workspace) => workspace.id === workspaceId), false)
+  const bucket = snapshot.workspaces.find((workspace) => workspace.retiredBucket === true)
+  assert.notEqual(bucket, undefined)
+  assert.equal(bucket.deleted, true)
+})
+
+test('every deleted workspace shares one deleted bucket', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const identity = { identityKey: 'deepseek / deepseek-chat', provider: 'deepseek', requestedModel: 'deepseek-chat', actualModel: 'deepseek-chat', label: 'deepseek / deepseek-chat', legacy: false }
+  const seed = (sid, wsId, input) => [sid, {
+    version: 3,
+    sessionId: sid,
+    workspaceId: wsId,
+    sourceCwd: 'C:\\' + wsId,
+    lastSeq: 2,
+    updatedAt: Date.now(),
+    turns: [{ key: sid + ':turn:1', seq: 1, time: eventTime, workspaceId: wsId, turn: 1, identity }],
+    usage: [{ key: sid + ':step:1:1', seq: 2, time: eventTime, workspaceId: wsId, identity, modelId: 'deepseek-chat', values: { input, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: { status: 'unpriced', pricingMode: 'official-model', currency: 'USD', source: 'none', pricingModel: 'deepseek-chat', providerId: null, inputTokenSemantics: 'fresh', multiplier: '1', rates: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, breakdown: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0' }, baseTotal: '0', total: '0', tiered: false } }],
+    lastIdentity: identity,
+  }]
+  const app = await createApp({ withStorage: true, ledgerSeed: Object.fromEntries([seed('s-a', 'ws-a', 10), seed('s-b', 'ws-b', 20)]), workspaces: [], sessions: [], events: new Map() })
+  const snapshot = (await waitForScan(app)).json()
+  assert.equal(snapshot.totals.input, 30)
+  const buckets = snapshot.workspaces.filter((workspace) => workspace.retiredBucket === true)
+  assert.equal(buckets.length, 1)
+})
+
+test('retires live usage that never reached the ledger', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const workspaces = [{ id: 'ws-live-retire', path: 'C:\\live-retire', title: 'Live retire' }]
+  const app = await createApp({
+    withStorage: true,
+    workspaces,
+    sessions: [],
+    readSession: async () => ({ events: [] }),
+  })
+  await waitForScan(app)
+  // Folded straight from the feed: no scan record and no persisted ledger row.
+  app.listeners['session/event'][0]({ id: 's-live-retire', header: { id: 's-live-retire', cwd: 'C:\\live-retire' } }, usageEvent(eventTime, 1, 1, { inputTokens: 61, outputTokens: 7 }, 2))
+  for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  let snapshot = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.equal(snapshot.totals.input, 61)
+  const turnsBefore = snapshot.totals.turns
+  workspaces.length = 0
+  await emitWorkspaceChange(app, { domain: 'workspace', table: 'workspaces', operation: 'deleted', key: 'ws-live-retire' })
+  snapshot = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  // Replaying the ledger cannot recover usage that was never written, so the
+  // live aggregate itself has to be re-keyed into the bucket.
+  assert.equal(snapshot.totals.input, 61)
+  assert.equal(snapshot.totals.turns, turnsBefore)
+  const bucket = snapshot.workspaces.find((workspace) => workspace.retiredBucket === true)
+  assert.notEqual(bucket, undefined)
 })
 
 test('seeds unchanged sessions from the ledger and replaces retried steps without double-counting', async () => {
