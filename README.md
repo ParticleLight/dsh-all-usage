@@ -105,10 +105,11 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 ### 最近更新
 
-**v1.1.9**
+**v1.1.10**
 
-- **删除工作区不再丢数据**：工作区被删除后，已记录的用量不再从统计中移除，而是与其它已删工作区一起汇总为一行「已删除」（含尚未落账的实时用量）；磁盘账本行保留原工作区 id 与 cwd，因此映射可逆、重启后会重建同一个桶。
-- 严格注册边界不变：未登记目录与历史 `unregistered:` 账本行仍不进入统计，已删除工作区的目录也不会再接纳新会话。
+- **恢复账本的 revision 快路径**：DSH 0.1.5 把 `sessionPersistence.listSnapshots()` 改名为 `list()`，插件因此拿不到每会话 revision，`sessionsSkippedByRevision` 恒为 0、每次启动都重读全部会话日志（实测 479 个会话读了 431 个、约 13 分钟）。现在两种写法都支持，未变化的会话重新从账本复用。
+- **扫描期间的工作区变更不再被丢弃**：以前基线运行中到达的注册表变更会被直接忽略，导致新增工作区必须重启才出现；现在会被记住并在扫描结束后立即补跑，另有每 30 秒的注册表轮询兜底。
+- 升级后**首次**启动仍会全量读一次（旧账本记录没有 `lastRevision` 字段），此后启动走快路径。
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -291,10 +292,11 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 
 ### Latest Update
 
-**v1.1.9**
+**v1.1.10**
 
-- **Deleting a workspace no longer loses data**: usage already recorded for a removed workspace is no longer subtracted; it is merged with every other removed workspace into one "Deleted" row, including usage folded from the live feed that had not reached the ledger yet. Persisted ledger rows keep their original workspace id and cwd, so the mapping is reversible and the same bucket is rebuilt after a restart.
-- The strict registration boundary is unchanged: unregistered directories and legacy `unregistered:` ledger rows still stay out of statistics, and a deleted workspace's directory never accepts new sessions again.
+- **The ledger fast path is back**: DSH 0.1.5 renamed `sessionPersistence.listSnapshots()` to `list()`, so no per-session revision was ever obtained — `sessionsSkippedByRevision` stayed at 0 and every start re-read every session log (431 reads / ~13 minutes for 479 sessions). Both spellings are accepted now, and unchanged sessions are applied from the ledger again.
+- **A registry change during a baseline is no longer dropped**: a change arriving mid-scan used to be ignored, so a newly added workspace only appeared after a restart. It is now replayed as soon as the scan settles, with a 30-second registry poll as a safety net.
+- The first start after upgrading still reads every log once (older ledger records carry no `lastRevision`); later starts take the fast path.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 

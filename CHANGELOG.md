@@ -2,6 +2,22 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [1.1.10] - 2026-09-14
+
+### Fixed
+
+- **The ledger fast path is back.** DSH 0.1.5 renamed `sessionPersistence.listSnapshots()` to `list()`, so the plugin never obtained a per-session revision: `sessionsSkippedByRevision` stayed at 0 and every baseline re-read every session log (431 reads / ~13 minutes for 479 sessions on the maintainer's host). Both spellings are now accepted; against a real 0.1.5 service the plugin reports `persistenceSnapshotsAvailable: true` and skips unchanged sessions again.
+- **A registry change during a baseline is no longer dropped.** `synchronizeWorkspaceRegistry()` returned early while `scan.done` was false, so a workspace added during the (previously very long) scan stayed invisible until the next restart. Such a change is now remembered and replayed as soon as the scan settles.
+
+### Changed
+
+- The workspace registry is additionally polled every 30 seconds, so a missed `domain/changed` event can no longer leave the workspace list stale until a restart.
+- `/api/all-usage/status` exposes `workspaceProbeEvents`, `workspaceSyncRuns`, `workspaceSyncAdded`, `workspaceSyncRemoved` and `workspaceSyncDeferred` (cumulative, not reset by a baseline) so the probe can be verified on a live host.
+
+### Note
+
+- The first start after upgrading still reads every log once: ledger records written before this release carry no `lastRevision`, so the revision comparison has nothing to match against. From the next start on, unchanged sessions are applied from the ledger without re-reading their logs.
+
 ## [1.1.9] - 2026-09-12
 
 ### Fixed
