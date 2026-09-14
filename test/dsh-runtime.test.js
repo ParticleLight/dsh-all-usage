@@ -208,6 +208,14 @@ async function runRuntimeSmoke(runtime) {
     assert.equal(fetched.response.status, 200)
     assert.equal(fetched.body.scan.done, true)
     assert.equal(fetched.body.totals.input, 0)
+    // The revision signal must come from the real persistence service: DSH
+    // 0.1.5 renamed listSnapshots() to list(), and without it every baseline
+    // silently re-reads every session log.
+    const runtimeAddress = webServer.server && webServer.server.address()
+    const runtimePort = runtimeAddress && typeof runtimeAddress === 'object' ? runtimeAddress.port : webServer.port
+    const runtimeStatus = await requestJson('http://127.0.0.1:' + String(runtimePort) + '/api/all-usage/status')
+    assert.equal(runtimeStatus.status, 200)
+    assert.equal(runtimeStatus.body.sync.persistenceSnapshotsAvailable, true)
 
     const sessions = root.get('sessions')
     const session = sessions.create('runtime-smoke-session', { meta: { cwd: workspace.path } })

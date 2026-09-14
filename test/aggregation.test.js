@@ -31,7 +31,7 @@ function makeRequest(method, headers = {}, body = '') {
   }
 }
 
-async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride, readSession: readSessionOverride, ledgerSeed = {}, storage: storageUnitOverride, timeout: timeoutOverride, snapshots = [] } = {}) {
+async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride, readSession: readSessionOverride, ledgerSeed = {}, storage: storageUnitOverride, timeout: timeoutOverride, snapshots = [], snapshotsApi = 'both' } = {}) {
   const routes = new Map()
   const cleanups = []
   const listeners = {}
@@ -106,7 +106,12 @@ async function createApp({ key = 'test-key', workspaces = [], withStorage = fals
       }
       if (service === 'webServer') return webServer
       if (service === 'sessionPersistence') {
-        return { listSnapshots: async () => snapshots }
+        // DSH 0.1.1 exposed listSnapshots(); 0.1.5 renamed it to list(). Both
+        // spellings stay covered so neither can rot unnoticed again.
+        const api = {}
+        if (snapshotsApi !== 'listSnapshots') api.list = async () => snapshots
+        if (snapshotsApi !== 'list') api.listSnapshots = async () => snapshots
+        return api
       }
       if (service === 'subprocess') throw new Error('subprocess must not be requested')
       return undefined
@@ -2211,4 +2216,89 @@ test('numeric-token-named sessions keep the composite-key fast path', async () =
   assert.equal(snap.totals.turns, 2)
   assert.equal((app.readCalls.get('Infinity-session') || 0), 0)
   assert.equal((app.readCalls.get('NaN-session') || 0), 0)
+})
+
+test('the 0.1.5 persistence listing keeps the revision fast path alive', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const workspaces = [{ id: 'ws-list', path: 'C:\\list', title: 'List' }]
+  const sessions = [{ header: { id: 's-list', cwd: 'C:\\list' } }]
+  const events = new Map([['s-list', [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 33, outputTokens: 4 }, 2),
+  ]]])
+  const snapshots = [{ header: { id: 's-list' }, revision: 'rev-list' }]
+  const first = await createApp({ withStorage: true, workspaces, sessions, events, snapshots, snapshotsApi: 'list' })
+  const firstSnapshot = (await waitForScan(first)).json()
+  assert.equal(firstSnapshot.totals.input, 33)
+  const firstStatus = (await call(first, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  // 0.1.5 renamed the listing; a host that only exposes list() must still feed
+  // the revision signal, otherwise every baseline re-reads every log.
+  assert.equal(firstStatus.sync.persistenceSnapshotsAvailable, true)
+  // Same ledger, unchanged revision: the log must not be read again.
+  const second = await createApp({ withStorage: true, storage: first.storageUnit, workspaces, sessions, events, snapshots, snapshotsApi: 'list' })
+  const secondSnapshot = (await waitForScan(second)).json()
+  assert.equal(secondSnapshot.totals.input, 33)
+  assert.equal(second.readCalls.get('s-list') || 0, 0)
+  const secondStatus = (await call(second, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.equal(secondStatus.sync.sessionsSkippedByRevision >= 1, true)
+})
+
+test('a host that only exposes the legacy listSnapshots still reuses revisions', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const workspaces = [{ id: 'ws-legacy', path: 'C:\\legacy', title: 'Legacy' }]
+  const sessions = [{ header: { id: 's-legacy', cwd: 'C:\\legacy' } }]
+  const events = new Map([['s-legacy', [
+    { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    usageEvent(eventTime, 1, 1, { inputTokens: 21, outputTokens: 2 }, 2),
+  ]]])
+  const snapshots = [{ header: { id: 's-legacy' }, revision: 'rev-legacy' }]
+  const first = await createApp({ withStorage: true, workspaces, sessions, events, snapshots, snapshotsApi: 'listSnapshots' })
+  await waitForScan(first)
+  const second = await createApp({ withStorage: true, storage: first.storageUnit, workspaces, sessions, events, snapshots, snapshotsApi: 'listSnapshots' })
+  const secondSnapshot = (await waitForScan(second)).json()
+  assert.equal(secondSnapshot.totals.input, 21)
+  assert.equal(second.readCalls.get('s-legacy') || 0, 0)
+})
+
+test('a registry change during the baseline is deferred instead of dropped', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const workspaces = [{ id: 'ws-first', path: 'C:\\first', title: 'First' }]
+  const events = new Map([
+    ['s-first', [
+      { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+      usageEvent(eventTime, 1, 1, { inputTokens: 5 }, 2),
+    ]],
+    ['s-added', [
+      { seq: 1, time: eventTime, type: 'request/context', data: { provider: 'deepseek', model: 'deepseek-chat' } },
+      usageEvent(eventTime, 1, 1, { inputTokens: 7 }, 2),
+    ]],
+  ])
+  let releaseFirst = () => {}
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve })
+  const app = await createApp({
+    withStorage: true,
+    workspaces,
+    sessions: [{ header: { id: 's-first', cwd: 'C:\\first' } }, { header: { id: 's-added', cwd: 'C:\\added' } }],
+    events,
+    readSession: async (sid) => {
+      if (sid === 's-first') await firstGate
+      return { events: events.get(sid) || [] }
+    },
+  })
+  // The baseline is still blocked on s-first: register a second workspace now.
+  // The old code returned early while the scan was running and forgot the
+  // change, which is why a new workspace stayed invisible until a restart.
+  workspaces.push({ id: 'ws-added', path: 'C:\\added', title: 'Added' })
+  await emitWorkspaceChange(app, { domain: 'workspace', table: 'workspaces', operation: 'put', key: 'ws-added', value: {} })
+  releaseFirst()
+  let snapshot = null
+  for (let i = 0; i < 400; i += 1) {
+    snapshot = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+    if (snapshot.scan.done && snapshot.totals.input === 12) break
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  assert.equal(snapshot.totals.input, 12)
+  const status = (await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  assert.equal(status.sync.workspaceSyncDeferred >= 1, true)
+  assert.equal(status.sync.workspaceSyncAdded >= 1, true)
 })
