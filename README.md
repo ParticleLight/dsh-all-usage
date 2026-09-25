@@ -106,12 +106,13 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 ### 最近更新
 
-**v1.1.11**
+**v1.1.12**
 
 - **桌面端自己的关闭按钮不再被面板盖住**：用量面板是全窗口遮罩，它的半透明背景和抓手条以前会铺满桌面客户端留给窗口按钮的那条 40px 顶栏，把桌面端的关闭按钮压在面板后面。现在只要宿主声明了 `data-windows-titlebar`，抽屉就从 `--dsh-windows-titlebar-height`（Windows 为 40px）下方开始绘制，顶栏保持干净；浏览器端没有该标记，行为不变。
 - **顶栏留白此前其实一直没生效**：`Number(localStorage.getItem('dsh-all-usage:topInset'))` 会把「未设置」读成 `0` 并提前返回，宿主标记 / Window Controls Overlay 几何 / UA 兜底全是死代码 —— 这就是上一版「改了却毫无变化」的原因。现在「未设置」与显式 `0` 已区分。
 - 顶栏高度优先取宿主自己声明的值，其次取 Window Controls Overlay 矩形，最后退回 UA；`localStorage['dsh-all-usage:topInset']` 仍可覆盖，免重构建微调。
 - `/api/all-usage/status` 新增 `clientEnv`（客户端经新的 `GET /api/all-usage/client-env` 上报）：UA、遮罩高度、留白值**及其来源**、视口、面板自身矩形，加载时与打开面板时各一次 —— 桌面端内部正是靠它在外部核对。
+- v1.1.11 只到了 GitHub Releases、没有到 npm（其发布流程会检出 release tag 并跑真实 Cordis smoke，而那条 smoke 的 route 计数写死为 9，被新路由打破；已发布的 tag 不移动）。桌面端修复随本版本进入 npm，运行时代码与 v1.1.11 完全相同。
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -295,12 +296,13 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 
 ### Latest Update
 
-**v1.1.11**
+**v1.1.12**
 
 - **The desktop client's own close button is no longer covered**: the usage sheet is a full-window overlay, so its backdrop and grabber bar were painted across the 40px caption strip the desktop client keeps for its window buttons, dimming the client's close button behind the panel. When the host marks the document with `data-windows-titlebar`, the sheet now starts below `--dsh-windows-titlebar-height` (40px on Windows) and the strip stays clear. Browsers have no such marker and are unchanged.
 - **The strip reservation never actually applied**: `Number(localStorage.getItem('dsh-all-usage:topInset'))` read an unset key as `0` and returned early, leaving the host marker, the Window Controls Overlay geometry and the user-agent fallback as dead code — which is why the previous attempt changed nothing at all. An unset key is now distinguished from an explicit `0`.
 - The strip height comes from the host's own declaration first, then the Window Controls Overlay rectangle, then the user agent; `localStorage['dsh-all-usage:topInset']` still overrides it, so no rebuild is needed to tune it.
 - `/api/all-usage/status` now exposes `clientEnv` (reported through the new `GET /api/all-usage/client-env` route): user agent, overlay height, the reserved strip **and its source**, viewport, and the panel's own rectangles, sent at load and whenever the sheet opens — which is how the reservation bug was pinned down from outside the desktop app.
+- v1.1.11 reached GitHub Releases but never npm: its publish workflow checks out the release tag and runs the real Cordis smoke, whose route count was hard-coded to 9 and broke on the new route (a published tag is never moved). The desktop fix reaches npm with this release; the runtime code is identical to v1.1.11.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 

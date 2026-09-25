@@ -2,6 +2,16 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [1.1.12] - 2026-09-25
+
+### Fixed
+
+- **The runtime smoke test no longer counts routes by hand.** It asserted that dispose removed exactly 9 exact routes, so v1.1.11 — which adds `/api/all-usage/client-env` — failed every Cordis smoke job and, with it, its own npm publication, while the published package itself was correct. The expected count is now derived from the route list the test already checks, so adding a route can no longer leave a stale number behind.
+
+### Note
+
+- v1.1.11 was published to GitHub Releases but never reached npm: the publish workflow checks out the release tag and verifies it, and a published tag is never moved. The desktop caption-strip fix reaches npm users with this release; the shipped runtime code is identical to v1.1.11.
+
 ## [1.1.11] - 2026-09-25
 
 ### Fixed
