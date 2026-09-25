@@ -2,6 +2,18 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [1.1.11] - 2026-09-25
+
+### Fixed
+
+- **The desktop client's own close button is no longer covered.** The usage sheet is a full-window overlay, so its backdrop and grabber bar were painted straight across the 40px caption strip the DSH desktop client keeps for its window buttons (minimise / maximise / close), dimming the client's close button behind the panel. When the host marks the document with `data-windows-titlebar`, the sheet now starts below `--dsh-windows-titlebar-height` (40px on Windows), so the strip stays clear. Browsers are unaffected: without the marker nothing changes.
+- **The strip reservation never actually applied.** `Number(localStorage.getItem('dsh-all-usage:topInset'))` reads an unset key as `0`, which passed the `>= 0` check and returned early — the host marker, the Window Controls Overlay geometry and the user-agent fallback were dead code, so the panel reserved nothing on any desktop host even though the logic was in place. An unset key is now distinguished from an explicit `0`.
+
+### Changed
+
+- The reserved strip is taken from the host's own declaration first (`data-windows-titlebar` plus `--dsh-windows-titlebar-height`), then the Window Controls Overlay rectangle, then the user agent. `localStorage['dsh-all-usage:topInset']` still overrides everything, so the strip can be tuned without a rebuild.
+- The client reports its environment through the new `GET /api/all-usage/client-env` route, surfaced as `clientEnv` in `/api/all-usage/status`: user agent, overlay height, the reserved strip **and where that number came from**, viewport, and the panel's own rectangles. It reports at load and again whenever the sheet opens — this is what exposed the reservation bug from outside the desktop app.
+
 ## [1.1.10] - 2026-09-14
 
 ### Fixed

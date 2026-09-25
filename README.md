@@ -106,11 +106,12 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 ### 最近更新
 
-**v1.1.10**
+**v1.1.11**
 
-- **恢复账本的 revision 快路径**：DSH 0.1.5 把 `sessionPersistence.listSnapshots()` 改名为 `list()`，插件因此拿不到每会话 revision，`sessionsSkippedByRevision` 恒为 0、每次启动都重读全部会话日志（实测 479 个会话读了 431 个、约 13 分钟）。现在两种写法都支持，未变化的会话重新从账本复用。
-- **扫描期间的工作区变更不再被丢弃**：以前基线运行中到达的注册表变更会被直接忽略，导致新增工作区必须重启才出现；现在会被记住并在扫描结束后立即补跑，另有每 30 秒的注册表轮询兜底。
-- 升级后**首次**启动仍会全量读一次（旧账本记录没有 `lastRevision` 字段），此后启动走快路径。
+- **桌面端自己的关闭按钮不再被面板盖住**：用量面板是全窗口遮罩，它的半透明背景和抓手条以前会铺满桌面客户端留给窗口按钮的那条 40px 顶栏，把桌面端的关闭按钮压在面板后面。现在只要宿主声明了 `data-windows-titlebar`，抽屉就从 `--dsh-windows-titlebar-height`（Windows 为 40px）下方开始绘制，顶栏保持干净；浏览器端没有该标记，行为不变。
+- **顶栏留白此前其实一直没生效**：`Number(localStorage.getItem('dsh-all-usage:topInset'))` 会把「未设置」读成 `0` 并提前返回，宿主标记 / Window Controls Overlay 几何 / UA 兜底全是死代码 —— 这就是上一版「改了却毫无变化」的原因。现在「未设置」与显式 `0` 已区分。
+- 顶栏高度优先取宿主自己声明的值，其次取 Window Controls Overlay 矩形，最后退回 UA；`localStorage['dsh-all-usage:topInset']` 仍可覆盖，免重构建微调。
+- `/api/all-usage/status` 新增 `clientEnv`（客户端经新的 `GET /api/all-usage/client-env` 上报）：UA、遮罩高度、留白值**及其来源**、视口、面板自身矩形，加载时与打开面板时各一次 —— 桌面端内部正是靠它在外部核对。
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -294,11 +295,12 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 
 ### Latest Update
 
-**v1.1.10**
+**v1.1.11**
 
-- **The ledger fast path is back**: DSH 0.1.5 renamed `sessionPersistence.listSnapshots()` to `list()`, so no per-session revision was ever obtained — `sessionsSkippedByRevision` stayed at 0 and every start re-read every session log (431 reads / ~13 minutes for 479 sessions). Both spellings are accepted now, and unchanged sessions are applied from the ledger again.
-- **A registry change during a baseline is no longer dropped**: a change arriving mid-scan used to be ignored, so a newly added workspace only appeared after a restart. It is now replayed as soon as the scan settles, with a 30-second registry poll as a safety net.
-- The first start after upgrading still reads every log once (older ledger records carry no `lastRevision`); later starts take the fast path.
+- **The desktop client's own close button is no longer covered**: the usage sheet is a full-window overlay, so its backdrop and grabber bar were painted across the 40px caption strip the desktop client keeps for its window buttons, dimming the client's close button behind the panel. When the host marks the document with `data-windows-titlebar`, the sheet now starts below `--dsh-windows-titlebar-height` (40px on Windows) and the strip stays clear. Browsers have no such marker and are unchanged.
+- **The strip reservation never actually applied**: `Number(localStorage.getItem('dsh-all-usage:topInset'))` read an unset key as `0` and returned early, leaving the host marker, the Window Controls Overlay geometry and the user-agent fallback as dead code — which is why the previous attempt changed nothing at all. An unset key is now distinguished from an explicit `0`.
+- The strip height comes from the host's own declaration first, then the Window Controls Overlay rectangle, then the user agent; `localStorage['dsh-all-usage:topInset']` still overrides it, so no rebuild is needed to tune it.
+- `/api/all-usage/status` now exposes `clientEnv` (reported through the new `GET /api/all-usage/client-env` route): user agent, overlay height, the reserved strip **and its source**, viewport, and the panel's own rectangles, sent at load and whenever the sheet opens — which is how the reservation bug was pinned down from outside the desktop app.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 
