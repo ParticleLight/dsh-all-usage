@@ -9,14 +9,22 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const RUNTIME_ROOT = process.env.DSH_RUNTIME_ROOT || 'F:\\dsh-web\\runtime'
 const requestedRuntimeVersion = process.env.DSH_RUNTIME_VERSION
-const RUNTIME_VERSIONS = requestedRuntimeVersion ? [requestedRuntimeVersion] : ['0.1.5-rc.1', '0.1.1-rc.2', '0.1.1-rc.1']
+const RUNTIME_VERSIONS = requestedRuntimeVersion ? [requestedRuntimeVersion] : ['0.1.7-rc.2', '0.1.5-rc.1', '0.1.1-rc.2', '0.1.1-rc.1']
 const REQUIRE_RUNTIME_SMOKE = process.env.DSH_REQUIRE_RUNTIME_SMOKE === '1'
 // Each DSH runtime pins its own Cordis/loader/timer line; an unknown runtime
 // falls back to any installed version so a new release still gets smoke-tested.
+// `settings` names the file-backed settings provider a runtime ships, when it
+// ships one. 0.1.5 and earlier ship @deepseek-ai/dsh-settings-file; 0.1.7 replaced
+// it with an abstract settings seam that no runtime package instantiates, so the
+// smoke runs without a settings service there — all-usage treats the settings
+// service as optional, and the smoke asserts exactly that.
+const FILE_SETTINGS = { package: '@deepseek-ai/dsh-settings-file', provider: 'FileSettingsProvider' }
 const RUNTIME_PROFILES = {
-  '0.1.1-rc.1': { cordis: '4.0.1', loader: '1.0.2', timer: '1.1.3' },
-  '0.1.1-rc.2': { cordis: '4.0.1', loader: '1.0.2', timer: '1.1.3' },
-  '0.1.5-rc.1': { cordis: '4.0.2', loader: '1.0.3', timer: '1.1.4' },
+  '0.1.1-rc.1': { cordis: '4.0.1', loader: '1.0.2', timer: '1.1.3', settings: FILE_SETTINGS },
+  '0.1.1-rc.2': { cordis: '4.0.1', loader: '1.0.2', timer: '1.1.3', settings: FILE_SETTINGS },
+  '0.1.5-rc.1': { cordis: '4.0.2', loader: '1.0.3', timer: '1.1.4', settings: FILE_SETTINGS },
+  '0.1.5-rc.2': { cordis: '4.0.2', loader: '1.0.3', timer: '1.1.4', settings: FILE_SETTINGS },
+  '0.1.7-rc.2': { cordis: '4.0.4', loader: '1.0.5', timer: '1.1.6', settings: null },
 }
 
 async function findPackage(packageName, version) {
@@ -61,11 +69,12 @@ async function locateRuntime(version) {
     storageDomain: ['@deepseek-ai/dsh-storage-domain', version],
     workspace: ['@deepseek-ai/dsh-workspace', version],
     webServer: ['@deepseek-ai/dsh-host-webserver', version],
-    settingsFile: ['@deepseek-ai/dsh-settings-file', version],
   }
+  if (profile.settings !== null && profile.settings !== undefined) required.settings = [profile.settings.package, version]
   const entries = Object.fromEntries(await Promise.all(Object.entries(required).map(async ([key, [name, packageVersion]]) => [key, await findPackage(name, packageVersion)])))
   const missing = Object.entries(entries).filter(([, value]) => value === null).map(([key]) => key)
-  return missing.length === 0 ? { version, entries } : { version, entries, missing }
+  const resolved = { version, entries, settings: profile.settings ?? null }
+  return missing.length === 0 ? resolved : { ...resolved, missing }
 }
 
 async function importEntry(packageDir, relativePath = 'lib/index.js') {
@@ -200,13 +209,18 @@ async function runRuntimeSmoke(runtime) {
     assert.ok(eventHooksAfterLoad.disposed >= 1)
 
     // Settings is optional to all-usage and appears after the plugin has already started.
-    await root.plugin(modules.settingsFile.default || modules.settingsFile, {
-      path: join(scratch, 'settings.yaml'),
-      dshHome: scratch,
-      watch: false,
-    })
-    await root.loader.await()
-    assert.equal(root.get('settings').constructor.name, 'FileSettingsProvider')
+    if (runtime.settings !== null) {
+      await root.plugin(modules.settings.default || modules.settings, {
+        path: join(scratch, 'settings.yaml'),
+        dshHome: scratch,
+        watch: false,
+      })
+      await root.loader.await()
+      assert.equal(root.get('settings').constructor.name, runtime.settings.provider)
+    } else {
+      // 0.1.7 ships no settings provider: the plugin must stay healthy without one.
+      assert.equal(root.get('settings'), undefined)
+    }
     const fetched = await waitForSnapshot(webServer)
     assert.ok(fetched.response)
     assert.equal(fetched.response.status, 200)

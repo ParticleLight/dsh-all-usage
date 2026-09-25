@@ -7,7 +7,19 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const dshCompatibility = packageJson.dsh && packageJson.dsh.compatibility
 if (!packageJson.engines || packageJson.engines.node !== '>=22 <25') throw new Error('package.json must declare Node.js engines >=22 <25')
-if (!dshCompatibility || dshCompatibility.runtime !== '>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0' || !Array.isArray(dshCompatibility.verified) || !dshCompatibility.verified.includes('0.1.5-rc.1') || !dshCompatibility.verified.includes('0.1.1-rc.2') || !dshCompatibility.verified.includes('0.1.1-rc.1')) throw new Error('package.json must declare the verified DSH compatibility range')
+const EXPECTED_RUNTIME_RANGE = '>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0 || >=0.1.7-rc.2 <0.1.8-0'
+const REQUIRED_VERIFIED = ['0.1.7-rc.2', '0.1.5-rc.2', '0.1.5-rc.1', '0.1.1-rc.2', '0.1.1-rc.1']
+if (!dshCompatibility || dshCompatibility.runtime !== EXPECTED_RUNTIME_RANGE || !Array.isArray(dshCompatibility.verified)) throw new Error('package.json must declare the verified DSH compatibility range')
+const missingVerified = REQUIRED_VERIFIED.filter((version) => !dshCompatibility.verified.includes(version))
+if (missingVerified.length > 0) throw new Error('package.json must list these verified DSH runtimes: ' + missingVerified.join(', '))
+// A version may only be called verified when it is actually smoke-tested, so
+// every verified runtime must appear in the CI matrix and carry a smoke profile.
+const workflow = readFileSync(join(root, '.github', 'workflows', 'ci.yml'), 'utf8')
+const smokeTest = readFileSync(join(root, 'test', 'dsh-runtime.test.js'), 'utf8')
+for (const version of dshCompatibility.verified) {
+  if (!workflow.includes("'" + version + "'")) throw new Error('the CI smoke matrix does not cover the verified runtime ' + version)
+  if (!smokeTest.includes("'" + version + "':")) throw new Error('test/dsh-runtime.test.js has no profile for the verified runtime ' + version)
+}
 // The README quotes the declared range and lists the verified runtimes in both
 // language sections. That drifted once already — v1.1.6 and v1.1.7 shipped a
 // README still claiming `<0.1.2` while package.json had moved on — so the gate
