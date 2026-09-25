@@ -143,6 +143,18 @@ test('uses language-style custom menus for unified filters', () => {
   assert.ok(source.includes('.uh-head { position:relative; z-index:20;'))
   assert.ok(source.includes('.uh-language-menu.uh-open { z-index:30; }'))
   assert.ok(source.includes('.uh-head { position:sticky; top:-18px; z-index:20;'))
+  // The desktop client keeps its own window buttons in a caption strip across the
+  // top of the window and marks the document with `data-windows-titlebar`. The
+  // sheet itself starts below that strip, so nothing the panel paints — backdrop,
+  // grabber bar, close button — can hide the host's own close button.
+  assert.ok(source.includes('function uhWindowControlsInset()'))
+  assert.ok(source.includes("root.hasAttribute('data-windows-titlebar')"))
+  assert.ok(source.includes("getPropertyValue('--dsh-windows-titlebar-height')"))
+  assert.ok(source.includes('navigator.windowControlsOverlay'))
+  assert.ok(source.includes('.uh-side-modal { position:fixed; inset:var(--uh-top-inset, 0px) 0 0 0;'))
+  assert.ok(source.includes('max-height:calc(100vh - var(--uh-top-inset, 0px) - 44px);'))
+  assert.ok(source.includes("style: captionInset > 0 ? { '--uh-top-inset': captionInset + 'px' } : undefined, onMouseDown"))
+  assert.ok(source.includes('padding:12px 2px 34px;'))
   assert.ok(source.includes("className: 'uh-language-menu' + (languageMenuOpen ? ' uh-open' : '')"))
   assert.doesNotMatch(source, /uh-filter-select/)
 })

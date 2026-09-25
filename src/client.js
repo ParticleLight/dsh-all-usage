@@ -11,6 +11,88 @@ window.__ModuleLoader__.load({
     function pad2(n) {
       return String(n).padStart(2, '0')
     }
+    // The desktop client keeps its own window buttons (minimise / maximise /
+    // close) in a caption strip across the top of the window and marks the
+    // document with `data-windows-titlebar` plus `--dsh-windows-titlebar-height`.
+    // Anything the usage panel paints into that strip — the sheet, its grabber,
+    // its close button — hides the desktop client's own close button, so the
+    // panel keeps the whole strip clear. The host's marker is authoritative and
+    // is therefore consulted first; a user agent never gets the last word.
+    // Override for tuning without a rebuild:
+    //   localStorage.setItem('dsh-all-usage:topInset', '72') // px, then reload
+    let uhInsetSource = 'none'
+    function uhWindowControlsInset() {
+      uhInsetSource = 'none'
+      try {
+        // An unset key must never read as the number 0: Number(null) is 0, which
+        // passes the range check below and silently reserves nothing at all.
+        const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem('dsh-all-usage:topInset')
+        if (raw !== null && raw !== '') {
+          const stored = Number(raw)
+          if (Number.isFinite(stored) && stored >= 0) { uhInsetSource = 'stored'; return Math.round(stored) }
+        }
+      } catch (error) { /* storage unavailable: fall through */ }
+      try {
+        const root = typeof document === 'undefined' ? null : document.documentElement
+        if (root !== null && root.hasAttribute('data-windows-titlebar')) {
+          const declared = Number.parseFloat(window.getComputedStyle(root).getPropertyValue('--dsh-windows-titlebar-height'))
+          uhInsetSource = 'titlebar-marker'
+          return Number.isFinite(declared) && declared > 0 ? Math.round(declared) : 40
+        }
+      } catch (error) { /* no host marker: fall through */ }
+      try {
+        const overlay = typeof navigator === 'undefined' ? undefined : navigator.windowControlsOverlay
+        if (overlay !== undefined && overlay !== null && overlay.visible === true) {
+          const rect = overlay.getTitlebarAreaRect()
+          if (rect !== null && rect !== undefined && Number.isFinite(rect.height) && rect.height > 0) { uhInsetSource = 'overlay'; return Math.round(rect.height) }
+        }
+      } catch (error) { /* no overlay geometry: fall through */ }
+      const agent = typeof navigator === 'undefined' ? '' : String(navigator.userAgent || '')
+      // The DSH desktop shell is an Electron app that builds its main window with
+      // titleBarStyle: 'hidden' and titleBarOverlay: { height: 40 } on Windows, so
+      // the page is expected to keep that strip clear. When the window does not
+      // expose the overlay geometry, fall back to the height it was built with.
+      if (/Electron/i.test(agent)) { uhInsetSource = 'electron-ua'; return 40 }
+      if (/QtWebEngine/i.test(agent)) { uhInsetSource = 'qtwebengine-ua'; return 40 }
+      return 0
+    }
+    // Diagnostic: a desktop host cannot be inspected from outside, so report what
+    // this page sees — user agent, overlay geometry, the strip the panel reserved
+    // and where that number came from, plus the panel's own rectangles — and
+    // surface it through /api/all-usage/status. It runs at load and again whenever
+    // the sheet opens, so a report always describes an open panel.
+    function uhReportClientEnv() {
+      try {
+        const overlay = typeof navigator === 'undefined' ? undefined : navigator.windowControlsOverlay
+        let overlayReport = 'none'
+        if (overlay !== undefined && overlay !== null) {
+          overlayReport = overlay.visible === true ? String((overlay.getTitlebarAreaRect() || {}).height) : 'hidden'
+        }
+        const agentReport = typeof navigator === 'undefined' ? '' : String(navigator.userAgent || '').slice(0, 180)
+        const readRect = (selector) => {
+          try {
+            const node = document.querySelector(selector)
+            if (node === null) return 'none'
+            const rect = node.getBoundingClientRect()
+            return [rect.top, rect.left, rect.width, rect.height].map((value) => Math.round(value)).join('/')
+          } catch (error) { return 'none' }
+        }
+        const rootNode = typeof document === 'undefined' ? null : document.documentElement
+        const markerReport = rootNode !== null && rootNode.hasAttribute('data-windows-titlebar')
+          ? (String(window.getComputedStyle(rootNode).getPropertyValue('--dsh-windows-titlebar-height')).trim() || 'set')
+          : 'none'
+        const viewportReport = typeof window === 'undefined' ? '' : Math.round(window.innerWidth) + 'x' + Math.round(window.innerHeight)
+        const query = 'ua=' + encodeURIComponent(agentReport) + '&wco=' + encodeURIComponent(overlayReport)
+          + '&inset=' + String(uhWindowControlsInset()) + '&src=' + encodeURIComponent(uhInsetSource)
+          + '&tb=' + encodeURIComponent(markerReport) + '&vp=' + encodeURIComponent(viewportReport)
+          + '&modal=' + encodeURIComponent(readRect('.uh-side-modal'))
+          + '&dlg=' + encodeURIComponent(readRect('.uh-side-dialog'))
+          + '&head=' + encodeURIComponent(readRect('.uh-side-dialog-head'))
+          + '&close=' + encodeURIComponent(readRect('.uh-close-button'))
+        void fetch('/api/all-usage/client-env?' + query, { headers: { accept: 'application/json' } }).catch(() => {})
+      } catch (error) { /* diagnostics only */ }
+    }
+    uhReportClientEnv()
     function fmtDate(d, utc) {
       const year = utc ? d.getUTCFullYear() : d.getFullYear()
       const month = utc ? d.getUTCMonth() : d.getMonth()
@@ -1721,7 +1803,7 @@ window.__ModuleLoader__.load({
 .uh-boundary-fallback { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; min-height:360px; padding:24px; border:1px solid var(--dsw-alias-border-l1); border-radius:12px; background:var(--dsw-alias-bg-layer-1); text-align:center; }
 .uh-boundary-title { color:var(--dsw-alias-label-primary); font-size:15px; font-weight:650; }
 .uh-boundary-note { max-width:420px; color:var(--dsw-alias-label-secondary); font-size:12px; line-height:1.6; }
-.uh-side-modal { position:fixed; inset:0; z-index:1100; background:color-mix(in srgb, #000 44%, transparent); display:flex; align-items:stretch; justify-content:center; padding:26px; }
+.uh-side-modal { position:fixed; inset:var(--uh-top-inset, 0px) 0 0 0; z-index:1100; background:color-mix(in srgb, #000 44%, transparent); display:flex; align-items:stretch; justify-content:center; padding:26px; }
 .uh-side-dialog { width:min(1120px, 100%); overflow-x:hidden; overflow-y:scroll; scrollbar-gutter:stable; scrollbar-width:auto; scrollbar-color:#707780 #1d1f22; background:var(--dsw-alias-bg-base); border:1px solid var(--dsw-alias-border-l2); border-radius:14px; box-shadow:0 18px 52px rgba(0,0,0,.35); padding:18px; }
 .uh-side-dialog::-webkit-scrollbar, .uh-pricing-table-wrap::-webkit-scrollbar { width:12px; height:12px; }
 .uh-side-dialog::-webkit-scrollbar-track, .uh-pricing-table-wrap::-webkit-scrollbar-track { background:#1d1f22; border-left:1px solid #363a40; }
@@ -1730,7 +1812,7 @@ window.__ModuleLoader__.load({
 .uh-side-dialog-head { display:flex; justify-content:flex-end; margin-bottom:8px; }
 @media (max-width: 640px) { .uh-side-modal { padding:0; } .uh-side-dialog { border-radius:0; border:0; padding:14px; } }
 /* iOS-style dashboard: grouped surfaces, tactile controls, and an elevated sheet. */
-.uh-page { gap:18px; max-width:1160px; margin:0 auto; padding:4px 2px 34px; font-family:-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif; }
+.uh-page { gap:18px; max-width:1160px; margin:0 auto; padding:12px 2px 34px; font-family:-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif; }
 .uh-head { position:sticky; top:-18px; z-index:20; margin:0 -2px; padding:18px 2px 14px; background:color-mix(in srgb, var(--dsw-alias-bg-base) 88%, transparent); backdrop-filter:blur(18px) saturate(150%); border-bottom:1px solid color-mix(in srgb, var(--dsw-alias-border-l1) 76%, transparent); }
 .uh-title { font-size:22px; line-height:1.2; font-weight:700; letter-spacing:0; }
 .uh-actions { gap:8px; }
@@ -1773,7 +1855,7 @@ window.__ModuleLoader__.load({
 .uh-side-entry:hover { border:0; background:color-mix(in srgb, var(--dsw-alias-brand-primary) 17%, transparent); }
 .uh-side-entry-icon { color:var(--dsw-alias-brand-primary); font-weight:700; }
 .uh-side-modal { align-items:flex-end; padding:0; background:rgba(0,0,0,.34); backdrop-filter:blur(8px); }
-.uh-side-dialog { width:min(1260px, 100%); max-height:calc(100vh - 44px); border:0; border-radius:24px 24px 0 0; padding:22px 24px 28px; background:color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent); box-shadow:0 -10px 44px rgba(0,0,0,.25); }
+.uh-side-dialog { width:min(1260px, 100%); max-height:calc(100vh - var(--uh-top-inset, 0px) - 44px); border:0; border-radius:24px 24px 0 0; padding:22px 24px 28px; background:color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent); box-shadow:0 -10px 44px rgba(0,0,0,.25); }
 .uh-side-dialog-head { position:sticky; top:-22px; z-index:8; justify-content:center; height:22px; margin:-22px -24px 8px; padding:8px 24px; background:color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent); border:0; }
 .uh-side-dialog-head::before { content:""; width:36px; height:5px; border-radius:3px; background:color-mix(in srgb, var(--dsw-alias-label-primary) 24%, transparent); }
 .uh-side-dialog-head .uh-refresh { position:absolute; right:20px; top:7px; min-height:28px; background:transparent; }
@@ -3630,6 +3712,9 @@ window.__ModuleLoader__.load({
       const [dashboardResetKey, setDashboardResetKey] = React.useState(0)
       const [language, setLanguage] = React.useState(storedLanguage)
       const tr = (zh, en) => language === 'en' ? en : zh
+      // The sheet, its grabber strip and its close button all start below the
+      // caption strip the desktop client keeps for its own window buttons.
+      const captionInset = uhWindowControlsInset()
       const dashboardFallback = () => React.createElement('div', { className: 'uh-boundary-fallback', role: 'alert' },
         React.createElement('div', { className: 'uh-boundary-title' }, tr('用量统计暂时无法显示', 'Usage statistics is temporarily unavailable')),
         React.createElement('div', { className: 'uh-boundary-note' }, tr('当前范围加载失败，入口仍然可用。', 'The selected range failed to render; the sidebar entry is still available.')),
@@ -3645,6 +3730,7 @@ window.__ModuleLoader__.load({
       }
       React.useEffect(() => {
         if (!open) return undefined
+        uhReportClientEnv()
         const closeOnEscape = (event) => { if (event.key === 'Escape') setOpen(false) }
         document.addEventListener('keydown', closeOnEscape)
         return () => document.removeEventListener('keydown', closeOnEscape)
@@ -3653,7 +3739,7 @@ window.__ModuleLoader__.load({
         React.createElement('button', {
           type: 'button', className: 'uh-side-entry', title: tr('用量统计', 'Usage Statistics'), 'aria-label': tr('用量统计', 'Usage Statistics'), onClick: () => setOpen(true),
         }, React.createElement('span', { className: 'uh-side-entry-icon' }, React.createElement(LineIcon, { name: 'chart', size: 17 })), props.wide ? React.createElement('span', { className: 'uh-side-entry-label' }, tr('用量统计', 'Usage Statistics')) : null),
-        open ? React.createElement('div', { className: 'uh-side-modal', role: 'presentation', onMouseDown: (event) => { if (event.target === event.currentTarget) setOpen(false) } },
+        open ? React.createElement('div', { className: 'uh-side-modal', role: 'presentation', style: captionInset > 0 ? { '--uh-top-inset': captionInset + 'px' } : undefined, onMouseDown: (event) => { if (event.target === event.currentTarget) setOpen(false) } },
           React.createElement('div', { className: 'uh-side-dialog', role: 'dialog', 'aria-modal': true, 'aria-label': tr('用量统计', 'Usage Statistics') },
             React.createElement('div', { className: 'uh-side-dialog-head' },
               React.createElement('button', { className: 'uh-refresh uh-close-button', type: 'button', title: tr('关闭用量统计', 'Close Usage Statistics'), 'aria-label': tr('关闭用量统计', 'Close Usage Statistics'), onClick: () => setOpen(false) }, React.createElement(LineIcon, { name: 'close', size: 18 })),
