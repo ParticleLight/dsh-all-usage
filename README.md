@@ -31,13 +31,14 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 ### 兼容性与已知限制
 
 - **运行环境**：需要 Node.js `>=22 <25`；CI 会在 Node 22 和 Node 24 上运行测试、语法检查和 npm 包内容检查。
-- **DSH 兼容**：`package.json` 声明 DSH runtime `>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0`，已使用 `0.1.5-rc.2`、`0.1.5-rc.1`、`0.1.1-rc.2` 和 `0.1.1-rc.1` 的真实 Cordis 服务链验证；`0.1.2-rc.1` 已通过实际使用验证兼容，但未纳入 CI smoke 矩阵。声明按元组拆成两段而非写成单一区间，是因为 node-semver 只有在范围里存在与目标版本同 `major.minor.patch` 且自身带预发布标签的比较符时，才会放行该预发布版本。
-- **桌面客户端（Electron，Windows）**：本插件在 DSH 桌面客户端上实测运行正常（实测 `@deepseek-ai/dsh-desktop` `0.1.7-rc.2`）。桌面客户端会在窗口顶部为自身的最小化 / 最大化 / 关闭按钮保留一条 40px 顶栏，并在文档上标记 `data-windows-titlebar` 与 `--dsh-windows-titlebar-height`；面板据此从该条**下方**开始绘制，所以桌面端自己的关闭按钮永远不会被面板盖住。浏览器端没有该标记，不留白。顶栏高度优先取宿主声明，其次取 Window Controls Overlay 矩形，最后退回 UA；需要微调时可在 DevTools 执行 `localStorage.setItem('dsh-all-usage:topInset', '48')` 后刷新（`0` 表示不留白），无需重新构建。桌面客户端自带运行时，`package.json` 的声明区间仍以下表的 CI 矩阵为准，`0.1.7` 尚未纳入 CI smoke。
+- **DSH 兼容**：`package.json` 声明 DSH runtime `>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0 || >=0.1.7-rc.2 <0.1.8-0`，已使用 `0.1.7-rc.2`、`0.1.5-rc.2`、`0.1.5-rc.1`、`0.1.1-rc.2` 和 `0.1.1-rc.1` 的真实 Cordis 服务链验证，且全部纳入 CI smoke 矩阵（Node 22/24 双档）；`0.1.2-rc.1` 已通过实际使用验证兼容，但未纳入 CI smoke 矩阵。声明按元组拆成三段而非写成单一区间，是因为 node-semver 只有在范围里存在与目标版本同 `major.minor.patch` 且自身带预发布标签的比较符时，才会放行该预发布版本 —— 例如必须写成 `>=0.1.7-rc.2` 才能让 `0.1.7-rc.2` 进入范围。
+- **桌面客户端（Electron，Windows）**：本插件在 DSH 桌面客户端上实测运行正常（实测 `@deepseek-ai/dsh-desktop` `0.1.7-rc.2`）。桌面客户端会在窗口顶部为自身的最小化 / 最大化 / 关闭按钮保留一条 40px 顶栏，并在文档上标记 `data-windows-titlebar` 与 `--dsh-windows-titlebar-height`；面板据此从该条**下方**开始绘制，所以桌面端自己的关闭按钮永远不会被面板盖住。浏览器端没有该标记，不留白。顶栏高度优先取宿主声明，其次取 Window Controls Overlay 矩形，最后退回 UA；需要微调时可在 DevTools 执行 `localStorage.setItem('dsh-all-usage:topInset', '48')` 后刷新（`0` 表示不留白），无需重新构建。桌面客户端自带运行时，其运行时 `0.1.7-rc.2` 已纳入声明区间与 CI smoke 矩阵（见下表）。
 - **Web 服务依赖**：Host 将 `webServer` 声明为必需依赖，确保服务晚挂载时由 DSH 等待后再执行插件；该包面向 DSH Web profile，不提供无 WebServer 的 headless 路由。HTTP 守卫还会检查真实 socket peer，反向代理只有在连接本身来自 loopback 时才会被接受。
 
 | DSH runtime | Node.js 支持 | 真实 Cordis smoke | 结论 |
 | --- | --- | --- | --- |
-| `0.1.5-rc.2` | `>=22 <25` | 通过（真实 Cordis 服务链，Node 24） | 已实测通过（尚未纳入 CI 矩阵） |
+| `0.1.7-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证（DSH 桌面客户端即运行于此版本） |
+| `0.1.5-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证 |
 | `0.1.5-rc.1` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证 |
 | `0.1.2-rc.1` | `>=22 <25` | 通过（实际使用验证，未纳入 CI） | 已实际验证兼容 |
 | `0.1.1-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证 |
@@ -107,13 +108,12 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 ### 最近更新
 
-**v1.1.12**
+**v1.1.13**
 
-- **桌面端自己的关闭按钮不再被面板盖住**：用量面板是全窗口遮罩，它的半透明背景和抓手条以前会铺满桌面客户端留给窗口按钮的那条 40px 顶栏，把桌面端的关闭按钮压在面板后面。现在只要宿主声明了 `data-windows-titlebar`，抽屉就从 `--dsh-windows-titlebar-height`（Windows 为 40px）下方开始绘制，顶栏保持干净；浏览器端没有该标记，行为不变。
-- **顶栏留白此前其实一直没生效**：`Number(localStorage.getItem('dsh-all-usage:topInset'))` 会把「未设置」读成 `0` 并提前返回，宿主标记 / Window Controls Overlay 几何 / UA 兜底全是死代码 —— 这就是上一版「改了却毫无变化」的原因。现在「未设置」与显式 `0` 已区分。
-- 顶栏高度优先取宿主自己声明的值，其次取 Window Controls Overlay 矩形，最后退回 UA；`localStorage['dsh-all-usage:topInset']` 仍可覆盖，免重构建微调。
-- `/api/all-usage/status` 新增 `clientEnv`（客户端经新的 `GET /api/all-usage/client-env` 上报）：UA、遮罩高度、留白值**及其来源**、视口、面板自身矩形，加载时与打开面板时各一次 —— 桌面端内部正是靠它在外部核对。
-- v1.1.11 只到了 GitHub Releases、没有到 npm（其发布流程会检出 release tag 并跑真实 Cordis smoke，而那条 smoke 的 route 计数写死为 9，被新路由打破；已发布的 tag 不移动）。桌面端修复随本版本进入 npm，运行时代码与 v1.1.11 完全相同。
+- **DSH `0.1.7-rc.2` 正式支持**：真实 Cordis smoke 在该运行时上通过（整条链路：全部路由、钩子、账本落盘、revision 快路径、卸载清理），因此 `dsh.compatibility.runtime` 增加 `>=0.1.7-rc.2 <0.1.8-0`，`0.1.7-rc.2` 进入 verified 列表与 CI smoke 矩阵。DSH 桌面客户端正是运行这条运行时，所以 1.1.11/1.1.12 的桌面端顶栏修复也在同一句声明覆盖之下。
+- **smoke 对设置服务做了版本区分**：0.1.7 把文件型 `@deepseek-ai/dsh-settings-file` 换成了抽象的设置 seam（运行时里没有包实例化它），因此该版本上 smoke 不加载设置服务，并**明确断言**插件在没有设置服务时依旧健康（插件本就把 `ctx.settings` 当可选）。
+- `0.1.5-rc.2` 也纳入 CI smoke 矩阵（此前只是本机实测），验证矩阵里不再有「未纳入 CI」的例外。
+- 门禁加固：`check-package.mjs` 现在要求 verified 里每个版本都同时出现在 CI 矩阵与 smoke profile 表里，杜绝「声明已支持却没有被测」；README 兼容性章节与验证矩阵同步到 v1.1.13。
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -223,13 +223,14 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, est
 ### Compatibility and Known Limitations
 
 - **Runtime**: Node.js `>=22 <25` is required. CI runs the test suite, syntax checks, and package-content checks on Node 22 and Node 24.
-- **DSH compatibility**: `package.json` declares DSH runtime `>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0`; the real Cordis service chain is verified on `0.1.5-rc.2`, `0.1.5-rc.1`, `0.1.1-rc.2` and `0.1.1-rc.1`. `0.1.2-rc.1` has also been verified compatible through real-world use, but is not covered by the CI smoke matrix. The declaration is split per tuple rather than written as one interval because node-semver only admits a prerelease version when some comparator shares its exact `major.minor.patch` tuple and itself carries a prerelease tag.
-- **Desktop client (Electron, Windows)**: the plugin is verified running in the DSH desktop client (`@deepseek-ai/dsh-desktop` `0.1.7-rc.2` as measured). The desktop client keeps a 40px caption strip across the top of its window for its own minimise / maximise / close buttons and marks the document with `data-windows-titlebar` and `--dsh-windows-titlebar-height`; the panel draws from **below** that strip, so the client's own close button is never covered. Browsers carry no such marker and reserve nothing. The strip height comes from the host's declaration first, then the Window Controls Overlay rectangle, then the user agent; to tune it, run `localStorage.setItem('dsh-all-usage:topInset', '48')` in DevTools and reload (`0` reserves nothing) — no rebuild required. The desktop client ships its own runtime, so the declared range in `package.json` still follows the CI matrix below; `0.1.7` is not part of the CI smoke yet.
+- **DSH compatibility**: `package.json` declares DSH runtime `>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0 || >=0.1.7-rc.2 <0.1.8-0`; the real Cordis service chain is verified on `0.1.7-rc.2`, `0.1.5-rc.2`, `0.1.5-rc.1`, `0.1.1-rc.2` and `0.1.1-rc.1`, all of them covered by the CI smoke matrix on Node 22 and 24. `0.1.2-rc.1` has also been verified compatible through real-world use, but is not covered by the CI smoke matrix. The declaration is split per tuple rather than written as one interval because node-semver only admits a prerelease version when some comparator shares its exact `major.minor.patch` tuple and itself carries a prerelease tag — `0.1.7-rc.2` is admitted only because the range says `>=0.1.7-rc.2`.
+- **Desktop client (Electron, Windows)**: the plugin is verified running in the DSH desktop client (`@deepseek-ai/dsh-desktop` `0.1.7-rc.2` as measured). The desktop client keeps a 40px caption strip across the top of its window for its own minimise / maximise / close buttons and marks the document with `data-windows-titlebar` and `--dsh-windows-titlebar-height`; the panel draws from **below** that strip, so the client's own close button is never covered. Browsers carry no such marker and reserve nothing. The strip height comes from the host's declaration first, then the Window Controls Overlay rectangle, then the user agent; to tune it, run `localStorage.setItem('dsh-all-usage:topInset', '48')` in DevTools and reload (`0` reserves nothing) — no rebuild required. The desktop client ships its own runtime, and that runtime — `0.1.7-rc.2` — is now part of the declared range and of the CI smoke matrix below.
 - **Web service dependency**: the Host declares `webServer` as a required dependency, so DSH waits for a late-mounted service before applying the plugin; this package targets the DSH Web profile and does not expose routes without WebServer. The HTTP guard also checks the actual socket peer, so a reverse proxy is accepted only when the connection itself is loopback.
 
 | DSH runtime | Node.js support | Real Cordis smoke | Conclusion |
 | --- | --- | --- | --- |
-| `0.1.5-rc.2` | `>=22 <25` | Passed (real Cordis service chain, Node 24) | Verified locally (not yet in the CI matrix) |
+| `0.1.7-rc.2` | `>=22 <25`, CI covers 22/24 | Passed (real Cordis service chain, CI covers Node 22/24) | Declared and verified (the DSH desktop client runs this version) |
+| `0.1.5-rc.2` | `>=22 <25`, CI covers 22/24 | Passed (real Cordis service chain, CI covers Node 22/24) | Declared and verified |
 | `0.1.5-rc.1` | `>=22 <25`, CI covers 22/24 | Passed (real Cordis service chain, CI covers Node 22/24) | Declared and verified |
 | `0.1.2-rc.1` | `>=22 <25` | Passed through real-world use (not in CI) | Verified compatible in real-world use |
 | `0.1.1-rc.2` | `>=22 <25`, CI covers 22/24 | Passed (real Cordis service chain, CI covers Node 22/24) | Declared and verified |
@@ -299,13 +300,12 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 
 ### Latest Update
 
-**v1.1.12**
+**v1.1.13**
 
-- **The desktop client's own close button is no longer covered**: the usage sheet is a full-window overlay, so its backdrop and grabber bar were painted across the 40px caption strip the desktop client keeps for its window buttons, dimming the client's close button behind the panel. When the host marks the document with `data-windows-titlebar`, the sheet now starts below `--dsh-windows-titlebar-height` (40px on Windows) and the strip stays clear. Browsers have no such marker and are unchanged.
-- **The strip reservation never actually applied**: `Number(localStorage.getItem('dsh-all-usage:topInset'))` read an unset key as `0` and returned early, leaving the host marker, the Window Controls Overlay geometry and the user-agent fallback as dead code — which is why the previous attempt changed nothing at all. An unset key is now distinguished from an explicit `0`.
-- The strip height comes from the host's own declaration first, then the Window Controls Overlay rectangle, then the user agent; `localStorage['dsh-all-usage:topInset']` still overrides it, so no rebuild is needed to tune it.
-- `/api/all-usage/status` now exposes `clientEnv` (reported through the new `GET /api/all-usage/client-env` route): user agent, overlay height, the reserved strip **and its source**, viewport, and the panel's own rectangles, sent at load and whenever the sheet opens — which is how the reservation bug was pinned down from outside the desktop app.
-- v1.1.11 reached GitHub Releases but never npm: its publish workflow checks out the release tag and runs the real Cordis smoke, whose route count was hard-coded to 9 and broke on the new route (a published tag is never moved). The desktop fix reaches npm with this release; the runtime code is identical to v1.1.11.
+- **DSH `0.1.7-rc.2` is now officially supported**: the real Cordis smoke passes on it (the whole plugin: every route, the hooks, the ledger flush, the revision fast path, disposal), so `dsh.compatibility.runtime` gains `>=0.1.7-rc.2 <0.1.8-0`, and `0.1.7-rc.2` joins both the verified list and the CI smoke matrix. The DSH desktop client runs this runtime line, so the caption-strip fix from 1.1.11/1.1.12 sits under the same declaration.
+- **The smoke is version-aware about settings**: 0.1.7 replaced the file-backed `@deepseek-ai/dsh-settings-file` provider with an abstract settings seam that no runtime package instantiates; the smoke therefore runs without a settings service on that line and asserts that the plugin stays healthy without one (the plugin already treats `ctx.settings` as optional).
+- `0.1.5-rc.2` is covered by the CI smoke matrix now instead of being verified locally only, so the matrix no longer has an exception.
+- The gate was tightened: `check-package.mjs` now fails when a version is called verified without appearing in both the CI matrix and the smoke profile table. The README compatibility section and its verification matrix are updated for v1.1.13.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 

@@ -2,6 +2,18 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [1.1.13] - 2026-09-25
+
+### Added
+
+- **DSH 0.1.7-rc.2 is a supported runtime.** The real Cordis smoke passes on it — every route, the session hooks, the ledger flush, the revision fast path and disposal — so `dsh.compatibility.runtime` gains `>=0.1.7-rc.2 <0.1.8-0`, and `0.1.7-rc.2` joins the verified list and the CI smoke matrix. The DSH desktop client runs this runtime line, so the caption-strip work from v1.1.11/v1.1.12 is covered by the same declaration.
+
+### Changed
+
+- The runtime smoke is version-aware about settings. 0.1.7 replaced the file-backed `@deepseek-ai/dsh-settings-file` provider with an abstract settings seam that no runtime package instantiates; the smoke runs without a settings service on that line and asserts that the plugin stays healthy without one, which is the behaviour the plugin already implements (`ctx.settings` is optional).
+- `0.1.5-rc.2` is covered by the CI smoke matrix instead of being verified locally only, so the verification matrix has no exception left.
+- `scripts/check-package.mjs` now fails when a runtime is called verified without appearing in both the CI matrix and the smoke profile table, so a declaration can no longer outrun its coverage.
+
 ## [1.1.12] - 2026-09-25
 
 ### Fixed
