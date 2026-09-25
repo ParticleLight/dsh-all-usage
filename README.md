@@ -32,15 +32,16 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 
 - **运行环境**：需要 Node.js `>=22 <25`；CI 会在 Node 22 和 Node 24 上运行测试、语法检查和 npm 包内容检查。
 - **DSH 兼容**：`package.json` 声明 DSH runtime `>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0`，已使用 `0.1.5-rc.2`、`0.1.5-rc.1`、`0.1.1-rc.2` 和 `0.1.1-rc.1` 的真实 Cordis 服务链验证；`0.1.2-rc.1` 已通过实际使用验证兼容，但未纳入 CI smoke 矩阵。声明按元组拆成两段而非写成单一区间，是因为 node-semver 只有在范围里存在与目标版本同 `major.minor.patch` 且自身带预发布标签的比较符时，才会放行该预发布版本。
+- **桌面客户端（Electron，Windows）**：本插件在 DSH 桌面客户端上实测运行正常（实测 `@deepseek-ai/dsh-desktop` `0.1.7-rc.2`）。桌面客户端会在窗口顶部为自身的最小化 / 最大化 / 关闭按钮保留一条 40px 顶栏，并在文档上标记 `data-windows-titlebar` 与 `--dsh-windows-titlebar-height`；面板据此从该条**下方**开始绘制，所以桌面端自己的关闭按钮永远不会被面板盖住。浏览器端没有该标记，不留白。顶栏高度优先取宿主声明，其次取 Window Controls Overlay 矩形，最后退回 UA；需要微调时可在 DevTools 执行 `localStorage.setItem('dsh-all-usage:topInset', '48')` 后刷新（`0` 表示不留白），无需重新构建。桌面客户端自带运行时，`package.json` 的声明区间仍以下表的 CI 矩阵为准，`0.1.7` 尚未纳入 CI smoke。
 - **Web 服务依赖**：Host 将 `webServer` 声明为必需依赖，确保服务晚挂载时由 DSH 等待后再执行插件；该包面向 DSH Web profile，不提供无 WebServer 的 headless 路由。HTTP 守卫还会检查真实 socket peer，反向代理只有在连接本身来自 loopback 时才会被接受。
 
 | DSH runtime | Node.js 支持 | 真实 Cordis smoke | 结论 |
 | --- | --- | --- | --- |
 | `0.1.5-rc.2` | `>=22 <25` | 通过（真实 Cordis 服务链，Node 24） | 已实测通过（尚未纳入 CI 矩阵） |
-| `0.1.5-rc.1` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，Node 24） | 已声明、已验证 |
+| `0.1.5-rc.1` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证 |
 | `0.1.2-rc.1` | `>=22 <25` | 通过（实际使用验证，未纳入 CI） | 已实际验证兼容 |
-| `0.1.1-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（当前 Node 24） | 已声明、已验证 |
-| `0.1.1-rc.1` | `>=22 <25`，CI 覆盖 22/24 | 通过（当前 Node 24） | 已声明、已验证 |
+| `0.1.1-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证 |
+| `0.1.1-rc.1` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证 |
 | 其他版本 | `>=22 <25` | 未测试 | 不在已验证矩阵内 |
 
 未列出的 DSH 版本不代表一定不兼容；提交问题时请附 DSH、Node.js 和插件版本。
@@ -158,7 +159,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 - **Host 端**（入口 `lib/index.js`，组装 `lib/plugin.js`）：按职责拆分为 `aggregation.js`（聚合与查询）、`ledger.js`（持久账本）、`session-sync.js`（历史/实时同步）、`pricing-runtime.js`（运行时定价）、`balance.js`（余额）、`http.js`（安全路由）；扫描 `turn/end`、`assistant/chunk` usage 和最终 `assistant/message.usage`，监听 `session/event` 实时折叠，并通过 `webServer` 服务注册数据路由：
   - `GET /api/all-usage` — 兼容统计快照
-  - `GET /api/all-usage/status` — 轻量 revision 与同步健康状态
+  - `GET /api/all-usage/status` — 轻量 revision 与同步健康状态，并附带最近一次客户端环境报告（`clientEnv`）
   - `GET /api/all-usage/query` — 按 scope 返回聚合、daily/hourly 趋势和 heatmap 数据；单日 scope 填充 `hourly`，跨日 scope 的 `hourly` 为空
   - `GET /api/all-usage/records` — 按 scope 分页返回脱敏 canonical usage rows
   - `GET /api/all-usage/balance?force=1` — 账户余额（复用 `llm-deepseek` 的 API Key 配置）
@@ -167,6 +168,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
   - `GET /api/all-usage/pricing/models?q=...` — 检索官方模型 ID 与名称匹配结果
   - `POST /api/all-usage/pricing` — 保存同步、mapping 和显式价格覆盖（含 context tier 档位）
   - `POST /api/all-usage/pricing/sync` — 手动同步 models.dev 并回填未计价调用
+  - `GET /api/all-usage/client-env` — 客户端环境诊断上报（UA、窗口控件遮罩高度、预留顶栏值**及其来源**、视口、面板矩形）；客户端在加载与打开面板时各上报一次，只在内存保留
 - **Client 端**：可读源码位于 `src/client.js`，`npm run build:client` 使用固定版本 Terser 生成 `window.__ModuleLoader__` 工厂格式的 `lib/client.js` 浏览器 bundle，并注册侧边栏「用量统计」入口（`sidebar.footer.action` 槽位）。所有 API 仅接受本机 loopback 请求并拒绝显式跨域请求；余额读取与别名写入还要求插件启动时生成、仅在当前进程有效的令牌（余额 GET 兼容浏览器省略 Origin）。英文模式的日期分桶、范围筛选、连续使用、热力图和导出时间统一按 UTC；中文模式按本地时区。
 
 ### 数据说明
@@ -176,7 +178,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - 会话删除后，已成功 flush 的用量仍从独立账本恢复；工作区删除同样不会丢数据——其历史用量汇总为一行「已删除」（含未落账的实时用量）。会话销毁提示和周期对账只负责触发重建，不会删除账本记录
 - 同一会话的同一 `turn / step` 只保留一份最终 usage；重试或替换消息会替换旧贡献，不重复累计
 - 输入 Token 按「未含缓存命中」计（缓存命中 / 写入独立成桶）；全 0 用量的重放事件不会覆盖已记录的真实用量，纯缓存命中的请求仍会计入
-- 轻量状态接口只公开 Host 实例、统计 revision、扫描进度与同步计数，不公开会话 ID、工作区路径、提示词或回复正文；完整快照仅在状态变化或手动刷新时获取
+- 轻量状态接口只公开 Host 实例、统计 revision、扫描进度、同步计数与最近一次客户端环境报告（UA、视口、预留顶栏值及其来源、面板矩形——由本机客户端上报且只存内存），不公开会话 ID、工作区路径、提示词或回复正文；完整快照仅在状态变化或手动刷新时获取
 - scope query 将回合（turns）、模型调用（calls）和去重会话（sessions）分开统计；Provider/模型筛选缺少路由信息时明确归为 Unknown，不从展示字符串猜测
 - records 接口只返回短 hash、时间、工作区 ID、结构化模型身份、turn/step、Token buckets 和当前物化来源，不返回原始 session ID、路径、提示词、回复或凭据
 - 看板中的总处理量 = 输入 + 输出 + 缓存读写 + 推理；缓存命中表示复用的上下文 Token，不等于新生成 Token 或实际费用
@@ -222,15 +224,16 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, est
 
 - **Runtime**: Node.js `>=22 <25` is required. CI runs the test suite, syntax checks, and package-content checks on Node 22 and Node 24.
 - **DSH compatibility**: `package.json` declares DSH runtime `>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0`; the real Cordis service chain is verified on `0.1.5-rc.2`, `0.1.5-rc.1`, `0.1.1-rc.2` and `0.1.1-rc.1`. `0.1.2-rc.1` has also been verified compatible through real-world use, but is not covered by the CI smoke matrix. The declaration is split per tuple rather than written as one interval because node-semver only admits a prerelease version when some comparator shares its exact `major.minor.patch` tuple and itself carries a prerelease tag.
+- **Desktop client (Electron, Windows)**: the plugin is verified running in the DSH desktop client (`@deepseek-ai/dsh-desktop` `0.1.7-rc.2` as measured). The desktop client keeps a 40px caption strip across the top of its window for its own minimise / maximise / close buttons and marks the document with `data-windows-titlebar` and `--dsh-windows-titlebar-height`; the panel draws from **below** that strip, so the client's own close button is never covered. Browsers carry no such marker and reserve nothing. The strip height comes from the host's declaration first, then the Window Controls Overlay rectangle, then the user agent; to tune it, run `localStorage.setItem('dsh-all-usage:topInset', '48')` in DevTools and reload (`0` reserves nothing) — no rebuild required. The desktop client ships its own runtime, so the declared range in `package.json` still follows the CI matrix below; `0.1.7` is not part of the CI smoke yet.
 - **Web service dependency**: the Host declares `webServer` as a required dependency, so DSH waits for a late-mounted service before applying the plugin; this package targets the DSH Web profile and does not expose routes without WebServer. The HTTP guard also checks the actual socket peer, so a reverse proxy is accepted only when the connection itself is loopback.
 
 | DSH runtime | Node.js support | Real Cordis smoke | Conclusion |
 | --- | --- | --- | --- |
 | `0.1.5-rc.2` | `>=22 <25` | Passed (real Cordis service chain, Node 24) | Verified locally (not yet in the CI matrix) |
-| `0.1.5-rc.1` | `>=22 <25`, CI covers 22/24 | Passed (real Cordis service chain, Node 24) | Declared and verified |
+| `0.1.5-rc.1` | `>=22 <25`, CI covers 22/24 | Passed (real Cordis service chain, CI covers Node 22/24) | Declared and verified |
 | `0.1.2-rc.1` | `>=22 <25` | Passed through real-world use (not in CI) | Verified compatible in real-world use |
-| `0.1.1-rc.2` | `>=22 <25`, CI covers 22/24 | Passed (current Node 24) | Declared and verified |
-| `0.1.1-rc.1` | `>=22 <25`, CI covers 22/24 | Passed (current Node 24) | Declared and verified |
+| `0.1.1-rc.2` | `>=22 <25`, CI covers 22/24 | Passed (real Cordis service chain, CI covers Node 22/24) | Declared and verified |
+| `0.1.1-rc.1` | `>=22 <25`, CI covers 22/24 | Passed (real Cordis service chain, CI covers Node 22/24) | Declared and verified |
 | Other versions | `>=22 <25` | Not tested | Outside the verified matrix |
 
 An unlisted DSH version is not necessarily incompatible. Include the DSH, Node.js, and plugin versions when reporting an issue.
@@ -340,7 +343,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 
 - **Host** (entry `lib/index.js`, assembled by `lib/plugin.js`): split by responsibility across `aggregation.js` (aggregation/query), `ledger.js` (durable ledger), `session-sync.js` (history/live sync), `pricing-runtime.js` (runtime pricing), `balance.js` (balance), and `http.js` (protected routes); aggregates `turn/end`, `assistant/chunk` usage, and final `assistant/message.usage`, folds live `session/event` updates, and exposes data routes through `webServer`:
   - `GET /api/all-usage` — compatible usage snapshot
-  - `GET /api/all-usage/status` — lightweight revision and sync health
+  - `GET /api/all-usage/status` — lightweight revision and sync health, plus the last client environment report (`clientEnv`)
   - `GET /api/all-usage/query` — scoped aggregate, daily/hourly trend, and heatmap data; single-day scopes populate `hourly`, while cross-day scopes return an empty `hourly` array
   - `GET /api/all-usage/records` — paginated privacy-safe canonical usage rows
   - `GET /api/all-usage/balance?force=1` — account balance using the configured `llm-deepseek` API key
@@ -349,6 +352,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
   - `GET /api/all-usage/pricing/models?q=...` — search official model IDs and display-name matches
   - `POST /api/all-usage/pricing` — save sync, mappings, and explicit price overrides, including context-tier bands
   - `POST /api/all-usage/pricing/sync` — sync models.dev and backfill unpriced calls
+  - `GET /api/all-usage/client-env` — client environment report (user agent, window-controls overlay height, the reserved strip **and its source**, viewport, panel rectangles); the client reports it at load and whenever the sheet opens, kept in memory only
 - **Client**: readable source lives in `src/client.js`; `npm run build:client` uses the pinned Terser version to generate the `window.__ModuleLoader__` bundle at `lib/client.js`, which registers the “Usage statistics” sidebar entry through the `sidebar.footer.action` slot. All API routes accept loopback requests and reject an explicit cross-origin Origin; balance reads and alias writes also require a process-scoped token generated when the plugin starts (the balance GET tolerates browsers omitting Origin).
 
 ### Data semantics
@@ -358,7 +362,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 - After a session is deleted, successfully flushed usage is restored from the separate ledger; disposal hints and periodic reconciliation trigger rebuilds without deleting ledger rows
 - For each session and logical `turn / step`, only the final usage contribution is kept; retries or replaced messages do not double-count
 - Input tokens are fresh (exclude cache hits/writes, which sit in their own buckets); all-zero usage replays do not overwrite recorded usage and pure cache-read requests still count
-- The lightweight status endpoint exposes only Host instance, stats revision, scan progress, and sync counters. It does not expose session IDs, workspace paths, prompts, or reply bodies; full snapshots are fetched only after status changes or a manual refresh
+- The lightweight status endpoint exposes only the Host instance, stats revision, scan progress, sync counters, and the last client environment report (user agent, viewport, reserved strip and its source, panel rectangles — reported by a local client and kept in memory only). It does not expose session IDs, workspace paths, prompts, or reply bodies; full snapshots are fetched only after status changes or a manual refresh
 - Scoped results keep turns, model calls, and distinct sessions as separate metrics; missing route identity is explicitly Unknown rather than inferred from a display label
 - The records endpoint returns only a short hash, time, workspace ID, structured model identity, turn/step, token buckets, and current materialization source. It omits raw session IDs, paths, prompts, replies, and credentials
 - Processed tokens = input + output + cache read/write + reasoning; a cache hit means reused context, not newly generated tokens or actual cost
