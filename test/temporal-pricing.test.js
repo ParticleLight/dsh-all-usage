@@ -275,6 +275,34 @@ test('calculateCost applies the exact band rates with BigInt decimal precision',
   assert.equal(off.total, '1.107')
 })
 
+test('deepseek-flash shares the flash peak band with deepseek-v4-flash', () => {
+  // models.dev lists deepseek-flash (DeepSeek V4.1 Flash) in the deepseek-flash
+  // family at the same standard rates as deepseek-v4-flash; it used to fall
+  // through to a flat rate because the built-in table only listed the v4 ids.
+  const flash = { providerId: 'deepseek', modelId: 'deepseek-flash', displayName: 'DeepSeek V4.1 Flash', input: '0.15', output: '0.6', cacheRead: '0.003', cacheWrite: '0' }
+  const state = { catalogEntries: [{ ...flash, source: 'models.dev', fetchedAt: 0 }], overrides: [], mappings: [], providerAliases: {} }
+  const resolved = resolvePricing({ provider: 'deepseek', requestedModel: 'deepseek-flash', actualModel: 'deepseek-flash', label: 'deepseek-flash', legacy: false }, state)
+  assert.equal(resolved.status, 'priced')
+  assert.equal(resolved.temporalRoute, 'official')
+  const plan = temporalPlanFor(resolved, MONDAY_PEAK)
+  assert.equal(plan.status, 'applied')
+  assert.equal(plan.band, 'peak')
+  const values = { input: 1000000, output: 1000000, cacheRead: 1000000, cacheWrite: 0, reasoning: 0 }
+  const peak = calculateCost(values, resolved, MONDAY_PEAK, 'usage-event')
+  assert.equal(peak.pricingBand, 'peak')
+  assert.equal(peak.breakdown.input, '0.44')
+  assert.equal(peak.breakdown.output, '1.32')
+  assert.equal(peak.breakdown.cacheRead, '0.014')
+  const off = calculateCost(values, resolved, MONDAY_OFF, 'usage-event')
+  assert.equal(off.pricingBand, 'off-peak')
+  assert.equal(off.breakdown.input, '0.15')
+  assert.equal(off.breakdown.output, '0.6')
+  // The first-party boundary still holds for the new id.
+  const reseller = resolvePricing({ provider: 'openrouter', requestedModel: 'deepseek-flash', actualModel: 'deepseek-flash', label: 'openrouter / deepseek-flash', legacy: false }, state)
+  assert.equal(reseller.temporalRoute, 'other')
+  assert.equal(temporalPlanFor(reseller, MONDAY_PEAK).exemptReason, 'route-not-official')
+})
+
 test('resolvePricing applies the built-in DeepSeek profile only on first-party routes', () => {
   const state = { catalogEntries: [{ ...V4_FLASH, source: 'models.dev', fetchedAt: 0 }], overrides: [], mappings: [], providerAliases: {} }
   const official = resolvePricing({ provider: 'deepseek', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', label: 'deepseek-v4-flash', legacy: false }, state)
