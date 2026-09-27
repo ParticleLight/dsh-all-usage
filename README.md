@@ -115,12 +115,11 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 ### 最近更新
 
-**v1.1.13**
+**v1.1.14**
 
-- **DSH `0.1.7-rc.2` 正式支持**：真实 Cordis smoke 在该运行时上通过（整条链路：全部路由、钩子、账本落盘、revision 快路径、卸载清理），因此 `dsh.compatibility.runtime` 增加 `>=0.1.7-rc.2 <0.1.8-0`，`0.1.7-rc.2` 进入 verified 列表与 CI smoke 矩阵。DSH 桌面客户端正是运行这条运行时，所以 1.1.11/1.1.12 的桌面端顶栏修复也在同一句声明覆盖之下。
-- **smoke 对设置服务做了版本区分**：0.1.7 把文件型 `@deepseek-ai/dsh-settings-file` 换成了抽象的设置 seam（运行时里没有包实例化它），因此该版本上 smoke 不加载设置服务，并**明确断言**插件在没有设置服务时依旧健康（插件本就把 `ctx.settings` 当可选）。
-- `0.1.5-rc.2` 也纳入 CI smoke 矩阵（此前只是本机实测），验证矩阵里不再有「未纳入 CI」的例外。
-- 门禁加固：`check-package.mjs` 现在要求 verified 里每个版本都同时出现在 CI 矩阵与 smoke profile 表里，杜绝「声明已支持却没有被测」；README 兼容性章节与验证矩阵同步到 v1.1.13。
+- **`deepseek-flash`（DeepSeek V4.1 Flash）现在正确按峰谷计价**：它与 `deepseek-v4-flash` 同 family、同基础价（0.15 / 0.6 / 0.003），但内置峰谷表里只有 v4 那几个 id，导致它的每条记录都按静态价计、面板显示「静态价（无峰谷计划）」—— 峰值时段成本被少算约 **57%**。现已把该模型写入内置表（峰值档 0.44 / 1.32 / 0.014）；非峰值费率仍取目录实时值，峰谷计划仍只对第一方路由生效。由 @baileyh8 在 #2 报告。
+- **历史记录自动修正**：升级后首次启动时，此前以「无峰谷计划」结论落盘的记录会被 `reconcileTemporalPricing()` 按各自用量发生时刻一次性迁移重算并回写账本，无需手动操作（已带档位的记录不会被目录刷新改写，仍需显式 `repriceTemporal`）。
+- README 顶部徽章更新：npm 版本 / **全量下载** / stars / license / CI / DSH 兼容 / status。
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -307,12 +306,11 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 
 ### Latest Update
 
-**v1.1.13**
+**v1.1.14**
 
-- **DSH `0.1.7-rc.2` is now officially supported**: the real Cordis smoke passes on it (the whole plugin: every route, the hooks, the ledger flush, the revision fast path, disposal), so `dsh.compatibility.runtime` gains `>=0.1.7-rc.2 <0.1.8-0`, and `0.1.7-rc.2` joins both the verified list and the CI smoke matrix. The DSH desktop client runs this runtime line, so the caption-strip fix from 1.1.11/1.1.12 sits under the same declaration.
-- **The smoke is version-aware about settings**: 0.1.7 replaced the file-backed `@deepseek-ai/dsh-settings-file` provider with an abstract settings seam that no runtime package instantiates; the smoke therefore runs without a settings service on that line and asserts that the plugin stays healthy without one (the plugin already treats `ctx.settings` as optional).
-- `0.1.5-rc.2` is covered by the CI smoke matrix now instead of being verified locally only, so the matrix no longer has an exception.
-- The gate was tightened: `check-package.mjs` now fails when a version is called verified without appearing in both the CI matrix and the smoke profile table. The README compatibility section and its verification matrix are updated for v1.1.13.
+- **`deepseek-flash` (DeepSeek V4.1 Flash) is now priced with the peak/off-peak plan**: models.dev lists it in the same `deepseek-flash` family and at the same standard rates as `deepseek-v4-flash` (0.15 / 0.6 / 0.003), but the built-in table only carried the v4 ids, so every record for it was priced flat — the cost panel said "static (no band plan)" and a peak-hour request was under-reported by roughly **57%**. The model is now declared in the built-in table (peak band 0.44 / 1.32 / 0.014); off-peak rates still come from the live catalog entry, and the plan still applies to first-party routes only. Reported by @baileyh8 in #2.
+- **Existing history is corrected automatically**: on the first start after upgrading, records stored with the "no band plan" verdict are migrated once by `reconcileTemporalPricing()` against their own usage instant and written back to the ledger — no manual step. Records that already carry a band are still never rewritten by a catalog refresh; those need an explicit `repriceTemporal`.
+- README badges updated: npm version / **total downloads** / stars / license / CI / DSH compatibility / status.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 

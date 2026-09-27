@@ -2,6 +2,12 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [1.1.14] - 2026-09-27
+
+### Fixed
+
+- **`deepseek-flash` gets the DeepSeek peak/off-peak plan.** models.dev lists it (DeepSeek V4.1 Flash) in the same `deepseek-flash` family and at the same standard rates as `deepseek-v4-flash`, but the built-in table only carried the v4 ids, so every record for that model was priced flat and the cost panel reported `temporalExemptReason: "no-temporal-profile"` — a peak-hour request was under-reported by roughly 57%. The table now declares the model; the off-peak rates still come from the live catalog entry, and the plan still applies to first-party routes only. Records already stored with that exempt verdict are migrated once against their own usage instant by `reconcileTemporalPricing()` and written back to the ledger, so existing history is corrected on the first start after upgrading. Reported by @baileyh8 in #2.
+
 ## [1.1.13] - 2026-09-25
 
 ### Added
