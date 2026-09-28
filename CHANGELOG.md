@@ -2,6 +2,25 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **Chinese statutory holidays can price as a full off-peak day.** A peak plan now carries an explicit `holidays` date list (China Standard Time calendar days: validated, sorted, de-duplicated, at most 400 entries, and part of the policy hash so the existing audit/repricing rules apply unchanged). On those days no rule can claim an instant, and each cost snapshot records `pricingHoliday`, so the ledger distinguishes a holiday off-peak band from an ordinary one. The panel exposes it as a switch plus a date list that also accepts `start..end` ranges, and `POST /api/all-usage/pricing/holidays` fetches one year of the State Council arrangement (the holiday-cn dataset: jsDelivr first, GitHub raw as a fallback, 24-hour host-side cache) so the list can be filled with one click; the fetch writes nothing — only saving freezes the dates (plus a provenance note that stays out of the policy hash) into the plan. The built-in DeepSeek peak plan now ships the 2026 arrangement itself (33 off-days taken from the State Council notice, with the provenance stored next to the dates), because DeepSeek's own rule is "Monday to Friday excluding Chinese public holidays": first-party and mapped DeepSeek routes therefore price holidays as off-peak with no configuration at all, and snapshots priced under the previous plan are migrated once. The official wording keeps weekends off-peak in full, so swapped-in working weekends (调休) need no extra handling.
+
+### Changed
+
+- **Cost Settings is now one editable price table.** The separate "Model mappings" and "Explicit price overrides" sections are gone: every ledger model gets a row whose four price boxes write that model's manual price, whose official-model column sets or clears the identity mapping (and previews the target rates immediately), and whose two chips expand a context-rate-band editor and a UTC peak/off-peak editor. Rows that exist only in the saved configuration (an override or mapping with no ledger usage yet) are returned with `usageBacked: false` so they stay visible, editable and removable.
+- **Peak/off-peak plans are editable per model.** `GET /api/all-usage/pricing` now carries `temporalSchedules` (deduplicated like `tierSchedules`) plus `temporalExplicit`, `temporalBuiltin` and `temporalConfigInvalid` on every row, so the panel can show whether a row uses the built-in DeepSeek table or a custom plan, copy the built-in table for customisation, restore it, or drop the plan. Changing a plan reconciles that model's history against the new policy (the documented audit semantics); price edits still never rewrite existing positive costs, and the panel says so.
+
+### Fixed
+
+- The pricing configuration round-trips `providerId` and `temporalPricing` on overrides. Dropping `providerId` from the snapshot turned a provider-scoped manual price into a provider-agnostic one on the next save and stopped it from being found as a mapping target, so a saved mapping could silently fall back to the catalog price.
+- `GET /api/all-usage/pricing/models` returns `rates`, `providerName`, `tiered`/`tierCount` and `builtinTemporal` per match, so the mapping column can preview a price before saving.
+
+### Internal
+
+- The compact `/api/all-usage` snapshot keeps its shape: temporal detail, schedule ids and configuration-only rows are only emitted for the detailed pricing payload, and `test/pricing-editor.test.js` guards that boundary.
 ## [1.1.14] - 2026-09-27
 
 ### Fixed

@@ -420,7 +420,7 @@ window.__ModuleLoader__.load({
     function costBandLabel(row, language) {
       const cost = row && row.cost && typeof row.cost === 'object' ? row.cost : {}
       if (cost.pricingBand === 'peak') return language === 'en' ? 'Peak' : '峰时'
-      if (cost.pricingBand === 'off-peak') return language === 'en' ? 'Off-peak' : '谷时'
+      if (cost.pricingBand === 'off-peak') return cost.pricingHoliday === true ? (language === 'en' ? 'Holiday off-peak' : '节假日谷时') : (language === 'en' ? 'Off-peak' : '谷时')
       if (cost.temporalExemptReason === 'route-not-official') return language === 'en' ? 'static (non-first-party)' : '静态价（非官方直连）'
       if (cost.temporalExemptReason === 'no-temporal-profile') return language === 'en' ? 'static (no band plan)' : '静态价（无峰谷计划）'
       return '—'
@@ -516,7 +516,7 @@ window.__ModuleLoader__.load({
       if (!tier || tier.type !== 'context' || !Number.isSafeInteger(size) || size <= previousSize || size > 1000000000) return false
       return ['input', 'output', 'cacheRead', 'cacheWrite'].every((key) => validPricingRateDraft(tier[key]))
     }
-    function pricingDraftValidationError(draft) {
+    function pricingDraftValidationError(draft, temporalDrafts) {
       const mappings = draft && Array.isArray(draft.mappings) ? draft.mappings : []
       for (const mapping of mappings) {
         if (!mapping || String(mapping.identityKey || mapping.usageIdentityKey || mapping.model || '').trim() === '' || String(mapping.catalogModelId || '').trim() === '') return 'mapping'
@@ -535,8 +535,607 @@ window.__ModuleLoader__.load({
         }
         if (entry.tiered === true && tiers.length === 0) return 'tier'
       }
+      // Loose peak/off-peak drafts are validated too: a half-typed time or
+      // rate must block the save instead of being silently dropped.
+      const loose = temporalDrafts !== null && temporalDrafts !== undefined && typeof temporalDrafts === 'object' ? temporalDrafts : {}
+      for (const key of Object.keys(loose)) {
+        if (pricingTemporalDraftValidationError(loose[key]) !== '') return 'temporal'
+      }
       return ''
     }
+    // ---------- merged price table: pure row/draft helpers ----------
+    // Everything below is side-effect free: the panel derives its rows from the
+    // server snapshot plus the local draft, and every edit returns a new draft
+    // object, so the same functions can be exercised in isolation by the tests.
+
+    function pricingRateText(value) {
+      if (value === undefined || value === null || value === '') return '0'
+      return String(value)
+    }
+    function pricingRateLabel(key, language) {
+      const labels = {
+        input: ['输入 / 1M', 'Input / 1M'],
+        output: ['输出 / 1M', 'Output / 1M'],
+        cacheRead: ['缓存读 / 1M', 'Cache read / 1M'],
+        cacheWrite: ['缓存写 / 1M', 'Cache write / 1M'],
+      }
+      const pair = labels[key] || labels.input
+      return language === 'en' ? pair[1] : pair[0]
+    }
+    function pricingRowKey(row) {
+      if (row === null || typeof row !== 'object') return ''
+      const identity = typeof row.identityKey === 'string' ? row.identityKey.trim() : ''
+      if (identity !== '') return identity
+      const model = row.pricingModel || row.actualModel || row.requestedModel || row.model || ''
+      return 'price|' + String(row.providerId || '').trim().toLowerCase() + '|' + String(model).trim().toLowerCase()
+    }
+    function pricingRowBasis(row, mapping) {
+      const target = mapping !== null && typeof mapping === 'object' && typeof mapping.catalogModelId === 'string' ? mapping.catalogModelId.trim() : ''
+      if (target !== '') return { providerId: String(mapping.catalogProviderId || '').trim().toLowerCase(), modelId: target }
+      const priced = row !== null && typeof row === 'object' && row.status === 'priced' && typeof row.pricingModel === 'string' && row.pricingModel.trim() !== ''
+      const modelId = priced ? row.pricingModel : (row !== null && typeof row === 'object' ? (row.actualModel || row.requestedModel || row.pricingModel || row.model) : '')
+      return { providerId: priced ? String(row.providerId || '').trim().toLowerCase() : '', modelId: String(modelId || '').trim() }
+    }
+    function pricingBasisKey(basis) {
+      const value = basis !== null && typeof basis === 'object' ? basis : {}
+      return String(value.providerId || '').trim().toLowerCase() + '|' + String(value.modelId || '').trim().toLowerCase()
+    }
+    function pricingOverrideIndex(overrides, basis) {
+      const list = Array.isArray(overrides) ? overrides : []
+      const key = pricingBasisKey(basis)
+      for (let index = 0; index < list.length; index += 1) {
+        const entry = list[index]
+        if (entry === null || typeof entry !== 'object') continue
+        if (pricingBasisKey({ providerId: entry.providerId, modelId: entry.modelId }) === key) return index
+      }
+      return -1
+    }
+    function pricingMappingIndex(mappings, identityKey) {
+      const list = Array.isArray(mappings) ? mappings : []
+      const key = String(identityKey || '').trim()
+      if (key === '') return -1
+      for (let index = 0; index < list.length; index += 1) {
+        const mapping = list[index]
+        if (mapping === null || typeof mapping !== 'object') continue
+        const value = String(mapping.identityKey || mapping.usageIdentityKey || '').trim()
+        if (value === key) return index
+      }
+      return -1
+    }
+    // Rows feed memoized children (model icons), so a keystroke in a price box
+    // must not rebuild them: the payload object is the cache key and it only
+    // changes when a fresh snapshot arrives.
+    const pricingUsedModelsCache = new WeakMap()
+    function pricingUsedModelsFor(source) {
+      if (source === null || typeof source !== 'object') return pricingUsedModelsOf(source)
+      const cached = pricingUsedModelsCache.get(source)
+      if (cached !== undefined) return cached
+      const rows = pricingUsedModelsOf(source)
+      pricingUsedModelsCache.set(source, rows)
+      return rows
+    }
+    function pricingRowsOf(pricing, draft, pickedTargets) {
+      const source = pricing !== null && typeof pricing === 'object' ? pricing : {}
+      const models = pricingUsedModelsFor(source)
+      const schedules = new Map()
+      for (const schedule of (Array.isArray(source.temporalSchedules) ? source.temporalSchedules : [])) {
+        if (schedule === null || typeof schedule !== 'object' || typeof schedule.id !== 'string' || !Array.isArray(schedule.policies)) continue
+        schedules.set(schedule.id, schedule.policies)
+      }
+      const mappings = draft !== null && typeof draft === 'object' && Array.isArray(draft.mappings) ? draft.mappings : []
+      const overrides = draft !== null && typeof draft === 'object' && Array.isArray(draft.overrides) ? draft.overrides : []
+      const targets = pickedTargets !== null && typeof pickedTargets === 'object' ? pickedTargets : {}
+      // This runs on every draft edit (each keystroke in a price box), so row
+      // lookups are indexed: a full configuration (500 mappings and 500
+      // overrides) must not cost rows × configuration per render.
+      const mappingByKey = new Map()
+      for (let index = 0; index < mappings.length; index += 1) {
+        const candidate = mappings[index]
+        if (candidate === null || typeof candidate !== 'object') continue
+        const identityText = String(candidate.identityKey || candidate.usageIdentityKey || '').trim()
+        if (identityText !== '' && !mappingByKey.has(identityText)) mappingByKey.set(identityText, index)
+      }
+      const overrideByBasis = new Map()
+      for (let index = 0; index < overrides.length; index += 1) {
+        const candidate = overrides[index]
+        if (candidate === null || typeof candidate !== 'object') continue
+        const basisText = pricingBasisKey({ providerId: candidate.providerId, modelId: candidate.modelId })
+        if (!overrideByBasis.has(basisText)) overrideByBasis.set(basisText, index)
+      }
+      return models.map((model) => {
+        const key = pricingRowKey(model)
+        const identityText = typeof model.identityKey === 'string' ? model.identityKey.trim() : ''
+        const mappingIndex = identityText !== '' && mappingByKey.has(identityText) ? mappingByKey.get(identityText) : -1
+        const mapping = mappingIndex >= 0 ? mappings[mappingIndex] : null
+        const mapped = mapping !== null && String(mapping.catalogModelId || '').trim() !== ''
+        const basis = pricingRowBasis(model, mapping)
+        const basisText = pricingBasisKey(basis)
+        const overrideIndex = overrideByBasis.has(basisText) ? overrideByBasis.get(basisText) : -1
+        const override = overrideIndex >= 0 ? overrides[overrideIndex] : null
+        const target = mapped && targets[key] !== null && typeof targets[key] === 'object' ? targets[key] : null
+        const preview = target !== null && target.rates !== null && typeof target.rates === 'object' ? target : null
+        const rates = override !== null && override !== undefined
+          ? { input: override.input, output: override.output, cacheRead: override.cacheRead, cacheWrite: override.cacheWrite }
+          : preview !== null
+            ? { input: preview.rates.input, output: preview.rates.output, cacheRead: preview.rates.cacheRead, cacheWrite: preview.rates.cacheWrite }
+            : (model.rates !== null && typeof model.rates === 'object' ? { input: model.rates.input, output: model.rates.output, cacheRead: model.rates.cacheRead, cacheWrite: model.rates.cacheWrite } : null)
+        const serverTiers = Array.isArray(model.tiers) ? model.tiers.map((tier) => Object.assign({}, tier)) : []
+        const tiers = override !== null && override !== undefined && Array.isArray(override.tiers) ? override.tiers.map((tier) => Object.assign({}, tier)) : (preview !== null ? [] : serverTiers)
+        const tiered = override !== null && override !== undefined
+          ? override.tiered === true && tiers.length > 0
+          : preview !== null
+            ? preview.tiered === true
+            : model.tiered === true
+        const tierCount = override !== null && override !== undefined
+          ? tiers.length
+          : preview !== null
+            ? (Number.isFinite(Number(preview.tierCount)) ? Number(preview.tierCount) : 0)
+            : (Number.isFinite(Number(model.tierCount)) ? Number(model.tierCount) : tiers.length)
+        const schedule = typeof model.temporalScheduleId === 'string' ? schedules.get(model.temporalScheduleId) : null
+        const plan = override !== null && override !== undefined && override.temporalPricing !== undefined
+          ? override.temporalPricing
+          : (Array.isArray(schedule) ? { policies: schedule } : null)
+        const rules = plan !== null && plan !== undefined && Array.isArray(plan.policies)
+          ? plan.policies.reduce((total, policy) => total + (policy !== null && Array.isArray(policy.rules) ? policy.rules.length : 0), 0)
+          : 0
+        const explicit = override !== null && override !== undefined && override.temporalPricing !== undefined
+        // A payload from a host that predates this panel carries only the
+        // policy id and the route (no schedule): the row must still report a
+        // peak plan instead of claiming the model has none.
+        const serverPolicyId = typeof model.temporalPolicyId === 'string' ? model.temporalPolicyId : ''
+        const serverTemporalRoute = model.temporalRoute === 'official' || model.temporalRoute === 'mapped'
+        const rulesUnavailable = plan === null && serverTemporalRoute && serverPolicyId !== ''
+        return {
+          key,
+          row: model,
+          identityKey: typeof model.identityKey === 'string' ? model.identityKey : '',
+          usageBacked: model.usageBacked !== false,
+          model: typeof model.model === 'string' ? model.model : '',
+          status: typeof model.status === 'string' ? model.status : 'unpriced',
+          reason: typeof model.reason === 'string' ? model.reason : '',
+          mapped,
+          mapping,
+          mappingIndex,
+          basis,
+          overrideIndex,
+          override,
+          source: override !== null && override !== undefined ? 'manual' : (typeof model.source === 'string' ? model.source : 'none'),
+          rates,
+          tiers,
+          tiered,
+          tierCount,
+          tieredInvalid: model.tieredInvalid === true,
+          multiplier: mapping !== null && mapping.multiplier !== undefined ? String(mapping.multiplier) : '1',
+          inputTokenSemantics: mapping !== null && typeof mapping.inputTokenSemantics === 'string' ? mapping.inputTokenSemantics : 'fresh',
+          pricingModel: mapped ? String(mapping.catalogModelId) : (typeof model.pricingModel === 'string' ? model.pricingModel : ''),
+          providerId: basis.providerId,
+          temporalPlan: plan === undefined ? null : plan,
+          temporalRuleCount: rules,
+          temporalPolicyId: serverPolicyId,
+          temporalRoute: typeof model.temporalRoute === 'string' ? model.temporalRoute : '',
+          temporalRulesUnavailable: rulesUnavailable,
+          temporalExplicit: explicit ? true : model.temporalExplicit === true,
+          temporalBuiltin: explicit ? false : (rulesUnavailable || model.temporalBuiltin === true),
+          temporalConfigInvalid: model.temporalConfigInvalid === true || (override !== null && override !== undefined && override.temporalPricingInvalid === true),
+          targetPreview: target,
+          mappable: typeof model.identityKey === 'string' && model.identityKey.trim() !== '',
+        }
+      })
+    }
+    function pricingDraftUpsertOverride(draft, view, patch) {
+      const base = draft !== null && typeof draft === 'object' ? draft : { sync: {}, mappings: [], overrides: [] }
+      const overrides = Array.isArray(base.overrides) ? base.overrides.map((entry) => Object.assign({}, entry)) : []
+      let index = pricingOverrideIndex(overrides, view.basis)
+      if (index < 0) {
+        const rates = view.rates !== null && typeof view.rates === 'object' ? view.rates : {}
+        const tiers = Array.isArray(view.tiers) ? view.tiers.map((tier) => Object.assign({}, tier)) : []
+        overrides.push({
+          providerId: view.basis.providerId || '',
+          modelId: view.basis.modelId,
+          displayName: view.model || view.basis.modelId,
+          input: pricingRateText(rates.input),
+          output: pricingRateText(rates.output),
+          cacheRead: pricingRateText(rates.cacheRead),
+          cacheWrite: pricingRateText(rates.cacheWrite),
+          tiered: tiers.length > 0,
+          tiers,
+        })
+        index = overrides.length - 1
+      }
+      overrides[index] = Object.assign({}, overrides[index], patch)
+      return Object.assign({}, base, { overrides })
+    }
+    function pricingDraftSetRate(draft, view, field, value) {
+      const patch = {}
+      patch[field] = value
+      return pricingDraftUpsertOverride(draft, view, patch)
+    }
+    function pricingDraftWithoutOverride(draft, basis) {
+      if (draft === null || typeof draft !== 'object') return draft
+      const index = pricingOverrideIndex(draft.overrides, basis)
+      if (index < 0) return draft
+      const overrides = draft.overrides.slice()
+      overrides.splice(index, 1)
+      return Object.assign({}, draft, { overrides })
+    }
+    function pricingDraftSetMapping(draft, view, option) {
+      const base = draft !== null && typeof draft === 'object' ? draft : { sync: {}, mappings: [], overrides: [] }
+      if (view.mappable !== true || option === null || option === undefined || typeof option.value !== 'string') return base
+      const mappings = Array.isArray(base.mappings) ? base.mappings.map((entry) => Object.assign({}, entry)) : []
+      const index = pricingMappingIndex(mappings, view.identityKey)
+      const patch = {
+        identityKey: view.identityKey,
+        provider: view.row !== null && typeof view.row === 'object' && typeof view.row.provider === 'string' ? view.row.provider : '',
+        model: view.row !== null && typeof view.row === 'object' ? (view.row.actualModel || view.row.requestedModel || '') : '',
+        catalogProviderId: typeof option.providerId === 'string' ? option.providerId : '',
+        catalogModelId: option.value,
+      }
+      if (index < 0) mappings.push(Object.assign({ inputTokenSemantics: 'fresh', multiplier: '1' }, patch))
+      else mappings[index] = Object.assign({}, mappings[index], patch)
+      return Object.assign({}, base, { mappings })
+    }
+    function pricingDraftWithoutMapping(draft, identityKey) {
+      if (draft === null || typeof draft !== 'object') return draft
+      const index = pricingMappingIndex(draft.mappings, identityKey)
+      if (index < 0) return draft
+      const mappings = draft.mappings.slice()
+      mappings.splice(index, 1)
+      return Object.assign({}, draft, { mappings })
+    }
+    function pricingDraftSetMappingField(draft, view, field, value) {
+      if (draft === null || typeof draft !== 'object') return draft
+      const index = pricingMappingIndex(draft.mappings, view.identityKey)
+      if (index < 0) return draft
+      const mappings = draft.mappings.slice()
+      const patch = {}
+      patch[field] = value
+      mappings[index] = Object.assign({}, mappings[index], patch)
+      return Object.assign({}, draft, { mappings })
+    }
+    function pricingTierDraftAdd(tiers, rates) {
+      const list = Array.isArray(tiers) ? tiers.map((tier) => Object.assign({}, tier)) : []
+      if (list.length >= 32) return list
+      const previous = list.length > 0 ? list[list.length - 1] : null
+      const previousSize = previous !== null && Number.isFinite(Number(previous.size)) ? Number(previous.size) : 100000
+      const source = previous !== null ? previous : (rates !== null && typeof rates === 'object' ? rates : {})
+      list.push({
+        type: 'context',
+        size: Math.min(1000000000, previousSize + 100000),
+        input: pricingRateText(source.input),
+        output: pricingRateText(source.output),
+        cacheRead: pricingRateText(source.cacheRead),
+        cacheWrite: pricingRateText(source.cacheWrite),
+      })
+      return list
+    }
+    function pricingTierDraftUpdate(tiers, index, field, value) {
+      const list = Array.isArray(tiers) ? tiers.map((tier) => Object.assign({}, tier)) : []
+      if (list[index] === undefined) return list
+      const patch = {}
+      patch[field] = value
+      list[index] = Object.assign({}, list[index], patch)
+      return list
+    }
+    function pricingTierDraftRemove(tiers, index) {
+      return (Array.isArray(tiers) ? tiers : []).filter((_, itemIndex) => itemIndex !== index).map((tier) => Object.assign({}, tier))
+    }
+    function pricingTimeTextToMinute(value) {
+      const text = String(value === undefined || value === null ? '' : value).trim()
+      const match = text.match(/^([0-9]{1,2}):([0-9]{1,2})$/)
+      if (match === null) return null
+      const hours = Number(match[1])
+      const minutes = Number(match[2])
+      if (!Number.isInteger(hours) || !Number.isInteger(minutes) || minutes < 0 || minutes > 59) return null
+      const total = hours * 60 + minutes
+      if (total < 0 || total > 1440) return null
+      return total
+    }
+    function pricingMinuteToTimeText(minute) {
+      const value = Number(minute)
+      if (!Number.isFinite(value) || value < 0 || value > 1440) return ''
+      return String(Math.floor(value / 60)).padStart(2, '0') + ':' + String(value % 60).padStart(2, '0')
+    }
+    function pricingDateTextToUtc(value) {
+      const text = String(value === undefined || value === null ? '' : value).trim()
+      if (text === '') return 0
+      const match = text.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/)
+      if (match === null) return null
+      const year = Number(match[1])
+      const month = Number(match[2])
+      const day = Number(match[3])
+      const at = Date.UTC(year, month - 1, day)
+      const date = new Date(at)
+      if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null
+      return at
+    }
+    function pricingUtcToDateText(value) {
+      const at = Number(value)
+      if (!Number.isFinite(at) || at <= 0) return ''
+      return new Date(at).toISOString().slice(0, 10)
+    }
+    // Statutory holidays are stored as an explicit date list: one date per line
+    // or a `start..end` range, following the China Standard Time calendar day.
+    function pricingHolidayDatesFromText(value) {
+      const text = String(value === undefined || value === null ? '' : value)
+      const dates = []
+      const seen = new Set()
+      for (const rawLine of text.split('\n')) {
+        const line = rawLine.trim()
+        if (line === '') continue
+        const parts = line.split('..')
+        if (parts.length > 2) return null
+        const startText = parts[0].trim()
+        const endText = parts.length === 2 ? parts[1].trim() : startText
+        if (startText === '' || endText === '') return null
+        const start = pricingDateTextToUtc(startText)
+        const end = pricingDateTextToUtc(endText)
+        if (start === null || end === null || start > end) return null
+        const days = Math.round((end - start) / 86400000) + 1
+        if (days > 366 || seen.size + days > 400) return null
+        for (let offset = 0; offset < days; offset += 1) {
+          const key = new Date(start + offset * 86400000).toISOString().slice(0, 10)
+          if (seen.has(key)) continue
+          seen.add(key)
+          dates.push(key)
+        }
+      }
+      dates.sort()
+      return dates
+    }
+    /** Union of the existing holiday text and a freshly fetched date list. */
+    function pricingHolidayTextMerge(text, dates) {
+      const existing = pricingHolidayDatesFromText(text)
+      const list = existing === null ? [] : existing.slice()
+      const seen = new Set(list)
+      for (const date of Array.isArray(dates) ? dates : []) {
+        const text2 = String(date === undefined || date === null ? '' : date).trim()
+        if (text2 === '' || seen.has(text2)) continue
+        seen.add(text2)
+        list.push(text2)
+      }
+      list.sort()
+      return list.length === 0 ? '' : list.join('\n')
+    }
+    function pricingTemporalDraftOfPlan(plan) {
+      const policies = plan !== null && plan !== undefined && Array.isArray(plan.policies) ? plan.policies : []
+      const policy = policies.length > 0 && policies[0] !== null && typeof policies[0] === 'object' ? policies[0] : null
+      if (policy === null) return null
+      const rules = Array.isArray(policy.rules) ? policy.rules : []
+      if (rules.length === 0) return null
+      return {
+        policyId: typeof policy.policyId === 'string' && policy.policyId !== '' ? policy.policyId : 'custom-peak',
+        effectiveFromText: pricingUtcToDateText(policy.effectiveFrom),
+        holidaysEnabled: Array.isArray(policy.holidays) && policy.holidays.length > 0,
+        holidaysText: Array.isArray(policy.holidays) ? policy.holidays.join('\n') : '',
+        holidaysSourceText: typeof policy.holidaysSource === 'string' ? policy.holidaysSource : '',
+        rules: rules.map((rule, index) => ({
+          id: typeof rule.id === 'string' && rule.id !== '' ? rule.id : 'peak-' + (index + 1),
+          weekdays: Array.isArray(rule.weekdays) ? rule.weekdays.slice().sort((left, right) => left - right) : [],
+          windows: (Array.isArray(rule.windows) ? rule.windows : []).map((window) => ({ start: pricingMinuteToTimeText(window.startMinute), end: pricingMinuteToTimeText(window.endMinute) })),
+          rates: {
+            input: pricingRateText(rule.rates !== null && rule.rates !== undefined ? rule.rates.input : ''),
+            output: pricingRateText(rule.rates !== null && rule.rates !== undefined ? rule.rates.output : ''),
+            cacheRead: pricingRateText(rule.rates !== null && rule.rates !== undefined ? rule.rates.cacheRead : ''),
+            cacheWrite: pricingRateText(rule.rates !== null && rule.rates !== undefined ? rule.rates.cacheWrite : ''),
+          },
+        })),
+      }
+    }
+    function pricingTemporalDraftDefault(rates) {
+      const base = rates !== null && typeof rates === 'object' ? rates : {}
+      return {
+        policyId: 'custom-peak',
+        effectiveFromText: '',
+        holidaysEnabled: false,
+        holidaysText: '',
+        holidaysSourceText: '',
+        rules: [{
+          id: 'peak-1',
+          weekdays: [1, 2, 3, 4, 5],
+          windows: [{ start: '01:00', end: '04:00' }],
+          rates: {
+            input: pricingRateText(base.input),
+            output: pricingRateText(base.output),
+            cacheRead: pricingRateText(base.cacheRead),
+            cacheWrite: pricingRateText(base.cacheWrite),
+          },
+        }],
+      }
+    }
+    function pricingTemporalDraftClone(draft) {
+      if (draft === null || typeof draft !== 'object') return null
+      return {
+        policyId: String(draft.policyId === undefined ? '' : draft.policyId),
+        effectiveFromText: String(draft.effectiveFromText === undefined ? '' : draft.effectiveFromText),
+        holidaysEnabled: draft.holidaysEnabled === true,
+        holidaysText: String(draft.holidaysText === undefined || draft.holidaysText === null ? '' : draft.holidaysText),
+        holidaysSourceText: String(draft.holidaysSourceText === undefined || draft.holidaysSourceText === null ? '' : draft.holidaysSourceText),
+        rules: (Array.isArray(draft.rules) ? draft.rules : []).map((rule, index) => ({
+          id: typeof rule.id === 'string' && rule.id !== '' ? rule.id : 'peak-' + (index + 1),
+          weekdays: (Array.isArray(rule.weekdays) ? rule.weekdays : []).map(Number),
+          windows: (Array.isArray(rule.windows) ? rule.windows : []).map((window) => ({ start: String(window.start === undefined ? '' : window.start), end: String(window.end === undefined ? '' : window.end) })),
+          rates: {
+            input: String(rule.rates === undefined || rule.rates === null || rule.rates.input === undefined ? '' : rule.rates.input),
+            output: String(rule.rates === undefined || rule.rates === null || rule.rates.output === undefined ? '' : rule.rates.output),
+            cacheRead: String(rule.rates === undefined || rule.rates === null || rule.rates.cacheRead === undefined ? '' : rule.rates.cacheRead),
+            cacheWrite: String(rule.rates === undefined || rule.rates === null || rule.rates.cacheWrite === undefined ? '' : rule.rates.cacheWrite),
+          },
+        })),
+      }
+    }
+    function pricingTemporalDraftWithRule(draft) {
+      const next = pricingTemporalDraftClone(draft)
+      if (next === null || next.rules.length >= 16) return next
+      const previous = next.rules.length > 0 ? next.rules[next.rules.length - 1] : null
+      next.rules.push({
+        id: 'peak-' + (next.rules.length + 1),
+        weekdays: previous !== null ? previous.weekdays.slice(0, 1) : [1, 2, 3, 4, 5],
+        windows: [{ start: '06:00', end: '10:00' }],
+        rates: previous !== null ? Object.assign({}, previous.rates) : { input: '', output: '', cacheRead: '', cacheWrite: '' },
+      })
+      return next
+    }
+    function pricingTemporalDraftWithoutRule(draft, index) {
+      const next = pricingTemporalDraftClone(draft)
+      if (next === null || next.rules.length <= 1) return next
+      next.rules = next.rules.filter((_, itemIndex) => itemIndex !== index)
+      return next
+    }
+    function pricingTemporalDraftRulePatch(draft, index, patch) {
+      const next = pricingTemporalDraftClone(draft)
+      if (next === null || next.rules[index] === undefined) return next
+      next.rules[index] = Object.assign({}, next.rules[index], patch)
+      return next
+    }
+    function pricingTemporalDraftToggleWeekday(draft, index, weekday) {
+      const next = pricingTemporalDraftClone(draft)
+      if (next === null || next.rules[index] === undefined) return next
+      const rule = next.rules[index]
+      const day = Number(weekday)
+      rule.weekdays = (rule.weekdays.includes(day) ? rule.weekdays.filter((item) => item !== day) : rule.weekdays.concat([day])).sort((left, right) => left - right)
+      return next
+    }
+    function pricingTemporalDraftWindows(draft, index, windows) {
+      return pricingTemporalDraftRulePatch(draft, index, { windows })
+    }
+    function pricingTemporalDraftRates(draft, index, rates) {
+      return pricingTemporalDraftRulePatch(draft, index, { rates })
+    }
+    function pricingTemporalPlanFromDraft(draft) {
+      const effectiveFrom = pricingDateTextToUtc(draft !== null && typeof draft === 'object' ? draft.effectiveFromText : '')
+      const rules = (draft !== null && typeof draft === 'object' && Array.isArray(draft.rules) ? draft.rules : []).map((rule, index) => ({
+        id: typeof rule.id === 'string' && rule.id !== '' ? rule.id : 'peak-' + (index + 1),
+        weekdays: (Array.isArray(rule.weekdays) ? rule.weekdays : []).slice().sort((left, right) => left - right),
+        windows: (Array.isArray(rule.windows) ? rule.windows : []).map((window) => ({ startMinute: pricingTimeTextToMinute(window.start), endMinute: pricingTimeTextToMinute(window.end) })),
+        rates: {
+          input: pricingRateText(rule.rates !== null && rule.rates !== undefined ? rule.rates.input : ''),
+          output: pricingRateText(rule.rates !== null && rule.rates !== undefined ? rule.rates.output : ''),
+          cacheRead: pricingRateText(rule.rates !== null && rule.rates !== undefined ? rule.rates.cacheRead : ''),
+          cacheWrite: pricingRateText(rule.rates !== null && rule.rates !== undefined ? rule.rates.cacheWrite : ''),
+        },
+      }))
+      return {
+        policies: [{
+          policyId: String(draft !== null && typeof draft === 'object' && draft.policyId !== undefined ? draft.policyId : '').trim(),
+          timezone: 'UTC',
+          effectiveFrom: effectiveFrom === null ? 0 : effectiveFrom,
+          effectiveUntil: null,
+          defaultPlan: null,
+          holidays: draft !== null && typeof draft === 'object' && draft.holidaysEnabled === true ? (pricingHolidayDatesFromText(draft.holidaysText) || []) : [],
+          holidaysSource: draft !== null && typeof draft === 'object' ? String(draft.holidaysSourceText === undefined || draft.holidaysSourceText === null ? '' : draft.holidaysSourceText).trim().slice(0, 512) : '',
+          rules,
+        }],
+      }
+    }
+    function pricingTemporalDraftValidationError(draft) {
+      if (draft === null || typeof draft !== 'object') return 'temporal'
+      const policyId = String(draft.policyId === undefined ? '' : draft.policyId).trim()
+      if (policyId === '' || policyId.length > 128) return 'temporal'
+      if (pricingDateTextToUtc(draft.effectiveFromText) === null) return 'temporal'
+      if (draft.holidaysEnabled === true && pricingHolidayDatesFromText(draft.holidaysText) === null) return 'temporal'
+      const rules = Array.isArray(draft.rules) ? draft.rules : []
+      if (rules.length === 0 || rules.length > 16) return 'temporal'
+      const perDay = new Map()
+      for (const rule of rules) {
+        const weekdays = Array.isArray(rule.weekdays) ? rule.weekdays.map(Number) : []
+        if (weekdays.length === 0 || weekdays.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) return 'temporal'
+        const windows = Array.isArray(rule.windows) ? rule.windows : []
+        if (windows.length === 0 || windows.length > 16) return 'temporal'
+        for (const window of windows) {
+          const start = pricingTimeTextToMinute(window.start)
+          const end = pricingTimeTextToMinute(window.end)
+          if (start === null || end === null || end <= start) return 'temporal'
+          for (const day of weekdays) {
+            const list = perDay.get(day) === undefined ? [] : perDay.get(day)
+            list.push({ start, end })
+            perDay.set(day, list)
+          }
+        }
+        if (!['input', 'output', 'cacheRead', 'cacheWrite'].every((key) => validPricingRateDraft(rule.rates !== null && rule.rates !== undefined ? rule.rates[key] : ''))) return 'temporal'
+      }
+      for (const list of perDay.values()) {
+        list.sort((left, right) => left.start - right.start)
+        for (let index = 1; index < list.length; index += 1) {
+          if (list[index].start < list[index - 1].end) return 'temporal'
+        }
+      }
+      return ''
+    }
+    function pricingDraftPayloadTooLarge(draft) {
+      try {
+        return JSON.stringify({ pricing: draft }).length > 200 * 1024
+      } catch (err) {
+        return true
+      }
+    }
+    function pricingRatesEqual(left, right) {
+      if (left === right) return true
+      if (left === null || left === undefined || right === null || right === undefined) return false
+      return left.input === right.input && left.output === right.output && left.cacheRead === right.cacheRead && left.cacheWrite === right.cacheWrite
+    }
+    function pricingTiersEqual(left, right) {
+      if (left === right) return true
+      const leftTiers = Array.isArray(left) ? left : []
+      const rightTiers = Array.isArray(right) ? right : []
+      if (leftTiers.length !== rightTiers.length) return false
+      for (let index = 0; index < leftTiers.length; index += 1) {
+        const a = leftTiers[index]
+        const b = rightTiers[index]
+        if (a === b) continue
+        if (a === null || a === undefined || b === null || b === undefined) return false
+        if (a.size !== b.size || a.input !== b.input || a.output !== b.output || a.cacheRead !== b.cacheRead || a.cacheWrite !== b.cacheWrite) return false
+      }
+      return true
+    }
+    function pricingRowViewEqual(left, right) {
+      if (left === right) return true
+      if (left === null || left === undefined || right === null || right === undefined) return false
+      return left.key === right.key
+        && left.model === right.model
+        && left.status === right.status
+        && left.reason === right.reason
+        && left.source === right.source
+        && left.mapped === right.mapped
+        && left.usageBacked === right.usageBacked
+        && left.mappable === right.mappable
+        && left.pricingModel === right.pricingModel
+        && left.providerId === right.providerId
+        && left.tiered === right.tiered
+        && left.tierCount === right.tierCount
+        && left.tieredInvalid === right.tieredInvalid
+        && left.multiplier === right.multiplier
+        && left.inputTokenSemantics === right.inputTokenSemantics
+        && left.temporalExplicit === right.temporalExplicit
+        && left.temporalBuiltin === right.temporalBuiltin
+        && left.temporalConfigInvalid === right.temporalConfigInvalid
+        && left.temporalRulesUnavailable === right.temporalRulesUnavailable
+        && left.temporalPolicyId === right.temporalPolicyId
+        && left.temporalRuleCount === right.temporalRuleCount
+        && left.overrideIndex === right.overrideIndex
+        && left.mappingIndex === right.mappingIndex
+        && pricingRatesEqual(left.rates, right.rates)
+        && pricingTiersEqual(left.tiers, right.tiers)
+        && pricingBasisKey(left.basis) === pricingBasisKey(right.basis)
+    }
+    // The row comparator is what keeps a keystroke in one price box from
+    // rebuilding every other row: a table at the 500-row cap would otherwise
+    // reconcile thousands of elements per keystroke.
+    function pricingRowPropsEqual(previous, next) {
+      if (previous === next) return true
+      if (previous.busy !== next.busy) return false
+      if (previous.language !== next.language) return false
+      if (previous.openSection !== next.openSection) return false
+      if (previous.searchText !== next.searchText) return false
+      if (previous.searchOpen !== next.searchOpen) return false
+      if (previous.searchOptions !== next.searchOptions) return false
+      // The expanded editors read the loose peak draft and the resolved plan.
+      if (previous.temporalDraft !== next.temporalDraft) return false
+      if (previous.temporalPlan !== next.temporalPlan) return false
+      if (previous.holidayStatus !== next.holidayStatus) return false
+      if (previous.holidayLoading !== next.holidayLoading) return false
+      return pricingRowViewEqual(previous.view, next.view)
+    }
+
     function pricingModelKey(value) {
       return String(value || '').trim().toLowerCase().replace(/^.*\//, '').split(':')[0]
     }
@@ -1345,6 +1944,11 @@ window.__ModuleLoader__.load({
       return props.render()
     }
     const MemoUsagePricingDialog = React.memo(UsagePricingDialog, (previous, next) => previous.revision === next.revision)
+    // One memoized row per model: the comparator decides from the row's props
+    // (see pricingRowPropsEqual), so unrelated rows bail out of the render.
+    const MemoUsagePricingRow = React.memo(function UsagePricingRow(props) {
+      return props.render(props.view)
+    }, pricingRowPropsEqual)
 
     function ModelIcon(props) {
       const size = Number.isFinite(props.size) ? props.size : 18
@@ -1562,10 +2166,10 @@ window.__ModuleLoader__.load({
 .uh-pricing-toolbar { padding:10px 0; border-top:1px solid var(--dsw-alias-border-l1); border-bottom:1px solid var(--dsw-alias-border-l1); }
 .uh-pricing-switch { display:inline-flex; align-items:center; gap:7px; color:var(--dsw-alias-label-primary); font-size:12px; }
 .uh-pricing-section { display:flex; flex-direction:column; gap:8px; }
-.uh-pricing-table-wrap { max-height:392px; overflow-x:auto; overflow-y:scroll; scrollbar-gutter:stable; scrollbar-width:auto; scrollbar-color:#707780 #1d1f22; border:1px solid var(--dsw-alias-border-l1); border-radius:8px; background:var(--dsw-alias-bg-layer-2); }
+.uh-pricing-table-wrap { max-height:392px; overflow-x:hidden; overflow-y:scroll; scrollbar-gutter:stable; scrollbar-width:auto; scrollbar-color:#707780 #1d1f22; border:1px solid var(--dsw-alias-border-l1); border-radius:8px; background:var(--dsw-alias-bg-layer-2); }
 .uh-pricing-model-table { width:100%; min-width:1080px; border-collapse:collapse; table-layout:fixed; font-size:11px; }
 .uh-pricing-model-table th, .uh-pricing-model-table td { min-width:0; padding:8px 9px; border-bottom:1px solid var(--dsw-alias-border-l1); text-align:left; vertical-align:middle; }
-.uh-pricing-model-table th { position:sticky; top:0; z-index:1; color:var(--dsw-alias-label-secondary); background:var(--dsw-alias-bg-layer-2); font-weight:650; white-space:nowrap; }
+.uh-pricing-model-table th { position:sticky; top:0; z-index:40; color:var(--dsw-alias-label-secondary); background:var(--dsw-alias-bg-layer-2); font-weight:650; white-space:nowrap; }
 .uh-pricing-model-table th:nth-child(1) { width:24%; }
 .uh-pricing-model-table th:nth-child(2) { width:84px; }
 .uh-pricing-model-table th:nth-child(3) { width:20%; }
@@ -1597,7 +2201,9 @@ window.__ModuleLoader__.load({
 .uh-pricing-used-model-input { box-sizing:border-box; width:100%; min-width:0; min-height:30px; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; padding:4px 7px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; font-size:11px; outline:none; }
 .uh-pricing-used-model-input:focus { border-color:var(--dsw-alias-brand-primary); }
 .uh-pricing-used-model-options { top:calc(100% + 7px); left:0; right:auto; width:100%; min-width:280px; max-height:240px; overflow-y:auto; z-index:40; }
-.uh-pricing-model-search { position:relative; z-index:2; min-width:0; }
+.uh-pricing-model-search { position:relative; z-index:2; min-width:0; display:flex; align-items:center; gap:6px; }
+.uh-pricing-model-search .uh-pricing-model-search-input { flex:1 1 auto; width:auto; }
+.uh-pricing-clear-mapping { flex:none; white-space:nowrap; }
 .uh-pricing-model-search:focus-within { z-index:30; }
 .uh-pricing-model-search-input { box-sizing:border-box; width:100%; min-width:0; min-height:30px; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; padding:4px 7px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; font-size:11px; outline:none; }
 .uh-pricing-model-search-input:focus { border-color:var(--dsw-alias-brand-primary); }
@@ -1620,13 +2226,73 @@ window.__ModuleLoader__.load({
 .uh-pricing-tier-editor-title { display:flex; align-items:baseline; gap:8px; min-width:0; }
 .uh-pricing-tier-editor-title strong { font-size:11px; }
 .uh-pricing-tier-editor-title span { color:var(--dsw-alias-label-secondary); font-size:10px; }
-.uh-pricing-tier-edit-head, .uh-pricing-tier-edit-row { display:grid; grid-template-columns:minmax(132px,.85fr) repeat(4,minmax(108px,1fr)) 32px; gap:10px; align-items:center; min-width:690px; }
+.uh-pricing-tier-edit-head, .uh-pricing-tier-edit-row { display:grid; grid-template-columns:minmax(120px,.85fr) repeat(4,minmax(72px,1fr)) 30px; gap:10px; align-items:center; min-width:0; }
 .uh-pricing-tier-edit-head { margin:5px 0; color:var(--dsw-alias-label-secondary); font-size:10px; }
 .uh-pricing-tier-edit-row { margin-top:7px; }
 .uh-pricing-tier-edit-row.uh-invalid input { border-color:var(--dsw-alias-warning, #a55b00); }
 .uh-pricing-tier-empty { padding:5px 0; color:var(--dsw-alias-label-secondary); font-size:10px; }
 .uh-pricing-error { color:var(--dsw-alias-warning, #a55b00); font-size:12px; line-height:1.45; }
 .uh-pricing-foot { padding-top:4px; }
+
+.uh-pricing-table-note { color:var(--dsw-alias-label-secondary); font-size:11px; line-height:1.5; }
+.uh-pricing-price-table { width:100%; min-width:0; }
+.uh-pricing-price-table th:nth-child(1) { width:20%; }
+.uh-pricing-price-table th:nth-child(2) { width:24%; }
+.uh-pricing-price-table th:nth-child(3), .uh-pricing-price-table th:nth-child(4), .uh-pricing-price-table th:nth-child(5), .uh-pricing-price-table th:nth-child(6) { width:11%; }
+.uh-pricing-price-table th:nth-child(7) { width:12%; }
+.uh-pricing-table-wrap .uh-pricing-price-table th, .uh-pricing-table-wrap .uh-pricing-price-table td { text-align:left; }
+.uh-pricing-price-table th, .uh-pricing-price-table td { padding:8px 8px; }
+.uh-pricing-price-table td { vertical-align:top; }
+.uh-pricing-row-flags { display:flex; align-items:center; flex-wrap:wrap; gap:4px; margin-top:5px; }
+.uh-pricing-flag { padding:2px 6px; border-radius:999px; background:var(--dsw-alias-bg-layer-1); color:var(--dsw-alias-label-secondary); font-size:10px; white-space:nowrap; }
+.uh-pricing-configured-row { background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 42%, transparent); }
+.uh-pricing-rate-input { box-sizing:border-box; width:100%; min-width:0; min-height:30px; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; padding:4px 7px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; font-size:11px; font-variant-numeric:tabular-nums; outline:none; }
+.uh-pricing-rate-input:focus { border-color:var(--dsw-alias-brand-primary); }
+.uh-pricing-map-cell { display:flex; flex-direction:column; gap:6px; }
+.uh-pricing-map-sub { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.uh-pricing-map-field { display:inline-flex; align-items:center; gap:5px; color:var(--dsw-alias-label-secondary); font-size:10px; }
+.uh-pricing-map-field input, .uh-pricing-map-field select { box-sizing:border-box; min-height:26px; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; padding:2px 6px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; font-size:11px; outline:none; }
+.uh-pricing-map-field input { width:70px; }
+.uh-pricing-link { border:0; background:transparent; color:var(--dsw-alias-brand-primary); font:inherit; font-size:11px; cursor:pointer; padding:2px 0; text-decoration:underline; }
+.uh-pricing-link:disabled { color:var(--dsw-alias-label-secondary); cursor:default; text-decoration:none; }
+.uh-pricing-chip { min-height:28px; padding:3px 9px; border:1px solid var(--dsw-alias-border-l2); border-radius:999px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-secondary); font:inherit; font-size:10px; cursor:pointer; white-space:nowrap; }
+.uh-pricing-chip.uh-on, .uh-pricing-chip.uh-strong { border-color:var(--dsw-alias-brand-primary); color:var(--dsw-alias-label-primary); background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); }
+.uh-pricing-action-cell { white-space:nowrap; }
+.uh-pricing-row-actions { display:flex; align-items:center; flex-wrap:wrap; gap:5px; white-space:nowrap; }
+.uh-pricing-editor-row > td { padding:0 9px 10px; background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 36%, transparent); }
+.uh-pricing-editor { display:flex; flex-direction:column; gap:10px; min-width:0; overflow-x:auto; }
+.uh-pricing-editor-foot { display:flex; justify-content:flex-end; }
+.uh-pricing-temporal-fields { display:flex; align-items:flex-end; flex-wrap:wrap; gap:10px; margin-top:6px; }
+.uh-pricing-temporal-fields label { display:inline-flex; flex-direction:column; gap:4px; color:var(--dsw-alias-label-secondary); font-size:10px; }
+.uh-pricing-temporal-fields input { box-sizing:border-box; min-height:28px; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; padding:3px 7px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; font-size:11px; outline:none; }
+.uh-pricing-temporal-fields input:focus { border-color:var(--dsw-alias-brand-primary); }
+.uh-pricing-temporal-rule { margin-top:8px; padding:8px 10px; border:1px solid var(--dsw-alias-border-l1); border-radius:8px; background:var(--dsw-alias-bg-base); }
+.uh-pricing-temporal-rule-head { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.uh-pricing-temporal-rule-name { color:var(--dsw-alias-label-secondary); font-size:10px; font-variant-numeric:tabular-nums; }
+.uh-pricing-weekdays { display:inline-flex; gap:3px; }
+.uh-pricing-weekday { width:26px; height:26px; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-secondary); font:inherit; font-size:10px; cursor:pointer; }
+.uh-pricing-weekday.uh-on { border-color:var(--dsw-alias-brand-primary); color:var(--dsw-alias-label-primary); background:color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); }
+.uh-pricing-temporal-windows { display:flex; align-items:center; flex-wrap:wrap; gap:7px; margin-top:7px; }
+.uh-pricing-temporal-window { display:inline-flex; align-items:center; gap:5px; }
+.uh-pricing-time-input { box-sizing:border-box; width:66px; min-height:28px; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; padding:3px 6px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; font-size:11px; font-variant-numeric:tabular-nums; text-align:center; outline:none; }
+.uh-pricing-time-input:focus { border-color:var(--dsw-alias-brand-primary); }
+.uh-pricing-time-sep { color:var(--dsw-alias-label-secondary); }
+.uh-pricing-temporal-rates { display:flex; flex-wrap:wrap; gap:9px; margin-top:8px; }
+.uh-pricing-temporal-rate { display:inline-flex; align-items:center; gap:5px; color:var(--dsw-alias-label-secondary); font-size:10px; }
+.uh-pricing-temporal-rate input { box-sizing:border-box; width:86px; min-height:28px; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; padding:3px 7px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; font-size:11px; font-variant-numeric:tabular-nums; outline:none; }
+.uh-pricing-temporal-foot { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:8px; }
+.uh-pricing-temporal-holidays { display:flex; flex-direction:column; gap:6px; margin-top:8px; padding:8px 10px; border:1px solid var(--dsw-alias-border-l1); border-radius:8px; background:var(--dsw-alias-bg-base); }
+.uh-pricing-holiday-load { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.uh-pricing-holiday-load input[type='number'] { box-sizing:border-box; width:82px; min-height:28px; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; padding:3px 7px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; font-size:11px; outline:none; }
+.uh-pricing-holiday-input { box-sizing:border-box; width:100%; min-height:74px; resize:vertical; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; padding:6px 8px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; font-size:11px; font-variant-numeric:tabular-nums; outline:none; }
+.uh-pricing-holiday-input:focus { border-color:var(--dsw-alias-brand-primary); }
+.uh-pricing-warning { margin-top:7px; padding:7px 9px; border-radius:7px; border:1px solid color-mix(in srgb, var(--dsw-alias-warning, #d9822b) 40%, var(--dsw-alias-border-l1)); color:var(--dsw-alias-warning, #a55b00); font-size:11px; line-height:1.45; }
+@media (max-width:640px) {
+  .uh-pricing-table-wrap { overflow-x:auto; }
+  .uh-pricing-price-table { min-width:820px; }
+  .uh-pricing-map-cell { min-width:170px; }
+}
+
 .uh-cost-num { color:var(--dsw-alias-label-primary); }
 .uh-progress { font-size:12px; color:var(--dsw-alias-label-secondary); display:flex; align-items:center; gap:10px; }
 .uh-sync-health { margin-top:8px; padding:8px 12px; display:flex; align-items:center; flex-wrap:wrap; gap:6px; border:1px solid var(--dsw-alias-border-l1); border-radius:10px; color:var(--dsw-alias-label-secondary); background:var(--dsw-alias-bg-layer-1); font-size:11px; line-height:1.45; }
@@ -2042,6 +2708,16 @@ window.__ModuleLoader__.load({
       if (!r.ok) { const error = new Error('HTTP ' + r.status); error.status = r.status; throw error }
       return r.json()
     })
+    // Fetches one year of the Chinese holiday arrangement; nothing is stored
+    // until the user saves, which is what freezes the dates into the policy.
+    const loadHolidayCalendarRpc = (year, writeToken) => fetch('/api/all-usage/pricing/holidays', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-all-usage-request-token': writeToken },
+      body: JSON.stringify({ year, backfill: false }),
+    }).then((r) => r.json().catch(() => ({ ok: false, message: 'bad-response' })).then((data) => {
+      if (data !== null && typeof data === 'object') return data
+      return { ok: false, message: 'HTTP ' + r.status }
+    }))
 
     const LANGUAGE_STORAGE_KEY = 'dsh-all-usage.language'
     function storedLanguage() {
@@ -2119,12 +2795,18 @@ window.__ModuleLoader__.load({
       const [pricingSyncing, setPricingSyncing] = React.useState(false)
       const [pricingSyncSaving, setPricingSyncSaving] = React.useState(false)
       const [pricingError, setPricingError] = React.useState('')
+      // Search, preview and editor state is keyed by pricingRowKey (a stable
+      // string) instead of a row index: deleting or shifting rows can no longer
+      // misroute an in-flight search or an open editor.
       const [pricingModelSearchOptions, setPricingModelSearchOptions] = React.useState({})
+      const [pricingModelSearchText, setPricingModelSearchText] = React.useState({})
       const [pricingModelSearchOpen, setPricingModelSearchOpen] = React.useState(null)
-      const [pricingUsedModelSearchText, setPricingUsedModelSearchText] = React.useState({})
-      const [pricingUsedModelOpen, setPricingUsedModelOpen] = React.useState(null)
-      const [pricingOverrideSearchText, setPricingOverrideSearchText] = React.useState({})
-      const [pricingOverrideOpen, setPricingOverrideOpen] = React.useState(null)
+      const [pricingPickedTargets, setPricingPickedTargets] = React.useState({})
+      const [pricingOpenEditor, setPricingOpenEditor] = React.useState(null)
+      const [pricingTemporalDrafts, setPricingTemporalDrafts] = React.useState({})
+      const [pricingHolidayYear, setPricingHolidayYear] = React.useState(() => new Date().getFullYear())
+      const [pricingHolidayLoading, setPricingHolidayLoading] = React.useState(false)
+      const [pricingHolidayStatus, setPricingHolidayStatus] = React.useState('')
       const pricingModelSearchSeqRef = React.useRef({})
       const pricingSearchEpochRef = React.useRef(0)
       const pricingModelSearchTimerRef = React.useRef({})
@@ -2140,6 +2822,7 @@ window.__ModuleLoader__.load({
         pricingModelSearchTimerRef.current = {}
         pricingModelSearchSeqRef.current = {}
         setPricingModelSearchOptions({})
+        setPricingModelSearchText({})
       }
       const [languageMenuOpen, setLanguageMenuOpen] = React.useState(false)
       const languageMenuRef = React.useRef(null)
@@ -2548,23 +3231,16 @@ window.__ModuleLoader__.load({
       const st = React.useMemo(() => streaks(fullHistoryDayMap, useUtc), [fullHistoryDayMap, useUtc, latestCalendarDate])
       const pricingSummary = stats && stats.pricing && typeof stats.pricing === 'object' ? stats.pricing : {}
       const currentPricing = pricingDetails && typeof pricingDetails === 'object' ? pricingDetails : pricingSummary
-      const pricingUsedModels = React.useMemo(() => pricingOpen ? pricingUsedModelsOf(currentPricing) : [], [pricingOpen, currentPricing])
-      const pricingUsedModelOptions = React.useMemo(() => pricingUsedModels.slice().sort((left, right) => {
-        const rank = { unpriced: 0, ambiguous: 1, unsupported: 2, priced: 3 }
-        return (rank[left.status] === undefined ? 9 : rank[left.status]) - (rank[right.status] === undefined ? 9 : rank[right.status]) || String(left.model || '').localeCompare(String(right.model || ''))
-      }).map((model) => ({
-        value: String(model.identityKey || model.model || ''),
-        label: (model.model || (language === 'en' ? 'Unknown model' : '未知模型')) + ' · ' + pricingStatusLabel(model.status, language),
-        model: pricingModelKey(model.actualModel || model.requestedModel || model.pricingModel),
-        officialModel: pricingModelKey(model.pricingModel),
-      })).filter((option) => option.value !== ''), [pricingUsedModels, language])
+      // One editable row per ledger price route plus the rows that only exist in
+      // the saved configuration (they stay visible, editable and removable).
+      const pricingRows = React.useMemo(() => pricingOpen ? pricingRowsOf(currentPricing, pricingDraft, pricingPickedTargets) : [], [pricingOpen, currentPricing, pricingDraft, pricingPickedTargets])
       const trendRows = React.useMemo(() => {
         const bounds = queryScope !== null ? { start: queryScope.start, end: queryScope.end } : resolveRangeBounds(stats, range, useUtc, activeCustomRange)
         const hourlyRows = queryUsable && queryScope !== null && queryScope.start === queryScope.end && queryResult && Array.isArray(queryResult.hourly) ? buildTrendHourlyRows(queryResult.hourly, useUtc) : []
         return hourlyRows.length > 0 ? hourlyRows : buildTrendRows(queryUsable && queryResult && Array.isArray(queryResult.daily) ? queryResult.daily : activeDayRows, bounds, useUtc)
       }, [queryScope, queryUsable, queryResult, activeDayRows, stats, range, useUtc, activeCustomRangeKey])
       const trendAnimationKey = queryUsable && queryResult ? queryKey + ':' + (queryVersion(queryResult) || 'query') : queryKey
-      const pricingRenderRevision = React.useMemo(() => ({}), [pricingOpen, pricingDraft, pricingLoading, pricingSaving, pricingSyncing, pricingSyncSaving, pricingError, currentPricing, pricingSummary, pricingUsedModels, pricingUsedModelOptions, pricingUsedModelOpen, pricingOverrideOpen, pricingUsedModelSearchText, pricingOverrideSearchText, pricingModelSearchOpen, pricingModelSearchOptions, stats, language])
+      const pricingRenderRevision = React.useMemo(() => ({}), [pricingOpen, pricingDraft, pricingLoading, pricingSaving, pricingSyncing, pricingSyncSaving, pricingError, currentPricing, pricingSummary, pricingRows, pricingOpenEditor, pricingTemporalDrafts, pricingModelSearchText, pricingModelSearchOpen, pricingModelSearchOptions, stats, language])
       const modelDonutItems = React.useMemo(() => modelRows.map((row, index) => ({ label: row.model, value: wsTotal(row), cost: row.cost, color: DONUT_COLORS[index % DONUT_COLORS.length], iconKey: modelView === 'route' ? (() => { const icon = resolveModelIcon(row); return icon === null ? null : icon.key })() : (row.iconKey === undefined ? null : row.iconKey) })), [modelRows, modelView])
       const workspaceDonutItems = React.useMemo(() => rows.map((row, index) => ({ label: wsTitle(row.workspaceId), value: wsTotal(row), cost: row.cost, color: DONUT_COLORS[index % DONUT_COLORS.length] })), [rows, wsTitle])
       const toggleTrendSeries = React.useCallback((key) => {
@@ -2621,6 +3297,16 @@ window.__ModuleLoader__.load({
         }
         setAliasOpen(false)
       }
+      // ---------- cost settings: one editable price table ----------
+      const resetPricingTransients = () => {
+        setPricingModelSearchOptions({})
+        setPricingModelSearchText({})
+        setPricingModelSearchOpen(null)
+        setPricingPickedTargets({})
+        setPricingOpenEditor(null)
+        setPricingTemporalDrafts({})
+        setPricingHolidayStatus('')
+      }
       const closePricingPanel = () => {
         if (pricingSaving || pricingSyncing || pricingSyncSaving) return
         // In-flight official-model searches must not reach a reopened panel.
@@ -2629,17 +3315,15 @@ window.__ModuleLoader__.load({
         setPricingLoading(false)
         setPricingOpen(false)
         pricingOpenRef.current = false
+        resetPricingTransients()
+        setPricingError('')
       }
       const openPricingPanel = () => {
         const seq = pricingGate.next()
         setPricingDetails(null)
         setPricingDraft(null)
         setPricingLoading(true)
-        setPricingUsedModelSearchText({})
-        setPricingOverrideSearchText({})
-        setPricingUsedModelOpen(null)
-        setPricingOverrideOpen(null)
-        setPricingModelSearchOpen(null)
+        resetPricingTransients()
         invalidatePricingSearches()
         setPricingError('')
         setPricingOpen(true)
@@ -2663,8 +3347,9 @@ window.__ModuleLoader__.load({
       }
       const savePricingSettings = (backfill) => {
         if (pricingDraft === null || pricingSaving || pricingSyncing || pricingSyncSaving) return
-        const validationError = pricingDraftValidationError(pricingDraft)
+        const validationError = pricingDraftValidationError(pricingDraft, pricingTemporalDrafts)
         if (validationError !== '') { setPricingError(validationError); return }
+        if (pricingDraftPayloadTooLarge(pricingDraft)) { setPricingError('too-large'); return }
         const requestToken = typeof stats.requestToken === 'string' ? stats.requestToken : ''
         if (requestToken === '') { setPricingError('token'); return }
         const seq = pricingGate.next()
@@ -2676,10 +3361,7 @@ window.__ModuleLoader__.load({
           setStats((prev) => prev === null ? prev : Object.assign({}, prev, { pricing: data.pricing }))
           setPricingDetails(data.pricing)
           setPricingDraft(pricingDraftOf(data.pricing))
-          setPricingUsedModelSearchText({})
-          setPricingOverrideSearchText({})
-          setPricingUsedModelOpen(null)
-          setPricingOverrideOpen(null)
+          resetPricingTransients()
           closePricingPanel()
           refreshRef.current()
         }, (reason) => { if (pricingGate.isCurrent(seq)) setPricingError(reason && reason.status === 403 ? 'forbidden' : 'save') }).finally(() => setPricingSaving(false))
@@ -2698,10 +3380,11 @@ window.__ModuleLoader__.load({
           setStats((prev) => prev === null ? prev : Object.assign({}, prev, { pricing: data.pricing }))
           setPricingDetails(data.pricing)
           setPricingDraft((prev) => pricingDraftAfterSync(prev, data.pricing))
-          setPricingUsedModelSearchText({})
-          setPricingOverrideSearchText({})
-          setPricingUsedModelOpen(null)
-          setPricingOverrideOpen(null)
+          setPricingModelSearchOptions({})
+          setPricingModelSearchText({})
+          setPricingModelSearchOpen(null)
+          setPricingPickedTargets({})
+          setPricingTemporalDrafts({})
           refreshRef.current()
         }, (reason) => { setPricingError(reason && reason.status === 403 ? 'forbidden' : 'sync') }).finally(() => setPricingSyncing(false))
       }
@@ -2734,203 +3417,163 @@ window.__ModuleLoader__.load({
           persistUsageUiState({ pricingAutoSync: savedEnabled })
         }, (reason) => rollback(reason && reason.status === 403 ? 'forbidden' : 'save')).finally(() => setPricingSyncSaving(false))
       }
-      const updatePricingMapping = (index, field, value) => {
-        setPricingDraft((prev) => {
-          if (prev === null || !Array.isArray(prev.mappings) || !prev.mappings[index]) return prev
-          const mappings = prev.mappings.slice()
-          mappings[index] = Object.assign({}, mappings[index], { [field]: value })
-          return Object.assign({}, prev, { mappings })
-        })
+      const updateRowRate = (view, field, value) => {
+        setPricingDraft((prev) => prev === null ? prev : pricingDraftSetRate(prev, view, field, value))
+        setPricingError('')
       }
-      const selectPricingUsedModel = (index, value) => {
-        const selected = pricingUsedModels.find((model) => String(model.identityKey || model.model || '') === String(value))
-        if (!selected) return
-        const modelAlias = selected.actualModel || selected.requestedModel || selected.pricingModel || ''
-        const officialModel = selected.status === 'priced' ? (selected.pricingModel || '') : ''
-        setPricingDraft((prev) => {
-          if (prev === null || !Array.isArray(prev.mappings) || !prev.mappings[index]) return prev
-          const mappings = prev.mappings.slice()
-          mappings[index] = Object.assign({}, mappings[index], { identityKey: value, model: modelAlias, catalogModelId: officialModel, catalogProviderId: selected.providerId || '' })
-          return Object.assign({}, prev, { mappings })
-        })
-        setPricingUsedModelSearchText((prev) => Object.assign({}, prev, { [index]: selected.model || modelAlias }))
-        setPricingUsedModelOpen(null)
-        setPricingModelSearchOpen(null)
+      const updateRowMappingField = (view, field, value) => {
+        setPricingDraft((prev) => prev === null ? prev : pricingDraftSetMappingField(prev, view, field, value))
+        setPricingError('')
       }
-      const searchUsedModels = (index, value) => {
-        setPricingUsedModelSearchText((prev) => Object.assign({}, prev, { [index]: value }))
-        setPricingUsedModelOpen(index)
-        setPricingDraft((prev) => {
-          if (prev === null || !Array.isArray(prev.mappings) || !prev.mappings[index]) return prev
-          const mappings = prev.mappings.slice()
-          mappings[index] = Object.assign({}, mappings[index], { identityKey: '', model: '', catalogModelId: '', catalogProviderId: '' })
-          return Object.assign({}, prev, { mappings })
-        })
-      }
-      const shiftIndexedMap = (map, removedIndex) => {
-        const next = {}
-        for (const key of Object.keys(map)) {
-          const index = Number(key)
-          if (!Number.isInteger(index) || index < 0 || index === removedIndex) continue
-          next[String(index > removedIndex ? index - 1 : index)] = map[key]
+      const chooseRowTarget = (view, option) => {
+        if (!option || typeof option.value !== 'string') return
+        const pendingTimer = pricingModelSearchTimerRef.current[view.key]
+        if (pendingTimer !== undefined) {
+          clearTimeout(pendingTimer)
+          delete pricingModelSearchTimerRef.current[view.key]
         }
-        return next
+        pricingModelSearchSeqRef.current[view.key] = (pricingModelSearchSeqRef.current[view.key] || 0) + 1
+        setPricingDraft((prev) => prev === null ? prev : pricingDraftSetMapping(prev, view, option))
+        // The picked entry's rates drive the row preview until the save returns
+        // the authoritative resolution from the host.
+        setPricingPickedTargets((prev) => Object.assign({}, prev, { [view.key]: option }))
+        setPricingModelSearchText((prev) => Object.assign({}, prev, { [view.key]: option.label || option.value }))
+        setPricingModelSearchOpen(null)
+        setPricingError('')
       }
-      const searchOfficialModels = (index, value) => {
+      const clearRowMapping = (view) => {
+        setPricingDraft((prev) => prev === null ? prev : pricingDraftWithoutMapping(prev, view.identityKey))
+        setPricingPickedTargets((prev) => { const next = Object.assign({}, prev); delete next[view.key]; return next })
+        setPricingModelSearchText((prev) => { const next = Object.assign({}, prev); delete next[view.key]; return next })
+        setPricingError('')
+      }
+      const resetRowOverride = (view) => {
+        setPricingDraft((prev) => prev === null ? prev : pricingDraftWithoutOverride(prev, view.basis))
+        setPricingTemporalDrafts((prev) => { const next = Object.assign({}, prev); delete next[view.key]; return next })
+        setPricingError('')
+      }
+      const searchRowTargets = (view, value) => {
+        const key = view.key
         const searchEpoch = pricingSearchEpochRef.current
-        updatePricingMapping(index, 'catalogModelId', value)
-        setPricingModelSearchOpen(index)
-        const previousTimer = pricingModelSearchTimerRef.current[index]
+        setPricingModelSearchText((prev) => Object.assign({}, prev, { [key]: value }))
+        setPricingModelSearchOpen(key)
+        const previousTimer = pricingModelSearchTimerRef.current[key]
         if (previousTimer !== undefined) {
           clearTimeout(previousTimer)
-          delete pricingModelSearchTimerRef.current[index]
+          delete pricingModelSearchTimerRef.current[key]
         }
-        const nextSeq = (pricingModelSearchSeqRef.current[index] || 0) + 1
-        pricingModelSearchSeqRef.current[index] = nextSeq
+        const nextSeq = (pricingModelSearchSeqRef.current[key] || 0) + 1
+        pricingModelSearchSeqRef.current[key] = nextSeq
         if (String(value || '').trim() === '') {
-          setPricingModelSearchOptions((prev) => Object.assign({}, prev, { [index]: [] }))
+          setPricingModelSearchOptions((prev) => Object.assign({}, prev, { [key]: [] }))
           return
         }
         const timerId = setTimeout(() => {
-          delete pricingModelSearchTimerRef.current[index]
+          delete pricingModelSearchTimerRef.current[key]
           getPricingModels(value).then((data) => {
-            // A deleted mapping can shift every later row, so an in-flight response
-            // must also prove the row-generation it was issued under is still the
-            // current one; the per-index seq alone can collide after a shift.
+            // The catalog can be replaced by a sync while a search is in flight;
+            // the epoch plus the per-row sequence keeps stale answers out.
             if (pricingSearchEpochRef.current !== searchEpoch) return
-            if (pricingModelSearchSeqRef.current[index] !== nextSeq) return
-            setPricingModelSearchOptions((prev) => Object.assign({}, prev, { [index]: Array.isArray(data && data.items) ? data.items : [] }))
+            if (pricingModelSearchSeqRef.current[key] !== nextSeq) return
+            setPricingModelSearchOptions((prev) => Object.assign({}, prev, { [key]: Array.isArray(data && data.items) ? data.items : [] }))
           }, () => {
             if (pricingSearchEpochRef.current !== searchEpoch) return
-            if (pricingModelSearchSeqRef.current[index] === nextSeq) setPricingModelSearchOptions((prev) => Object.assign({}, prev, { [index]: [] }))
+            if (pricingModelSearchSeqRef.current[key] === nextSeq) setPricingModelSearchOptions((prev) => Object.assign({}, prev, { [key]: [] }))
           })
         }, 180)
-        pricingModelSearchTimerRef.current[index] = timerId
+        pricingModelSearchTimerRef.current[key] = timerId
       }
-      const chooseOfficialModel = (index, option) => {
-        if (!option || typeof option.value !== 'string') return
-        const pendingTimer = pricingModelSearchTimerRef.current[index]
-        if (pendingTimer !== undefined) {
-          clearTimeout(pendingTimer)
-          delete pricingModelSearchTimerRef.current[index]
+      const addRowTier = (view) => {
+        const tiers = pricingTierDraftAdd(view.tiers, view.rates)
+        setPricingDraft((prev) => prev === null ? prev : pricingDraftUpsertOverride(prev, view, { tiered: tiers.length > 0, tiers }))
+        setPricingError('')
+      }
+      const updateRowTier = (view, index, field, value) => {
+        const tiers = pricingTierDraftUpdate(view.tiers, index, field, value)
+        setPricingDraft((prev) => prev === null ? prev : pricingDraftUpsertOverride(prev, view, { tiered: tiers.length > 0, tiers }))
+        setPricingError('')
+      }
+      const removeRowTier = (view, index) => {
+        const tiers = pricingTierDraftRemove(view.tiers, index)
+        setPricingDraft((prev) => prev === null ? prev : pricingDraftUpsertOverride(prev, view, { tiered: tiers.length > 0, tiers }))
+        setPricingError('')
+      }
+      const applyTemporalDraft = (view, next) => {
+        setPricingTemporalDrafts((prev) => Object.assign({}, prev, { [view.key]: next }))
+        // Only a complete, valid plan is written into the draft: a half-typed
+        // time or rate stays local until it parses, and the save validation
+        // still sees the loose draft and refuses to drop the edit silently.
+        if (pricingTemporalDraftValidationError(next) === '') {
+          setPricingDraft((prev) => prev === null ? prev : pricingDraftUpsertOverride(prev, view, { temporalPricing: pricingTemporalPlanFromDraft(next), temporalPricingInvalid: undefined }))
         }
-        pricingModelSearchSeqRef.current[index] = (pricingModelSearchSeqRef.current[index] || 0) + 1
-        setPricingDraft((prev) => {
-          if (prev === null || !Array.isArray(prev.mappings) || !prev.mappings[index]) return prev
-          const mappings = prev.mappings.slice()
-          mappings[index] = Object.assign({}, mappings[index], { catalogModelId: option.value, catalogProviderId: option.providerId || '' })
-          return Object.assign({}, prev, { mappings })
-        })
-        setPricingModelSearchOpen(null)
-      }
-      const addPricingMapping = () => {
-        setPricingDraft((prev) => prev === null ? prev : Object.assign({}, prev, { mappings: prev.mappings.concat([{ identityKey: '', model: '', catalogProviderId: '', catalogModelId: '', inputTokenSemantics: 'fresh', multiplier: '1' }]) }))
-      }
-      const removePricingMapping = (index) => {
-        // Deleting a mapping shifts every later row: cancel pending searches,
-        // move their async state down, and invalidate every in-flight response
-        // with a row-generation bump so a stale response can never populate a
-        // shifted row (the per-index sequence alone can collide after the shift).
-        pricingSearchEpochRef.current += 1
-        const timers = pricingModelSearchTimerRef.current
-        for (const key of Object.keys(timers)) clearTimeout(timers[key])
-        pricingModelSearchTimerRef.current = shiftIndexedMap(timers, index)
-        pricingModelSearchSeqRef.current = shiftIndexedMap(pricingModelSearchSeqRef.current, index)
-        setPricingModelSearchOptions((prev) => shiftIndexedMap(prev, index))
-        setPricingUsedModelSearchText((prev) => shiftIndexedMap(prev, index))
-        setPricingOverrideSearchText((prev) => shiftIndexedMap(prev, index))
-        const shiftOpen = (current) => current === null || current === undefined ? current : current === index ? null : (Number.isInteger(current) && current > index ? current - 1 : current)
-        setPricingModelSearchOpen((current) => shiftOpen(current))
-        setPricingUsedModelOpen((current) => shiftOpen(current))
-        setPricingOverrideOpen((current) => shiftOpen(current))
-        setPricingDraft((prev) => prev === null ? prev : Object.assign({}, prev, { mappings: prev.mappings.filter((_, itemIndex) => itemIndex !== index) }))
-      }
-      const updatePricingOverride = (index, field, value) => {
-        setPricingDraft((prev) => {
-          if (prev === null || !Array.isArray(prev.overrides) || !prev.overrides[index]) return prev
-          const overrides = prev.overrides.slice()
-          overrides[index] = Object.assign({}, overrides[index], { [field]: value })
-          return Object.assign({}, prev, { overrides })
-        })
-      }
-      const addPricingOverrideTier = (index) => {
-        setPricingDraft((prev) => {
-          if (prev === null || !Array.isArray(prev.overrides) || !prev.overrides[index]) return prev
-          const overrides = prev.overrides.slice()
-          const entry = Object.assign({}, overrides[index])
-          const tiers = Array.isArray(entry.tiers) ? entry.tiers.map((tier) => Object.assign({}, tier)) : []
-          if (tiers.length >= 32) return prev
-          const previous = tiers.length > 0 ? tiers[tiers.length - 1] : null
-          const previousSize = previous && Number.isFinite(Number(previous.size)) ? Number(previous.size) : 100000
-          const source = previous || entry
-          tiers.push({
-            type: 'context',
-            size: Math.min(1000000000, previousSize + 100000),
-            input: source.input === undefined ? '' : source.input,
-            output: source.output === undefined ? '' : source.output,
-            cacheRead: source.cacheRead === undefined ? '' : source.cacheRead,
-            cacheWrite: source.cacheWrite === undefined ? '' : source.cacheWrite,
-          })
-          overrides[index] = Object.assign({}, entry, { tiered: true, tiers })
-          return Object.assign({}, prev, { overrides })
-        })
         setPricingError('')
       }
-      const updatePricingOverrideTier = (overrideIndex, tierIndex, field, value) => {
-        setPricingDraft((prev) => {
-          if (prev === null || !Array.isArray(prev.overrides) || !prev.overrides[overrideIndex]) return prev
-          const overrides = prev.overrides.slice()
-          const entry = Object.assign({}, overrides[overrideIndex])
-          const tiers = Array.isArray(entry.tiers) ? entry.tiers.map((tier) => Object.assign({}, tier)) : []
-          if (!tiers[tierIndex]) return prev
-          tiers[tierIndex] = Object.assign({}, tiers[tierIndex], { [field]: value })
-          overrides[overrideIndex] = Object.assign({}, entry, { tiered: tiers.length > 0, tiers })
-          return Object.assign({}, prev, { overrides })
-        })
+      const startTemporalRules = (view) => {
+        const draft = pricingTemporalDraftOfPlan(view.temporalPlan) || pricingTemporalDraftDefault(view.rates)
+        applyTemporalDraft(view, draft)
+      }
+      const resetTemporalPlan = (view) => {
+        setPricingTemporalDrafts((prev) => { const next = Object.assign({}, prev); delete next[view.key]; return next })
+        if (view.overrideIndex < 0) return
+        // Removing the explicit plan re-attaches the built-in DeepSeek table
+        // (or leaves the row on static pricing) without dropping the manual price.
+        setPricingDraft((prev) => prev === null ? prev : pricingDraftUpsertOverride(prev, view, { temporalPricing: undefined, temporalPricingInvalid: undefined }))
         setPricingError('')
       }
-      const removePricingOverrideTier = (overrideIndex, tierIndex) => {
-        setPricingDraft((prev) => {
-          if (prev === null || !Array.isArray(prev.overrides) || !prev.overrides[overrideIndex]) return prev
-          const overrides = prev.overrides.slice()
-          const entry = Object.assign({}, overrides[overrideIndex])
-          const tiers = (Array.isArray(entry.tiers) ? entry.tiers : []).filter((_, index) => index !== tierIndex).map((tier) => Object.assign({}, tier))
-          overrides[overrideIndex] = Object.assign({}, entry, { tiered: tiers.length > 0, tiers })
-          return Object.assign({}, prev, { overrides })
-        })
-        setPricingError('')
-      }
-      const selectPricingOverrideModel = (index, value) => {
-        const selected = pricingUsedModels.find((model) => String(model.identityKey || model.model || '') === String(value))
-        if (!selected) return
-        const modelId = selected.pricingModel || selected.actualModel || selected.requestedModel || ''
-        setPricingDraft((prev) => {
-          if (prev === null || !Array.isArray(prev.overrides) || !prev.overrides[index]) return prev
-          const overrides = prev.overrides.slice()
-          const patch = { modelId }
-          if (selected.status === 'priced' && selected.rates) {
-            Object.assign(patch, selected.rates)
-            patch.tiers = Array.isArray(selected.tiers) ? selected.tiers.map((tier) => Object.assign({}, tier)) : []
-            patch.tiered = patch.tiers.length > 0
+      const loadRowHolidays = (view) => {
+        if (pricingHolidayLoading === true) return
+        const requestToken = typeof stats.requestToken === 'string' ? stats.requestToken : ''
+        if (requestToken === '') {
+          setPricingHolidayStatus(tr('当前进程令牌不可用，请刷新看板', 'The process capability is unavailable; refresh the dashboard'))
+          return
+        }
+        const year = Number(pricingHolidayYear)
+        if (!Number.isSafeInteger(year) || year < 2000 || year > 2100) {
+          setPricingHolidayStatus(tr('年份无效（2000–2100）', 'Invalid year (2000-2100)'))
+          return
+        }
+        setPricingHolidayLoading(true)
+        setPricingHolidayStatus('')
+        loadHolidayCalendarRpc(year, requestToken).then((data) => {
+          if (data === null || typeof data !== 'object' || data.ok !== true || !Array.isArray(data.dates)) {
+            const reason = data && typeof data === 'object' && typeof data.message === 'string' && data.message !== '' ? data.message : 'unavailable'
+            setPricingHolidayStatus(tr('抓取失败：', 'Fetch failed: ') + reason)
+            return
           }
-          overrides[index] = Object.assign({}, overrides[index], patch)
-          return Object.assign({}, prev, { overrides })
-        })
-        setPricingOverrideSearchText((prev) => Object.assign({}, prev, { [index]: modelId }))
-        setPricingOverrideOpen(null)
+          const draft = pricingTemporalDrafts[view.key] !== undefined
+            ? pricingTemporalDrafts[view.key]
+            : (pricingTemporalDraftOfPlan(view.temporalPlan) || pricingTemporalDraftDefault(view.rates))
+          const merged = pricingHolidayTextMerge(draft.holidaysText, data.dates)
+          const fetchedAt = Number(data.fetchedAt)
+          const origin = typeof data.paperUrl === 'string' && data.paperUrl !== '' ? data.paperUrl : String(data.sourceUrl || '')
+          const stamp = Number.isFinite(fetchedAt) && fetchedAt > 0 ? new Date(fetchedAt).toISOString().slice(0, 16).replace('T', ' ') : ''
+          const next = Object.assign(pricingTemporalDraftClone(draft), {
+            holidaysEnabled: true,
+            holidaysText: merged,
+            holidaysSourceText: (origin + (stamp === '' ? '' : ' · ' + stamp) + (data.cached === true ? ' · cached' : '')).slice(0, 512),
+          })
+          setPricingHolidayStatus(tr('已载入 ', 'Loaded ') + data.dates.length + tr(' 天', ' days') + (data.cached === true ? tr('（缓存）', ' (cached)') : ''))
+          // applyTemporalDraft freezes the merged list into the plan draft; the
+          // actual freeze happens when the user saves the panel.
+          applyTemporalDraft(view, next)
+        }, () => {
+          setPricingHolidayStatus(tr('抓取失败：网络不可用', 'Fetch failed: network unavailable'))
+        }).finally(() => setPricingHolidayLoading(false))
       }
-      const searchPricingOverrideModels = (index, value) => {
-        setPricingOverrideSearchText((prev) => Object.assign({}, prev, { [index]: value }))
-        setPricingOverrideOpen(index)
-        updatePricingOverride(index, 'modelId', value)
-      }
-      const addPricingOverride = () => {
-        setPricingDraft((prev) => prev === null ? prev : Object.assign({}, prev, { overrides: prev.overrides.concat([{ providerId: '', modelId: '', displayName: '', input: '', output: '', cacheRead: '', cacheWrite: '', tiered: false, tiers: [] }]) }))
+      const toggleRowEditor = (view, section) => {
+        const key = view.key + '|' + section
+        setPricingOpenEditor((current) => current === key ? null : key)
+        if (section === 'temporal') {
+          setPricingTemporalDrafts((prev) => {
+            if (prev[view.key] !== undefined) return prev
+            const draft = pricingTemporalDraftOfPlan(view.temporalPlan)
+            return draft === null ? prev : Object.assign({}, prev, { [view.key]: draft })
+          })
+        }
         setPricingError('')
       }
-      const removePricingOverride = (index) => {
-        setPricingDraft((prev) => prev === null ? prev : Object.assign({}, prev, { overrides: prev.overrides.filter((_, itemIndex) => itemIndex !== index) }))
-      }
+      const closeRowEditor = () => setPricingOpenEditor(null)
+
 
       const totalTokens = agg.totals.input + agg.totals.output + agg.totals.cacheRead + agg.totals.cacheWrite + agg.totals.reasoning
       const cacheRate = rateOf(agg.totals.input, agg.totals.cacheRead)
@@ -3151,198 +3794,337 @@ window.__ModuleLoader__.load({
 
 
       const pricingSync = currentPricing.sync && typeof currentPricing.sync === 'object' ? currentPricing.sync : {}
+      const pricingBusy = pricingSaving || pricingSyncing || pricingSyncSaving
+      const pricingWeekdayLabels = language === 'en' ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] : ['日', '一', '二', '三', '四', '五', '六']
+      const pricingConfiguredCount = pricingRows.filter((view) => view.usageBacked !== true).length
+      const pricingErrorMessage = (code) => code === 'forbidden'
+        ? tr('没有权限保存成本设置', 'Not allowed to save cost settings')
+        : code === 'token'
+          ? tr('当前进程令牌不可用，请刷新看板', 'The process capability is unavailable; refresh the dashboard')
+          : code === 'load'
+            ? tr('完整费率设置加载失败', 'Full pricing settings could not be loaded')
+            : code === 'sync'
+              ? tr('models.dev 同步失败，已保留上次成功目录和未保存编辑', 'models.dev sync failed; the last good catalog and unsaved edits were kept')
+              : code === 'mapping'
+                ? tr('模型映射无效：请选择官方模型并填写有效倍率', 'Invalid mapping: pick an official model and enter a valid multiplier')
+                : code === 'tier'
+                  ? tr('费率档位无效：最多 32 档；阈值必须为递增的正整数，四项费率必须完整且非负', 'Invalid rate bands: maximum 32; thresholds must be increasing positive integers and all four rates must be complete and non-negative')
+                  : code === 'temporal'
+                    ? tr('分时计费无效：需要策略 ID，每规则至少一个周几与一个时段，时间格式 HH:MM 且结束大于开始，同周几的时段不得重叠，四项费率必须完整', 'Invalid time-of-day rules: a policy ID, at least one weekday and window per rule, HH:MM times with the end after the start, no overlapping windows on the same weekday, and all four rates filled in')
+                    : code === 'override'
+                      ? tr('价格无效：请填写完整的非负基础费率', 'Invalid price: enter all non-negative base rates')
+                      : code === 'too-large'
+                        ? tr('成本设置过大，无法保存：请精简档位或时段规则', 'The cost settings are too large to save: trim bands or peak rules')
+                        : tr('成本设置保存失败，请检查输入', 'Cost settings could not be saved; check the inputs')
+      const pricingSourceLabel = (view) => {
+        if (view.temporalConfigInvalid === true) return tr('时段配置异常', 'Peak plan invalid')
+        if (view.tieredInvalid === true) return tr('档位异常', 'Bands invalid')
+        if (view.source === 'manual') return tr('手工价', 'Manual')
+        if (view.temporalExplicit === true) return tr('自定义峰谷', 'Custom peak')
+        if (view.temporalBuiltin === true) return tr('内置峰谷', 'Built-in peak')
+        if (view.status === 'priced') return tr('目录价', 'Catalog')
+        return pricingStatusLabel(view.status, language)
+      }
+      const pricingTemporalChipLabel = (view) => {
+        if (view.temporalConfigInvalid === true) return tr('时段异常', 'Peak invalid')
+        if (view.temporalRulesUnavailable === true) return tr('峰谷计划 ', 'peak plan ') + view.temporalPolicyId
+        const planLabel = view.temporalExplicit === true
+          ? (view.temporalRuleCount > 0 ? tr('自定义 ', 'custom ') + view.temporalRuleCount + tr(' 条规则', ' rules') : tr('自定义规则', 'custom rules'))
+          : view.temporalBuiltin === true ? tr('内置 DeepSeek 峰谷表', 'built-in DeepSeek peak table') : null
+        if (planLabel === null) return tr('未启用', 'not enabled')
+        // A reseller route is priced statically: the peak plan (and its holiday
+        // list) only applies to first-party routes, or after the row is mapped to
+        // the official entry — the same distinction the old rate-band badge made.
+        if (view.temporalRoute !== 'official' && view.temporalRoute !== 'mapped') {
+          return planLabel + tr('（该行非官方直连，暂按静态价；映射到官方条目后生效）', ' (reseller route: static pricing until this row is mapped to the official entry)')
+        }
+        return planLabel
+      }
+      const pricingRateInput = (view, field) => React.createElement('input', {
+        type: 'number',
+        min: '0',
+        step: 'any',
+        className: 'uh-pricing-rate-input',
+        'aria-label': pricingRateLabel(field, language) + ' · ' + (view.model || view.pricingModel || ''),
+        title: tr('价格单位为 USD / 1M Token', 'Price per 1M tokens in USD'),
+        value: view.rates !== null && view.rates[field] !== undefined ? view.rates[field] : '',
+        disabled: pricingBusy,
+        onChange: (event) => updateRowRate(view, field, event.target.value),
+      })
+      const pricingRateCell = (view, field) => React.createElement('td', { className: 'uh-pricing-rate-cell' }, pricingRateInput(view, field))
+      const renderTierEditor = (view) => {
+        const tiers = view.tiers
+        let previousTierSize = 0
+        const rows = tiers.map((tier, tierIndex) => {
+          const valid = pricingTierDraftValid(tier, previousTierSize)
+          const numericSize = Number(tier !== null && tier !== undefined && tier.size !== undefined ? tier.size : NaN)
+          if (Number.isSafeInteger(numericSize)) previousTierSize = numericSize
+          return React.createElement('div', { key: tierIndex, className: 'uh-pricing-tier-edit-row' + (valid ? '' : ' uh-invalid') },
+            React.createElement('input', { type: 'number', min: '1', max: '1000000000', step: '1', placeholder: tr('阈值 Token', 'Token threshold'), title: tr('本档覆盖范围：', 'This band covers ') + pricingTierBandLabel(tiers, tierIndex, language), 'aria-label': tr('上下文阈值 Token', 'Context threshold tokens'), value: tier === null || tier === undefined || tier.size === undefined ? '' : tier.size, disabled: pricingBusy, onChange: (event) => updateRowTier(view, tierIndex, 'size', event.target.value) }),
+            ['input', 'output', 'cacheRead', 'cacheWrite'].map((key) => React.createElement('input', { key, type: 'number', min: '0', step: 'any', placeholder: pricingRateLabel(key, language), 'aria-label': tr('档位', 'Band') + ' ' + pricingRateLabel(key, language), value: tier === null || tier === undefined || tier[key] === undefined ? '' : tier[key], disabled: pricingBusy, onChange: (event) => updateRowTier(view, tierIndex, key, event.target.value) })),
+            React.createElement('button', { type: 'button', className: 'uh-refresh uh-icon-button', title: tr('删除费率档位', 'Remove rate band'), 'aria-label': tr('删除费率档位', 'Remove rate band'), disabled: pricingBusy, onClick: () => removeRowTier(view, tierIndex) }, React.createElement(LineIcon, { name: 'close', size: 14 })),
+          )
+        })
+        return React.createElement('div', { className: 'uh-pricing-tier-editor' },
+          React.createElement('div', { className: 'uh-pricing-tier-editor-head' },
+            React.createElement('div', { className: 'uh-pricing-tier-editor-title' },
+              React.createElement('strong', {}, tr('上下文费率档位', 'Context rate bands')),
+              React.createElement('span', {}, tr('输入上下文超过阈值后，整次请求使用该档四项费率', 'Above a threshold, all four rates apply to the whole request')),
+            ),
+            React.createElement('button', { type: 'button', className: 'uh-refresh', disabled: pricingBusy || tiers.length >= 32, title: tiers.length >= 32 ? tr('每个模型最多 32 个档位', 'Maximum 32 bands per model') : tr('添加上下文费率档位', 'Add context rate band'), onClick: () => addRowTier(view) }, React.createElement(LineIcon, { name: 'plus', size: 13 }), tr('添加档位', 'Add band')),
+          ),
+          tiers.length === 0
+            ? React.createElement('div', { className: 'uh-pricing-tier-empty' }, tr('未配置档位，所有上下文使用基础费率。', 'No bands configured; base rates apply to every context.'))
+            : React.createElement(React.Fragment, null,
+              React.createElement('div', { className: 'uh-pricing-tier-edit-head' },
+                React.createElement('span', {}, tr('超过 Token', 'Above tokens')),
+                React.createElement('span', {}, tr('输入 / 1M', 'Input / 1M')),
+                React.createElement('span', {}, tr('输出 / 1M', 'Output / 1M')),
+                React.createElement('span', {}, tr('缓存读 / 1M', 'Cache read / 1M')),
+                React.createElement('span', {}, tr('缓存写 / 1M', 'Cache write / 1M')),
+                React.createElement('span', {}, ''),
+              ),
+              rows,
+            ),
+        )
+      }
+      const renderTemporalEditor = (view) => {
+        const draft = pricingTemporalDrafts[view.key] !== undefined ? pricingTemporalDrafts[view.key] : pricingTemporalDraftOfPlan(view.temporalPlan)
+        const issue = draft === null || draft === undefined ? '' : pricingTemporalDraftValidationError(draft)
+        const header = React.createElement('div', { className: 'uh-pricing-tier-editor-head' },
+          React.createElement('div', { className: 'uh-pricing-tier-editor-title' },
+            React.createElement('strong', {}, tr('分时段计费（UTC）', 'Time-of-day pricing (UTC)')),
+            React.createElement('span', {}, view.temporalExplicit === true ? tr('自定义规则', 'Custom rules') : view.temporalRulesUnavailable === true ? tr('峰谷计划 ', 'Peak plan ') + view.temporalPolicyId : view.temporalBuiltin === true ? tr('当前使用内置 DeepSeek 峰谷表', 'Using the built-in DeepSeek peak table') : tr('未启用时段规则', 'No time-of-day rules')),
+          ),
+          React.createElement('div', { className: 'uh-actions' },
+            view.temporalBuiltin === true && view.temporalExplicit !== true ? React.createElement('button', { type: 'button', className: 'uh-refresh', disabled: pricingBusy, onClick: () => startTemporalRules(view) }, view.temporalRulesUnavailable === true ? tr('改为自定义规则', 'Replace with custom rules') : tr('复制内置表并自定义', 'Copy built-in table')) : null,
+            view.temporalExplicit === true ? React.createElement('button', { type: 'button', className: 'uh-refresh', disabled: pricingBusy, onClick: () => resetTemporalPlan(view) }, view.temporalBuiltin === true ? tr('恢复内置', 'Restore built-in') : tr('清除时段规则', 'Remove rules')) : null,
+            view.temporalBuiltin !== true && view.temporalExplicit !== true ? React.createElement('button', { type: 'button', className: 'uh-refresh', disabled: pricingBusy, onClick: () => startTemporalRules(view) }, React.createElement(LineIcon, { name: 'plus', size: 13 }), tr('启用分时计费', 'Enable time-of-day pricing')) : null,
+          ),
+        )
+        if (draft === null || draft === undefined) {
+          return React.createElement('div', { className: 'uh-pricing-tier-editor uh-pricing-temporal-editor' }, header,
+            React.createElement('div', { className: 'uh-pricing-tier-empty' }, view.temporalRulesUnavailable === true ? tr('该行已启用峰谷计划（', 'This row already uses a peak plan (') + view.temporalPolicyId + tr('），但运行中的宿主尚未提供规则内容；重启 DSH 后即可查看与编辑。', '), but the running host does not expose its rules yet; restart DSH to view and edit them.') : tr('未启用时段规则：所有请求都使用该行基础价。', 'No time-of-day rules: every request uses the row base rates.')))
+        }
+        const effectiveFrom = pricingDateTextToUtc(draft.effectiveFromText)
+        const holidayDates = draft.holidaysEnabled === true ? pricingHolidayDatesFromText(draft.holidaysText) : null
+        const rules = draft.rules.map((rule, ruleIndex) => {
+          const windows = rule.windows.map((window, windowIndex) => React.createElement('div', { key: windowIndex, className: 'uh-pricing-temporal-window' },
+            React.createElement('input', { type: 'text', className: 'uh-pricing-time-input', placeholder: 'HH:MM', 'aria-label': tr('开始时间', 'Start time'), value: window.start, disabled: pricingBusy, onChange: (event) => applyTemporalDraft(view, pricingTemporalDraftWindows(draft, ruleIndex, rule.windows.map((item, itemIndex) => itemIndex === windowIndex ? { start: event.target.value, end: item.end } : item))) }),
+            React.createElement('span', { className: 'uh-pricing-time-sep' }, '–'),
+            React.createElement('input', { type: 'text', className: 'uh-pricing-time-input', placeholder: 'HH:MM', 'aria-label': tr('结束时间', 'End time'), value: window.end, disabled: pricingBusy, onChange: (event) => applyTemporalDraft(view, pricingTemporalDraftWindows(draft, ruleIndex, rule.windows.map((item, itemIndex) => itemIndex === windowIndex ? { start: item.start, end: event.target.value } : item))) }),
+            rule.windows.length > 1 ? React.createElement('button', { type: 'button', className: 'uh-refresh uh-icon-button', title: tr('删除时段', 'Remove window'), 'aria-label': tr('删除时段', 'Remove window'), disabled: pricingBusy, onClick: () => applyTemporalDraft(view, pricingTemporalDraftWindows(draft, ruleIndex, rule.windows.filter((_, itemIndex) => itemIndex !== windowIndex))) }, React.createElement(LineIcon, { name: 'close', size: 13 })) : null,
+          ))
+          return React.createElement('div', { key: rule.id + ':' + ruleIndex, className: 'uh-pricing-temporal-rule' },
+            React.createElement('div', { className: 'uh-pricing-temporal-rule-head' },
+              React.createElement('span', { className: 'uh-pricing-temporal-rule-name' }, rule.id),
+              React.createElement('div', { className: 'uh-pricing-weekdays' },
+                pricingWeekdayLabels.map((label, day) => React.createElement('button', { key: day, type: 'button', className: 'uh-pricing-weekday' + (rule.weekdays.includes(day) ? ' uh-on' : ''), 'aria-pressed': rule.weekdays.includes(day), disabled: pricingBusy, onClick: () => applyTemporalDraft(view, pricingTemporalDraftToggleWeekday(draft, ruleIndex, day)) }, label)),
+              ),
+              React.createElement('button', { type: 'button', className: 'uh-refresh uh-icon-button', disabled: pricingBusy || draft.rules.length <= 1, title: tr('删除规则', 'Remove rule'), 'aria-label': tr('删除规则', 'Remove rule'), onClick: () => applyTemporalDraft(view, pricingTemporalDraftWithoutRule(draft, ruleIndex)) }, React.createElement(LineIcon, { name: 'close', size: 14 })),
+            ),
+            React.createElement('div', { className: 'uh-pricing-temporal-windows' },
+              windows,
+              rule.windows.length < 16 ? React.createElement('button', { type: 'button', className: 'uh-pricing-link', disabled: pricingBusy, onClick: () => applyTemporalDraft(view, pricingTemporalDraftWindows(draft, ruleIndex, rule.windows.concat([{ start: '06:00', end: '10:00' }]))) }, tr('添加时段', 'Add window')) : null,
+            ),
+            React.createElement('div', { className: 'uh-pricing-temporal-rates' },
+              ['input', 'output', 'cacheRead', 'cacheWrite'].map((key) => React.createElement('label', { key, className: 'uh-pricing-temporal-rate' },
+                React.createElement('span', {}, tr('峰时·', 'Peak ·') + pricingRateLabel(key, language).split(' / ')[0]),
+                React.createElement('input', { type: 'number', min: '0', step: 'any', value: rule.rates[key], disabled: pricingBusy, onChange: (event) => applyTemporalDraft(view, pricingTemporalDraftRates(draft, ruleIndex, Object.assign({}, rule.rates, { [key]: event.target.value }))) }),
+              )),
+            ),
+          )
+        })
+        return React.createElement('div', { className: 'uh-pricing-tier-editor uh-pricing-temporal-editor' },
+          header,
+          React.createElement('div', { className: 'uh-pricing-tier-empty' }, tr('谷时段（未命中规则）使用该行基础价，峰时段使用规则费率；周几与时间均为 UTC。', 'Off-peak (no rule match) uses the row base rates, peak uses the rule rates. Weekdays and times are UTC.')),
+          React.createElement('div', { className: 'uh-pricing-temporal-fields' },
+            React.createElement('label', {}, React.createElement('span', {}, tr('策略 ID', 'Policy ID')), React.createElement('input', { type: 'text', value: draft.policyId, disabled: pricingBusy, onChange: (event) => applyTemporalDraft(view, Object.assign(pricingTemporalDraftClone(draft), { policyId: event.target.value })) })),
+            React.createElement('label', {}, React.createElement('span', {}, tr('生效起点（UTC，留空 = 全部历史）', 'Effective from (UTC, empty = all history)')), React.createElement('input', { type: 'date', value: draft.effectiveFromText, disabled: pricingBusy, onChange: (event) => applyTemporalDraft(view, Object.assign(pricingTemporalDraftClone(draft), { effectiveFromText: event.target.value })) })),
+          ),
+          effectiveFrom !== null && effectiveFrom > 0 ? React.createElement('div', { className: 'uh-pricing-warning' }, tr('该时刻之前的用量没有可用档位，会失败关闭为未计价。', 'Usage before this instant has no applicable band and fails closed as unpriced.')) : null,
+          React.createElement('div', { className: 'uh-pricing-temporal-holidays' },
+            React.createElement('label', { className: 'uh-pricing-switch' },
+              React.createElement('input', { type: 'checkbox', checked: draft.holidaysEnabled === true, disabled: pricingBusy, onChange: (event) => applyTemporalDraft(view, Object.assign(pricingTemporalDraftClone(draft), { holidaysEnabled: event.target.checked })) }),
+              React.createElement('span', {}, tr('中国法定节假日全天按谷时计价', 'Chinese statutory holidays price as off-peak all day')),
+            ),
+            draft.holidaysEnabled === true ? React.createElement(React.Fragment, null,
+              React.createElement('div', { className: 'uh-pricing-tier-empty' }, tr('每行一个日期（YYYY-MM-DD），支持区间写法 2026-10-01..2026-10-07。按北京时间（UTC+8）日历日判定；调休上班日不会被自动识别，需要你自己从列表里去掉。', 'One date per line (YYYY-MM-DD); ranges such as 2026-10-01..2026-10-07 are expanded. Days follow the China Standard Time (UTC+8) calendar; swapped-in working weekends are not detected, so remove them yourself.')),
+              React.createElement('textarea', { className: 'uh-pricing-holiday-input', rows: 4, spellCheck: false, disabled: pricingBusy, placeholder: '2026-10-01\n2026-10-02', 'aria-label': tr('法定节假日日期', 'Statutory holiday dates'), value: draft.holidaysText, onChange: (event) => applyTemporalDraft(view, Object.assign(pricingTemporalDraftClone(draft), { holidaysText: event.target.value })) }),
+              holidayDates === null
+                ? React.createElement('span', { className: 'uh-pricing-error' }, tr('日期格式无效：请使用 YYYY-MM-DD，或 start..end 区间', 'Invalid dates: use YYYY-MM-DD, or a start..end range'))
+                : React.createElement('span', { className: 'uh-pricing-tier-empty' }, tr('已解析 ', 'parsed ') + holidayDates.length + tr(' 天节假日', ' holiday days')),
+              React.createElement('div', { className: 'uh-pricing-holiday-load' },
+                React.createElement('label', { className: 'uh-pricing-map-field' },
+                  React.createElement('span', {}, tr('年份', 'Year')),
+                  React.createElement('input', { type: 'number', min: '2000', max: '2100', step: '1', value: pricingHolidayYear, disabled: pricingBusy || pricingHolidayLoading, 'aria-label': tr('要载入的年份', 'Year to load'), onChange: (event) => setPricingHolidayYear(Number(event.target.value)) }),
+                ),
+                React.createElement('button', { type: 'button', className: 'uh-refresh', disabled: pricingBusy || pricingHolidayLoading, onClick: () => loadRowHolidays(view) }, React.createElement(LineIcon, { name: 'refresh', size: 13 }), pricingHolidayLoading ? tr('抓取中…', 'Fetching…') : tr('从公开日历载入', 'Load from public calendar')),
+                pricingHolidayStatus !== '' ? React.createElement('span', { className: 'uh-pricing-tier-empty' }, pricingHolidayStatus) : null,
+              ),
+              draft.holidaysSourceText !== '' ? React.createElement('span', { className: 'uh-pricing-tier-empty', title: draft.holidaysSourceText }, tr('来源：', 'Source: ') + draft.holidaysSourceText) : null,
+            ) : null,
+          ),
+          rules,
+          React.createElement('div', { className: 'uh-pricing-temporal-foot' },
+            draft.rules.length < 16 ? React.createElement('button', { type: 'button', className: 'uh-refresh', disabled: pricingBusy, onClick: () => applyTemporalDraft(view, pricingTemporalDraftWithRule(draft)) }, React.createElement(LineIcon, { name: 'plus', size: 13 }), tr('添加规则', 'Add rule')) : null,
+            issue !== '' ? React.createElement('span', { className: 'uh-pricing-error' }, tr('时段规则尚未完成，保存前需修正。', 'The rules are incomplete; fix them before saving.')) : null,
+          ),
+        )
+      }
+      const renderRowEditor = (view) => {
+        const section = pricingOpenEditor !== null && pricingOpenEditor.indexOf(view.key + '|') === 0 ? pricingOpenEditor.slice(view.key.length + 1) : ''
+        return React.createElement('div', { className: 'uh-pricing-editor' },
+          section === 'tiers' ? renderTierEditor(view) : null,
+          section === 'temporal' ? renderTemporalEditor(view) : null,
+          React.createElement('div', { className: 'uh-pricing-editor-foot' },
+            React.createElement('button', { type: 'button', className: 'uh-pricing-link', onClick: closeRowEditor }, tr('收起', 'Collapse')),
+          ),
+        )
+      }
+      const pricingSearchTextFor = (view) => pricingModelSearchText[view.key]
+      const renderPricingRow = (view) => {
+        const openSection = pricingOpenEditor !== null && pricingOpenEditor.indexOf(view.key + '|') === 0 ? pricingOpenEditor : null
+        const searchText = pricingSearchTextFor(view)
+        const options = Array.isArray(pricingModelSearchOptions[view.key]) ? pricingModelSearchOptions[view.key] : []
+        return React.createElement(React.Fragment, { key: view.key },
+          React.createElement('tr', { className: 'uh-pricing-model-row' + (view.usageBacked === true ? '' : ' uh-pricing-configured-row') },
+            React.createElement('td', { className: 'uh-pricing-model-name' },
+              React.createElement('span', { className: 'uh-model-label', title: view.model }, React.createElement(MemoModelIcon, { row: view.row, size: 16 }), React.createElement('span', { className: 'uh-model-text' }, view.model || tr('未知模型', 'Unknown model'))),
+              React.createElement('div', { className: 'uh-pricing-row-flags' },
+                React.createElement('span', { className: 'uh-pricing-status uh-pricing-status-' + view.status, title: view.reason || '' }, pricingStatusLabel(view.status, language)),
+                React.createElement('span', { className: 'uh-pricing-tier-badge uh-flat' }, pricingSourceLabel(view)),
+                view.mapped ? React.createElement('span', { className: 'uh-pricing-flag' }, tr('已映射', 'Mapped')) : null,
+                view.usageBacked === true ? null : React.createElement('span', { className: 'uh-pricing-flag' }, tr('账本无用量', 'No ledger usage')),
+              ),
+            ),
+            React.createElement('td', { className: 'uh-pricing-map-cell' },
+              React.createElement('div', { className: 'uh-pricing-model-search' },
+                React.createElement('input', {
+                  type: 'text',
+                  className: 'uh-pricing-model-search-input',
+                  placeholder: view.mappable === true ? tr('输入官方模型 ID 检索', 'Type an official model ID') : tr('该行不是账本路线', 'Not a ledger route'),
+                  value: searchText !== undefined ? searchText : (view.pricingModel || ''),
+                  disabled: pricingBusy || view.mappable !== true,
+                  'aria-label': tr('官方模型 ID', 'Official model ID'),
+                  'aria-autocomplete': 'list',
+                  onFocus: (event) => {
+                    if (view.mappable !== true || pricingBusy === true) return
+                    setPricingModelSearchOpen(view.key)
+                    // Focusing must never clear the row's current model: keep the
+                    // text visible and select it, so typing replaces it instead.
+                    const field = event.target
+                    if (field === null || field === undefined || typeof field.select !== 'function') return
+                    try { field.select() } catch (err) { /* a detached field is harmless */ }
+                    // The click that focused the field places the caret after this
+                    // event, so re-apply the selection on the next frame.
+                    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => { try { field.select() } catch (err) { /* ignore */ } })
+                  },
+                  onBlur: () => setTimeout(() => { setPricingModelSearchOpen((current) => current === view.key ? null : current); setPricingModelSearchText((prev) => { const next = Object.assign({}, prev); delete next[view.key]; return next }) }, 140),
+                  onKeyDown: (event) => { if (event.key === 'Escape') setPricingModelSearchOpen(null) },
+                  onChange: (event) => searchRowTargets(view, event.target.value),
+                }),
+                pricingModelSearchOpen === view.key && options.length > 0 ? React.createElement('div', { className: 'uh-language-options uh-pricing-model-options', role: 'listbox', 'aria-label': tr('官方模型匹配结果', 'Official model matches') },
+                  options.map((option) => React.createElement('button', { key: option.value, type: 'button', role: 'option', className: 'uh-language-option uh-pricing-model-option', onMouseDown: (event) => event.preventDefault(), onClick: () => chooseRowTarget(view, option) },
+                    React.createElement(LineIcon, { name: 'list', size: 14 }),
+                    React.createElement('span', { className: 'uh-pricing-model-option-name' }, option.label || option.value),
+                    React.createElement('span', { className: 'uh-pricing-model-option-id' }, option.value + (option.tiered === true ? ' · ' + tr('分层 ', 'tiered ') + option.tierCount : '') + (option.builtinTemporal === true ? ' · ' + tr('峰谷', 'peak') : '')),
+                  )),
+                ) : null,
+                view.mapped ? React.createElement('button', { type: 'button', className: 'uh-pricing-link uh-pricing-clear-mapping', disabled: pricingBusy, title: tr('删除该行的官方模型映射，回到按模型自动匹配', 'Remove this row mapping and fall back to automatic model matching'), onClick: () => clearRowMapping(view) }, tr('清除映射', 'Clear mapping')) : null,
+              ),
+              React.createElement('div', { className: 'uh-pricing-map-sub' },
+                React.createElement('label', { className: 'uh-pricing-map-field' },
+                  React.createElement('span', {}, tr('倍率', 'Multiplier')),
+                  React.createElement('input', { type: 'number', min: '0', step: 'any', value: view.multiplier, disabled: pricingBusy || view.mapped !== true, title: view.mapped === true ? tr('成本倍率，只作用于最终总价', 'Cost multiplier; applied to the final total only') : tr('设置映射后生效', 'Effective after a mapping is set'), 'aria-label': tr('成本倍率', 'Cost multiplier'), onChange: (event) => updateRowMappingField(view, 'multiplier', event.target.value) }),
+                ),
+                React.createElement('label', { className: 'uh-pricing-map-field' },
+                  React.createElement('span', {}, tr('输入口径', 'Input semantics')),
+                  React.createElement('select', { value: view.inputTokenSemantics, disabled: pricingBusy || view.mapped !== true, 'aria-label': tr('输入口径', 'Input semantics'), title: pricingSemanticsLabel(view.inputTokenSemantics, language), onChange: (event) => updateRowMappingField(view, 'inputTokenSemantics', event.target.value) },
+                    React.createElement('option', { value: 'fresh' }, 'Fresh'),
+                    React.createElement('option', { value: 'total' }, 'Total'),
+                    React.createElement('option', { value: 'legacy' }, 'Legacy'),
+                  ),
+                ),
+              ),
+            ),
+            pricingRateCell(view, 'input'),
+            pricingRateCell(view, 'output'),
+            pricingRateCell(view, 'cacheRead'),
+            pricingRateCell(view, 'cacheWrite'),
+
+            React.createElement('td', { className: 'uh-pricing-row-actions' },
+              React.createElement('button', { type: 'button', className: 'uh-pricing-chip' + (openSection !== null && openSection.slice(view.key.length + 1) === 'tiers' ? ' uh-on' : '') + (view.tierCount > 0 ? ' uh-strong' : ''), disabled: pricingBusy, title: view.tierCount > 0 ? tr('上下文分层：已配置 ', 'Context tiers: ') + view.tierCount + tr(' 个档位', ' bands') : tr('上下文分层：未配置，所有上下文使用基础费率', 'Context tiers: none, base rates apply to every context'), onClick: () => toggleRowEditor(view, 'tiers') }, tr('上下文分层', 'Context tiers')),
+              React.createElement('button', { type: 'button', className: 'uh-pricing-chip' + (openSection !== null && openSection.slice(view.key.length + 1) === 'temporal' ? ' uh-on' : '') + (view.temporalBuiltin === true || view.temporalExplicit === true ? ' uh-strong' : ''), disabled: pricingBusy, title: tr('时间分层：', 'Time tiers: ') + pricingTemporalChipLabel(view), onClick: () => toggleRowEditor(view, 'temporal') }, tr('时间分层', 'Time tiers')),
+              view.source === 'manual' ? React.createElement('button', { type: 'button', className: 'uh-pricing-link', disabled: pricingBusy, title: tr('删除手工价，回落到目录价或内置峰谷', 'Remove the manual price and fall back to the catalog or the built-in peak table'), onClick: () => resetRowOverride(view) }, tr('恢复默认', 'Reset')) : null,
+            ),
+          ),
+          openSection === null ? null : React.createElement('tr', { className: 'uh-pricing-editor-row' },
+            React.createElement('td', { colSpan: 7 }, renderRowEditor(view)),
+          ),
+        )
+      }
       const renderPricingPanel = () => pricingDraft !== null ? React.createElement('div', { className: 'uh-panel uh-pricing-panel uh-anim-panel' },
         React.createElement('div', { className: 'uh-pricing-head' },
           React.createElement('div', { className: 'uh-title-with-icon' }, React.createElement(LineIcon, { name: 'wallet', size: 16 }), React.createElement('strong', {}, tr('成本统计设置', 'Cost Statistics'))),
-          React.createElement('button', { type: 'button', className: 'uh-refresh uh-icon-button', title: tr('关闭成本设置', 'Close cost settings'), 'aria-label': tr('关闭成本设置', 'Close cost settings'), disabled: pricingSaving || pricingSyncing || pricingSyncSaving, onClick: closePricingPanel }, React.createElement(LineIcon, { name: 'close', size: 16 })),
+          React.createElement('button', { type: 'button', className: 'uh-refresh uh-icon-button', title: tr('关闭成本设置', 'Close cost settings'), 'aria-label': tr('关闭成本设置', 'Close cost settings'), disabled: pricingBusy, onClick: closePricingPanel }, React.createElement(LineIcon, { name: 'close', size: 16 })),
         ),
-        React.createElement('div', { className: 'uh-pricing-note' }, tr('价格单位为 USD / 1M Token。输入上下文严格超过档位阈值时，整次请求的输入、输出和缓存均使用该档费率；可展开查看 models.dev 档位，也可在价格覆盖中自定义。', 'Prices are USD per 1M tokens. When input context strictly exceeds a band threshold, that band’s input, output, and cache rates apply to the whole request. Expand models.dev schedules or define custom override bands below.')),
+        React.createElement('div', { className: 'uh-pricing-note' }, tr('价格单位为 USD / 1M Token。直接改价格框即创建或更新手工价（同一官方模型的所有行共享同一价格）；「官方模型」列选定映射后该行自动改用官方目录价；「档位」配置上下文费率档，「分时计费」配置 UTC 峰谷规则。', 'Prices are USD per 1M tokens. Editing a price box creates or updates a manual price (every row priced from the same official model shares it). Picking an official model in the mapping column switches the row to the catalog price. Bands add context-dependent rates; Time-of-day adds UTC peak rules.')),
         React.createElement('div', { className: 'uh-pricing-toolbar' },
           React.createElement('label', { className: 'uh-pricing-switch' },
-            React.createElement('input', { type: 'checkbox', checked: pricingDraft.sync.autoEnabled === true, disabled: pricingSaving || pricingSyncing || pricingSyncSaving, onChange: (event) => updatePricingSync(event.target.checked) }),
+            React.createElement('input', { type: 'checkbox', checked: pricingDraft.sync.autoEnabled === true, disabled: pricingBusy, onChange: (event) => updatePricingSync(event.target.checked) }),
             React.createElement('span', {}, tr('启用 6 小时自动同步', 'Enable 6-hour automatic sync')),
           ),
           React.createElement('span', { className: 'uh-note' }, pricingSyncSaving ? tr('保存中…', 'Saving…') : (pricingSync.lastSuccessAt > 0 ? tr('上次成功：', 'Last success: ') + new Date(pricingSync.lastSuccessAt).toLocaleString() : tr('尚未同步', 'Not synced yet'))),
-          React.createElement('button', { type: 'button', className: 'uh-refresh', onClick: syncPricingNow, disabled: pricingSyncing || pricingSaving || pricingSyncSaving }, React.createElement(LineIcon, { name: 'refresh', size: 14 }), pricingSyncing ? tr('同步中…', 'Syncing…') : tr('立即同步', 'Sync now')),
+          React.createElement('button', { type: 'button', className: 'uh-refresh', onClick: syncPricingNow, disabled: pricingBusy }, React.createElement(LineIcon, { name: 'refresh', size: 14 }), pricingSyncing ? tr('同步中…', 'Syncing…') : tr('立即同步', 'Sync now')),
         ),
         pricingSync.lastError ? React.createElement('div', { className: 'uh-pricing-error', role: 'alert' }, tr('上次同步失败：', 'Last sync failed: ') + pricingSync.lastError) : null,
-        React.createElement('div', { className: 'uh-pricing-section' },
-          React.createElement('div', { className: 'uh-pricing-section-head' }, React.createElement('strong', {}, tr('当前用量匹配', 'Usage matches')), React.createElement('span', { className: 'uh-note' }, pricingUsedModels.length + ' ' + tr('个模型', 'models'))),
-          pricingUsedModels.length === 0 ? React.createElement('div', { className: 'uh-empty', style: { padding: '12px 0' } }, tr('暂无模型用量', 'No model usage yet')) : React.createElement('div', { className: 'uh-pricing-table-wrap' },
-            React.createElement('table', { className: 'uh-pricing-model-table' },
-              React.createElement('thead', {}, React.createElement('tr', {},
-                React.createElement('th', { scope: 'col' }, tr('当前模型', 'Usage model')),
-                React.createElement('th', { scope: 'col' }, tr('状态', 'Status')),
-                React.createElement('th', { scope: 'col' }, tr('官方模型', 'Official model')),
-                React.createElement('th', { scope: 'col' }, tr('费率档位', 'Rate bands')),
-                React.createElement('th', { scope: 'col', title: tr('基础输入价格（USD / 1M）', 'Base input price (USD / 1M)') }, tr('输入', 'Input')),
-                React.createElement('th', { scope: 'col', title: tr('基础输出价格（USD / 1M）', 'Base output price (USD / 1M)') }, tr('输出', 'Output')),
-                React.createElement('th', { scope: 'col', title: tr('基础缓存读取价格（USD / 1M）', 'Base cache read price (USD / 1M)') }, tr('缓存读', 'Cache read')),
-                React.createElement('th', { scope: 'col', title: tr('基础缓存写入价格（USD / 1M）', 'Base cache write price (USD / 1M)') }, tr('缓存写', 'Cache write')),
-              )),
-              React.createElement('tbody', {}, pricingUsedModels.map((model) => {
-                const tiers = Array.isArray(model.tiers) ? model.tiers : []
-                const hasTierSchedule = model.tiered === true && model.tieredInvalid !== true && tiers.length > 0 && model.rates
-                const tierLabel = model.tieredInvalid === true ? tr('档位异常', 'Invalid tiers') : model.tiered === true ? tr('分层 · ', 'Tiered · ') + tiers.length : tr('固定', 'Flat')
-                const temporalLabel = model.temporalRoute === 'official' || model.temporalRoute === 'mapped' ? (language === 'en' ? '峰谷 · ' : 'Peak/off-peak · ') + 'UTC' : model.temporalRoute === 'other' ? (language === 'en' ? '静态价 · 非官方直连' : 'static · reseller') : ''
-                const schedule = hasTierSchedule ? [Object.assign({ type: 'context', size: 0 }, model.rates)].concat(tiers) : []
-                return React.createElement(React.Fragment, { key: model.identityKey },
-                  React.createElement('tr', {},
-                    React.createElement('td', { className: 'uh-pricing-model-name', title: model.model }, React.createElement('span', { className: 'uh-model-label' }, React.createElement(MemoModelIcon, { row: model, size: 16 }), React.createElement('span', { className: 'uh-model-text' }, model.model || tr('未知模型', 'Unknown model')))),
-                    React.createElement('td', { title: model.reason || '' }, React.createElement('span', { className: 'uh-pricing-status uh-pricing-status-' + (model.status || 'unpriced') }, pricingStatusLabel(model.status || 'unpriced', language))),
-                    React.createElement('td', { className: 'uh-pricing-model-target', title: model.pricingModel || '' }, model.pricingModel || tr('未匹配', 'No match')),
-                    React.createElement('td', {}, React.createElement('span', { className: 'uh-pricing-tier-badge' + (model.tiered === true ? '' : ' uh-flat'), title: model.temporalPolicyId || '' }, tierLabel + (temporalLabel !== '' ? ' · ' + temporalLabel : ''))),
-                    React.createElement('td', { className: 'uh-pricing-model-rate' }, model.status === 'priced' && model.rates ? model.rates.input : '—'),
-                    React.createElement('td', { className: 'uh-pricing-model-rate' }, model.status === 'priced' && model.rates ? model.rates.output : '—'),
-                    React.createElement('td', { className: 'uh-pricing-model-rate' }, model.status === 'priced' && model.rates ? model.rates.cacheRead : '—'),
-                    React.createElement('td', { className: 'uh-pricing-model-rate' }, model.status === 'priced' && model.rates ? model.rates.cacheWrite : '—'),
-                  ),
-                  hasTierSchedule ? React.createElement('tr', { className: 'uh-pricing-tier-row' }, React.createElement('td', { colSpan: 8 },
-                    React.createElement('details', { className: 'uh-pricing-tier-details' },
-                      React.createElement('summary', {},
-                        React.createElement(LineIcon, { name: 'chevron', size: 13, className: 'uh-pricing-tier-caret' }),
-                        tr('查看完整费率表', 'View full rate table'),
-                        React.createElement('span', { className: 'uh-pricing-tier-context' }, pricingSemanticsLabel(model.inputTokenSemantics, language) + (model.multiplier && model.multiplier !== '1' ? ' · ×' + model.multiplier : '')),
-                      ),
-                      React.createElement('table', { className: 'uh-pricing-tier-table' },
-                        React.createElement('thead', {}, React.createElement('tr', {},
-                          React.createElement('th', { scope: 'col' }, tr('输入上下文范围', 'Input context range')),
-                          React.createElement('th', { scope: 'col' }, tr('输入', 'Input')),
-                          React.createElement('th', { scope: 'col' }, tr('输出', 'Output')),
-                          React.createElement('th', { scope: 'col' }, tr('缓存读', 'Cache read')),
-                          React.createElement('th', { scope: 'col' }, tr('缓存写', 'Cache write')),
-                        )),
-                        React.createElement('tbody', {}, schedule.map((rate, index) => React.createElement('tr', { key: index },
-                          React.createElement('td', {}, pricingTierBandLabel(tiers, index - 1, language)),
-                          React.createElement('td', {}, rate.input),
-                          React.createElement('td', {}, rate.output),
-                          React.createElement('td', {}, rate.cacheRead),
-                          React.createElement('td', {}, rate.cacheWrite),
-                        ))),
-                      ),
-                    ),
-                  )) : null,
-                )
-              })),
-            ),
+        React.createElement('div', { className: 'uh-pricing-table-note' },
+          tr('共 ', '') + pricingRows.length + tr(' 个模型', ' models') + (pricingConfiguredCount > 0 ? tr('（', ' (') + pricingConfiguredCount + tr(' 项仅存在于配置中，账本暂无用量）', ' configured rows have no ledger usage)') : '') + (pricingRows.length >= 500 ? tr(' · 已达 500 行上限', ' · capped at 500 rows') : ''),
+        ),
+        React.createElement('div', { className: 'uh-pricing-table-wrap' },
+          React.createElement('table', { className: 'uh-pricing-model-table uh-pricing-price-table' },
+            React.createElement('thead', {}, React.createElement('tr', {},
+              React.createElement('th', { scope: 'col' }, tr('模型', 'Model')),
+              React.createElement('th', { scope: 'col' }, tr('官方模型 / 映射', 'Official model / mapping')),
+              React.createElement('th', { scope: 'col' }, tr('输入 / 1M', 'Input / 1M')),
+              React.createElement('th', { scope: 'col' }, tr('输出 / 1M', 'Output / 1M')),
+              React.createElement('th', { scope: 'col' }, tr('缓存读 / 1M', 'Cache read / 1M')),
+              React.createElement('th', { scope: 'col' }, tr('缓存写 / 1M', 'Cache write / 1M')),
+              React.createElement('th', { scope: 'col' }, tr('操作', 'Actions')),
+            )),
+            React.createElement('tbody', {}, pricingRows.length === 0
+              ? React.createElement('tr', {}, React.createElement('td', { colSpan: 7 }, React.createElement('div', { className: 'uh-empty', style: { padding: '12px 0' } }, tr('暂无模型用量', 'No model usage yet'))))
+              : pricingRows.map((view) => React.createElement(MemoUsagePricingRow, {
+                key: view.key,
+                view,
+                busy: pricingBusy,
+                language,
+                openSection: pricingOpenEditor !== null && pricingOpenEditor.indexOf(view.key + '|') === 0 ? pricingOpenEditor : null,
+                searchText: pricingSearchTextFor(view) === undefined ? null : pricingSearchTextFor(view),
+                searchOpen: pricingModelSearchOpen === view.key,
+                searchOptions: Array.isArray(pricingModelSearchOptions[view.key]) ? pricingModelSearchOptions[view.key] : null,
+                temporalDraft: pricingTemporalDrafts[view.key] === undefined ? null : pricingTemporalDrafts[view.key],
+                temporalPlan: view.temporalPlan,
+                holidayStatus: pricingHolidayStatus,
+                holidayLoading: pricingHolidayLoading,
+                render: renderPricingRow,
+              }))),
           ),
         ),
-        React.createElement('div', { className: 'uh-pricing-section' },
-          React.createElement('div', { className: 'uh-pricing-section-head' }, React.createElement('strong', {}, tr('模型映射', 'Model mappings')), React.createElement('button', { type: 'button', className: 'uh-refresh', onClick: addPricingMapping }, React.createElement(LineIcon, { name: 'plus', size: 13 }), tr('添加映射', 'Add mapping'))),
-          pricingDraft.mappings.length === 0 ? React.createElement('div', { className: 'uh-empty', style: { padding: '12px 0' } }, tr('选择当前模型后，再指定对应的官方模型。DSH Provider 不参与计价。', 'Select a used model, then choose its official model. The DSH provider is ignored.')) : pricingDraft.mappings.map((mapping, index) => {
-            const usedModelQuery = String(pricingUsedModelSearchText[index] || '').trim().toLowerCase()
-            const mappingModelKey = pricingModelKey(mapping.model)
-            const mappingOfficialModelKey = pricingModelKey(mapping.catalogModelId)
-            const selectedUsedModel = pricingUsedModelOptions.find((option) => option.value === String(mapping.identityKey || mapping.usageIdentityKey || '')) || pricingUsedModelOptions.find((option) => mappingModelKey !== '' && option.model === mappingModelKey) || pricingUsedModelOptions.find((option) => mappingOfficialModelKey !== '' && option.officialModel === mappingOfficialModelKey)
-            const usedModelOptions = pricingUsedModelOptions.filter((option) => usedModelQuery === '' || option.label.toLowerCase().includes(usedModelQuery))
-            return React.createElement('div', { key: index, className: 'uh-pricing-edit-row' },
-              React.createElement('div', { className: 'uh-pricing-used-model-picker' },
-                React.createElement('input', { type: 'text', className: 'uh-pricing-used-model-input', placeholder: tr('选择当前用过的模型', 'Select a used model'), value: pricingUsedModelSearchText[index] !== undefined ? pricingUsedModelSearchText[index] : (selectedUsedModel ? selectedUsedModel.label : ''), 'aria-label': tr('当前用过的模型', 'Used model'), 'aria-haspopup': 'listbox', 'aria-expanded': pricingUsedModelOpen === index, onFocus: () => { setPricingUsedModelOpen(index); setPricingUsedModelSearchText((prev) => Object.assign({}, prev, { [index]: '' })) }, onClick: () => setPricingUsedModelOpen(index), onBlur: () => setTimeout(() => { setPricingUsedModelOpen((current) => current === index ? null : current); if (selectedUsedModel) setPricingUsedModelSearchText((prev) => Object.assign({}, prev, { [index]: selectedUsedModel.label })) }, 120), onKeyDown: (event) => { if (event.key === 'Escape') setPricingUsedModelOpen(null) }, onChange: (event) => searchUsedModels(index, event.target.value) }),
-                pricingUsedModelOpen === index && usedModelOptions.length > 0 ? React.createElement('div', { className: 'uh-language-options uh-pricing-used-model-options', role: 'listbox', 'aria-label': tr('当前用过的模型', 'Used models') },
-                  usedModelOptions.map((option) => React.createElement('button', { key: option.value, type: 'button', role: 'option', className: 'uh-language-option uh-pricing-model-option', onMouseDown: (event) => event.preventDefault(), onClick: () => selectPricingUsedModel(index, option.value) },
-                    React.createElement(LineIcon, { name: 'list', size: 14 }),
-                    React.createElement('span', { className: 'uh-pricing-model-option-name' }, option.label),
-                  )),
-                ) : null,
-              ),
-              React.createElement('div', { className: 'uh-pricing-model-search' },
-                React.createElement('input', { type: 'text', className: 'uh-pricing-model-search-input', placeholder: tr('输入官方模型 ID 检索', 'Type official model ID to search'), value: mapping.catalogModelId || '', 'aria-label': tr('官方模型 ID', 'Official model ID'), 'aria-autocomplete': 'list', onFocus: () => setPricingModelSearchOpen(index), onBlur: () => setTimeout(() => setPricingModelSearchOpen((current) => current === index ? null : current), 120), onKeyDown: (event) => { if (event.key === 'Escape') setPricingModelSearchOpen(null) }, onChange: (event) => searchOfficialModels(index, event.target.value) }),
-                pricingModelSearchOpen === index && Array.isArray(pricingModelSearchOptions[index]) && pricingModelSearchOptions[index].length > 0 ? React.createElement('div', { className: 'uh-language-options uh-pricing-model-options', role: 'listbox', 'aria-label': tr('官方模型匹配结果', 'Official model matches') },
-                  pricingModelSearchOptions[index].map((option) => React.createElement('button', { key: option.value, type: 'button', role: 'option', className: 'uh-language-option uh-pricing-model-option', onMouseDown: (event) => event.preventDefault(), onClick: () => chooseOfficialModel(index, option) },
-                    React.createElement(LineIcon, { name: 'list', size: 14 }),
-                    React.createElement('span', { className: 'uh-pricing-model-option-name' }, option.label || option.value),
-                    React.createElement('span', { className: 'uh-pricing-model-option-id' }, option.value + (option.tiered === true ? ' · ' + tr('分层 ', 'tiered ') + option.tierCount : '')),
-                  )),
-                ) : null,
-              ),
-              React.createElement('input', { type: 'number', min: '0', step: 'any', placeholder: tr('倍率', 'Multiplier'), title: tr('成本倍率', 'Cost multiplier'), 'aria-label': tr('成本倍率', 'Cost multiplier'), value: mapping.multiplier || '1', onChange: (event) => updatePricingMapping(index, 'multiplier', event.target.value) }),
-              React.createElement('button', { type: 'button', className: 'uh-refresh uh-icon-button', title: tr('删除映射', 'Remove mapping'), 'aria-label': tr('删除映射', 'Remove mapping'), onClick: () => removePricingMapping(index) }, React.createElement(LineIcon, { name: 'close', size: 14 })),
-            )
-          }),
-        ),
-        React.createElement('div', { className: 'uh-pricing-section' },
-          React.createElement('div', { className: 'uh-pricing-section-head' }, React.createElement('strong', {}, tr('显式价格覆盖', 'Explicit price overrides')), React.createElement('button', { type: 'button', className: 'uh-refresh', onClick: addPricingOverride }, React.createElement(LineIcon, { name: 'plus', size: 13 }), tr('添加价格', 'Add price'))),
-          pricingDraft.overrides.length === 0 ? React.createElement('div', { className: 'uh-empty', style: { padding: '12px 0' } }, tr('仅在官方目录未覆盖或有明确官方账单时添加；可配置基础价格和上下文费率档位。', 'Add an override only when the official catalog lacks the model or you have an authoritative official price. Base rates and context tiers are supported.')) : React.createElement(React.Fragment, null,
-            React.createElement('div', { className: 'uh-pricing-price-head' },
-              React.createElement('span', {}, tr('官方模型 ID', 'Official model ID')),
-              React.createElement('span', {}, tr('基础输入 / 1M', 'Base input / 1M')),
-              React.createElement('span', {}, tr('基础输出 / 1M', 'Base output / 1M')),
-              React.createElement('span', {}, tr('基础缓存读 / 1M', 'Base cache read / 1M')),
-              React.createElement('span', {}, tr('基础缓存写 / 1M', 'Base cache write / 1M')),
-              React.createElement('span', {}, ''),
-            ),
-            React.createElement('div', { className: 'uh-pricing-overrides' }, pricingDraft.overrides.map((entry, index) => {
-              const overrideModelQuery = String(pricingOverrideSearchText[index] || '').trim().toLowerCase()
-              const overrideModelOptions = pricingUsedModelOptions.filter((option) => overrideModelQuery === '' || option.label.toLowerCase().includes(overrideModelQuery))
-              const tiers = Array.isArray(entry.tiers) ? entry.tiers : []
-              let previousTierSize = 0
-              const tierEditors = tiers.map((tier, tierIndex) => {
-                const valid = pricingTierDraftValid(tier, previousTierSize)
-                const numericSize = Number(tier && tier.size)
-                if (Number.isSafeInteger(numericSize)) previousTierSize = numericSize
-                return React.createElement('div', { key: tierIndex, className: 'uh-pricing-tier-edit-row' + (valid ? '' : ' uh-invalid') },
-                  React.createElement('input', { type: 'number', min: '1', max: '1000000000', step: '1', placeholder: tr('阈值 Token', 'Token threshold'), title: tr('上下文超过此 Token 数时启用本档', 'Use this band when context exceeds this token count'), 'aria-label': tr('上下文阈值 Token', 'Context threshold tokens'), value: tier.size === undefined ? '' : tier.size, onChange: (event) => updatePricingOverrideTier(index, tierIndex, 'size', event.target.value) }),
-                  React.createElement('input', { type: 'number', min: '0', step: 'any', placeholder: tr('输入价 / 1M', 'Input / 1M'), 'aria-label': tr('档位输入价格 / 1M', 'Tier input price / 1M'), value: tier.input === undefined ? '' : tier.input, onChange: (event) => updatePricingOverrideTier(index, tierIndex, 'input', event.target.value) }),
-                  React.createElement('input', { type: 'number', min: '0', step: 'any', placeholder: tr('输出价 / 1M', 'Output / 1M'), 'aria-label': tr('档位输出价格 / 1M', 'Tier output price / 1M'), value: tier.output === undefined ? '' : tier.output, onChange: (event) => updatePricingOverrideTier(index, tierIndex, 'output', event.target.value) }),
-                  React.createElement('input', { type: 'number', min: '0', step: 'any', placeholder: tr('缓存读 / 1M', 'Cache read / 1M'), 'aria-label': tr('档位缓存读取价格 / 1M', 'Tier cache read price / 1M'), value: tier.cacheRead === undefined ? '' : tier.cacheRead, onChange: (event) => updatePricingOverrideTier(index, tierIndex, 'cacheRead', event.target.value) }),
-                  React.createElement('input', { type: 'number', min: '0', step: 'any', placeholder: tr('缓存写 / 1M', 'Cache write / 1M'), 'aria-label': tr('档位缓存写入价格 / 1M', 'Tier cache write price / 1M'), value: tier.cacheWrite === undefined ? '' : tier.cacheWrite, onChange: (event) => updatePricingOverrideTier(index, tierIndex, 'cacheWrite', event.target.value) }),
-                  React.createElement('button', { type: 'button', className: 'uh-refresh uh-icon-button', title: tr('删除费率档位', 'Remove rate band'), 'aria-label': tr('删除费率档位', 'Remove rate band'), onClick: () => removePricingOverrideTier(index, tierIndex) }, React.createElement(LineIcon, { name: 'close', size: 14 })),
-                )
-              })
-              return React.createElement('div', { key: index, className: 'uh-pricing-override' },
-                React.createElement('div', { className: 'uh-pricing-edit-row uh-pricing-price-row' },
-                  React.createElement('div', { className: 'uh-pricing-used-model-picker' },
-                    React.createElement('input', { type: 'text', className: 'uh-pricing-used-model-input', placeholder: tr('选择当前用过的模型', 'Select a used model'), value: pricingOverrideSearchText[index] !== undefined ? pricingOverrideSearchText[index] : (entry.modelId || ''), 'aria-label': tr('覆盖模型 ID', 'Override model ID'), 'aria-haspopup': 'listbox', 'aria-expanded': pricingOverrideOpen === index, onFocus: () => { setPricingOverrideOpen(index); setPricingOverrideSearchText((prev) => Object.assign({}, prev, { [index]: '' })) }, onClick: () => setPricingOverrideOpen(index), onBlur: () => setTimeout(() => { setPricingOverrideOpen((current) => current === index ? null : current); if (entry.modelId) setPricingOverrideSearchText((prev) => Object.assign({}, prev, { [index]: entry.modelId })) }, 120), onKeyDown: (event) => { if (event.key === 'Escape') setPricingOverrideOpen(null) }, onChange: (event) => searchPricingOverrideModels(index, event.target.value) }),
-                    pricingOverrideOpen === index && overrideModelOptions.length > 0 ? React.createElement('div', { className: 'uh-language-options uh-pricing-used-model-options', role: 'listbox', 'aria-label': tr('当前用过的模型', 'Used models') },
-                      overrideModelOptions.map((option) => React.createElement('button', { key: option.value, type: 'button', role: 'option', className: 'uh-language-option uh-pricing-model-option', onMouseDown: (event) => event.preventDefault(), onClick: () => selectPricingOverrideModel(index, option.value) },
-                        React.createElement(LineIcon, { name: 'list', size: 14 }),
-                        React.createElement('span', { className: 'uh-pricing-model-option-name' }, option.label),
-                      )),
-                    ) : null,
-                  ),
-                  React.createElement('input', { type: 'number', min: '0', step: 'any', placeholder: tr('输入价 / 1M', 'Input / 1M'), title: tr('基础输入价格，美元 / 100 万 Token', 'Base input price, USD / 1M tokens'), 'aria-label': tr('基础输入价格 / 1M', 'Base input price / 1M'), value: entry.input === undefined ? '' : entry.input, onChange: (event) => updatePricingOverride(index, 'input', event.target.value) }),
-                  React.createElement('input', { type: 'number', min: '0', step: 'any', placeholder: tr('输出价 / 1M', 'Output / 1M'), title: tr('基础输出价格，美元 / 100 万 Token', 'Base output price, USD / 1M tokens'), 'aria-label': tr('基础输出价格 / 1M', 'Base output price / 1M'), value: entry.output === undefined ? '' : entry.output, onChange: (event) => updatePricingOverride(index, 'output', event.target.value) }),
-                  React.createElement('input', { type: 'number', min: '0', step: 'any', placeholder: tr('缓存读 / 1M', 'Cache read / 1M'), title: tr('基础缓存读取价格，美元 / 100 万 Token', 'Base cache read price, USD / 1M tokens'), 'aria-label': tr('基础缓存读取价格 / 1M', 'Base cache read price / 1M'), value: entry.cacheRead === undefined ? '' : entry.cacheRead, onChange: (event) => updatePricingOverride(index, 'cacheRead', event.target.value) }),
-                  React.createElement('input', { type: 'number', min: '0', step: 'any', placeholder: tr('缓存写 / 1M', 'Cache write / 1M'), title: tr('基础缓存写入价格，美元 / 100 万 Token', 'Base cache write price, USD / 1M tokens'), 'aria-label': tr('基础缓存写入价格 / 1M', 'Base cache write price / 1M'), value: entry.cacheWrite === undefined ? '' : entry.cacheWrite, onChange: (event) => updatePricingOverride(index, 'cacheWrite', event.target.value) }),
-                  React.createElement('button', { type: 'button', className: 'uh-refresh uh-icon-button', title: tr('删除价格覆盖', 'Remove price override'), 'aria-label': tr('删除价格覆盖', 'Remove price override'), onClick: () => removePricingOverride(index) }, React.createElement(LineIcon, { name: 'close', size: 14 })),
-                ),
-                React.createElement('div', { className: 'uh-pricing-tier-editor' },
-                  React.createElement('div', { className: 'uh-pricing-tier-editor-head' },
-                    React.createElement('div', { className: 'uh-pricing-tier-editor-title' },
-                      React.createElement('strong', {}, tr('上下文费率档位', 'Context rate bands')),
-                      React.createElement('span', {}, tr('超过阈值后，整次请求使用该档四项费率', 'Above a threshold, all four rates apply to the whole request')),
-                    ),
-                    React.createElement('button', { type: 'button', className: 'uh-refresh', disabled: tiers.length >= 32, title: tiers.length >= 32 ? tr('每个模型最多 32 个档位', 'Maximum 32 bands per model') : tr('添加上下文费率档位', 'Add context rate band'), onClick: () => addPricingOverrideTier(index) }, React.createElement(LineIcon, { name: 'plus', size: 13 }), tr('添加档位', 'Add band')),
-                  ),
-                  tiers.length === 0 ? React.createElement('div', { className: 'uh-pricing-tier-empty' }, tr('未配置档位，所有上下文使用基础费率。', 'No bands configured; base rates apply to every context.')) : React.createElement(React.Fragment, null,
-                    React.createElement('div', { className: 'uh-pricing-tier-edit-head' },
-                      React.createElement('span', {}, tr('超过 Token', 'Above tokens')),
-                      React.createElement('span', {}, tr('输入 / 1M', 'Input / 1M')),
-                      React.createElement('span', {}, tr('输出 / 1M', 'Output / 1M')),
-                      React.createElement('span', {}, tr('缓存读 / 1M', 'Cache read / 1M')),
-                      React.createElement('span', {}, tr('缓存写 / 1M', 'Cache write / 1M')),
-                      React.createElement('span', {}, ''),
-                    ),
-                    tierEditors,
-                  ),
-                ),
-              )
-            })),
-          ),
-        ),
-        pricingError !== '' ? React.createElement('div', { className: 'uh-pricing-error', role: 'alert' }, pricingError === 'forbidden' ? tr('没有权限保存成本设置', 'Not allowed to save cost settings') : pricingError === 'token' ? tr('当前进程令牌不可用，请刷新看板', 'The process capability is unavailable; refresh the dashboard') : pricingError === 'sync' ? tr('models.dev 同步失败，已保留上次成功目录和未保存编辑', 'models.dev sync failed; the last good catalog and unsaved edits were kept') : pricingError === 'mapping' ? tr('模型映射无效：请选择当前模型、官方模型并填写有效倍率', 'Invalid model mapping: select a used model, an official model, and a valid multiplier') : pricingError === 'tier' ? tr('费率档位无效：最多 32 档；阈值必须为递增的正整数，四项费率必须完整且非负', 'Invalid rate bands: maximum 32; thresholds must be increasing positive integers and all four rates must be complete and non-negative') : pricingError === 'override' ? tr('价格覆盖无效：请选择模型并填写完整的非负基础费率', 'Invalid price override: select a model and enter all non-negative base rates') : tr('成本设置保存失败，请检查输入', 'Cost settings could not be saved; check the inputs')) : null,
+        pricingError !== '' ? React.createElement('div', { className: 'uh-pricing-error', role: 'alert' }, pricingErrorMessage(pricingError)) : null,
         React.createElement('div', { className: 'uh-pricing-foot' },
-          React.createElement('span', { className: 'uh-note' }, tr('保存不会重算已有正成本；回填只处理未计价调用。', 'Saving does not recalculate existing positive costs; backfill only handles unpriced calls.')),
+          React.createElement('span', { className: 'uh-note' }, tr('保存只影响未计价调用与之后的调用，已有正成本不会重算；改动时段规则会按新政策重新对账该模型历史。', 'Saving affects unpriced and future calls only; existing positive costs are never recalculated. Changing a peak plan reconciles that model history against the new rules.')),
           React.createElement('div', { className: 'uh-actions' },
-            React.createElement('button', { type: 'button', className: 'uh-refresh', disabled: pricingSaving || pricingSyncing || pricingSyncSaving, onClick: closePricingPanel }, tr('取消', 'Cancel')),
-            React.createElement('button', { type: 'button', className: 'uh-refresh', disabled: pricingSaving || pricingSyncing || pricingSyncSaving, onClick: () => savePricingSettings(false) }, pricingSaving ? tr('保存中…', 'Saving…') : tr('保存', 'Save')),
-            React.createElement('button', { type: 'button', className: 'uh-refresh uh-pricing-backfill', disabled: pricingSaving || pricingSyncing || pricingSyncSaving, onClick: () => savePricingSettings(true) }, tr('保存并回填', 'Save and backfill')),
+            React.createElement('button', { type: 'button', className: 'uh-refresh', disabled: pricingBusy, onClick: closePricingPanel }, tr('取消', 'Cancel')),
+            React.createElement('button', { type: 'button', className: 'uh-refresh', disabled: pricingBusy, onClick: () => savePricingSettings(false) }, pricingSaving ? tr('保存中…', 'Saving…') : tr('保存', 'Save')),
+            React.createElement('button', { type: 'button', className: 'uh-refresh uh-pricing-backfill', disabled: pricingBusy, onClick: () => savePricingSettings(true) }, tr('保存并回填', 'Save and backfill')),
           ),
         ),
       ) : React.createElement('div', { className: 'uh-panel uh-pricing-panel uh-anim-panel' },
         React.createElement('div', { className: 'uh-pricing-head' },
           React.createElement('div', { className: 'uh-title-with-icon' }, React.createElement(LineIcon, { name: 'wallet', size: 16 }), React.createElement('strong', {}, tr('成本统计设置', 'Cost Statistics'))),
-          React.createElement('button', { type: 'button', className: 'uh-refresh uh-icon-button', title: tr('关闭成本设置', 'Close cost settings'), 'aria-label': tr('关闭成本设置', 'Close cost settings'), disabled: pricingSaving || pricingSyncing || pricingSyncSaving, onClick: closePricingPanel }, React.createElement(LineIcon, { name: 'close', size: 16 })),
+          React.createElement('button', { type: 'button', className: 'uh-refresh uh-icon-button', title: tr('关闭成本设置', 'Close cost settings'), 'aria-label': tr('关闭成本设置', 'Close cost settings'), disabled: pricingBusy, onClick: closePricingPanel }, React.createElement(LineIcon, { name: 'close', size: 16 })),
         ),
         pricingLoading ? React.createElement('div', { className: 'uh-empty', role: 'status', style: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 } },
           React.createElement('span', { className: 'uh-trend-spinner', 'aria-hidden': true }),

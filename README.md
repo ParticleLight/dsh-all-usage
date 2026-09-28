@@ -20,7 +20,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **热力图**：53 周使用热力图；按工作区筛选并查看每日回合与 Token 明细
 - **模型统计**：支持混合查看、按模型合并、按供应商汇总三种维度，展示调用次数、各类 Token 与缓存命中率；模型行与筛选下拉显示真实厂商品牌 SVG 图标（未知/混牌保持中性）
 - **摘要与工作区**：Token 用量、缓存命中、估算成本、账户余额、连续使用、工作区 Token 分布和明细
-- **成本统计**：从 models.dev 同步模型价格；按输入、输出、缓存读取和缓存写入四个桶计算，保存价格快照，明确区分已计价、免费模型和未计价调用
+- **成本统计 / 价格表**：从 models.dev 同步模型价格；按输入、输出、缓存读取和缓存写入四个桶计算，保存价格快照，明确区分已计价、免费模型和未计价调用。成本设置是一张可编辑的价格表：每行一个账本模型，价格框直接编辑即写入该模型的手工价，「官方模型」列选定映射后该行自动改用官方目录价，并可为每行配置**上下文费率档位**与**分时段（UTC 峰谷）计费**；配置里存在但账本暂无用量的行同样可见、可改、可删。峰谷规则可额外开启「中国法定节假日全天按谷时计价」，节假日日期以显式列表保存在该模型的峰谷计划里（按北京时间 UTC+8 日历日判定，支持 2026-10-01..2026-10-07 区间写法，也可一键「从公开日历载入」当年放假安排后冻结进策略）。内置 DeepSeek 峰谷表已自带 2026 年官方放假安排（随插件版本更新），官方直连或已映射到官方条目的行无需任何配置即按节假日谷价计价；非官方直连的中转行仍按静态价，映射后生效
 - **导出**：按当前时间范围和模型聚合方式导出 CSV
 - **时间范围**：今日、近 30 天、近 90 天、全部，或在全部可扫描历史日数据中自定义起止日期；热力图始终展示最近 53 周
 - **工作区别名**：在侧栏入口打开看板后管理，持久化保存到 $DSH_HOME/storages 的 KV 单元 `all_usage_aliases`
@@ -33,7 +33,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **趋势折线图**：按当前范围、时区、工作区、供应商和模型显示输入、缓存读写、输出、推理及总处理量；单日范围按小时聚合并显示小时轴，跨日范围按日聚合；使用平滑单调曲线与入场动画，悬停查看精确值，图例可切换曲线，点击点位进入当日明细
 - **统一筛选与审计**：工作区、供应商、模型和日期筛选贯穿摘要、热力图、趋势、表格与 CSV；工作区、供应商、模型三个筛选维度可独立自由组合，工作区、供应商和模型选项只展示当前日期范围内实际使用过的值；切换范围后失效筛选会自动清除；请求日志以紧凑分页表常驻显示，选择单条后查看分组 Token 详情
 - **Token 口径**：输入按「未含缓存命中」计，缓存命中 / 写入与推理独立成桶；全 0 用量的重放事件不会覆盖已记录的真实用量，仅缓存命中的请求也会计入
-- **成本口径**：模型价格来自 models.dev 的 USD / 1M Token 目录；成本快照按 DSH 已归一化的 fresh input 和四类价格桶计算，倍率只作用于最终总价，已有正成本历史不会因价格更新重算；只按模型选择官方厂商条目，未找到官方价格时显示为未计价
+- **成本口径**：模型价格来自 models.dev 的 USD / 1M Token 目录；成本快照按 DSH 已归一化的 fresh input 和四类价格桶计算，倍率只作用于最终总价，已有正成本历史不会因价格更新重算；只按模型选择官方厂商条目，未找到官方价格时显示为未计价。同一官方模型的价格在所有行之间共享：价格框写入的是该模型的手工价条目；价格改动永不重算已有正成本，而峰谷规则改动会按新政策重新对账该模型历史
 
 ### 兼容性与已知限制
 
@@ -170,10 +170,11 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
   - `GET /api/all-usage/records` — 按 scope 分页返回脱敏 canonical usage rows
   - `GET /api/all-usage/balance?force=1` — 账户余额（复用 `llm-deepseek` 的 API Key 配置）
   - `POST /api/all-usage/alias` — 设置工作区别名
-  - `GET /api/all-usage/pricing` — 查看 models.dev 同步状态、已用模型匹配和显式覆盖
-  - `GET /api/all-usage/pricing/models?q=...` — 检索官方模型 ID 与名称匹配结果
-  - `POST /api/all-usage/pricing` — 保存同步、mapping 和显式价格覆盖（含 context tier 档位）
+  - `GET /api/all-usage/pricing` — 读取可编辑价格表所需的完整配置：逐模型的生效费率与状态、映射、手工价、峰谷计划（含内置表来源与完整规则）以及仅存在于配置中的行
+  - `GET /api/all-usage/pricing/models?q=...` — 检索官方模型 ID 与名称匹配结果（含预览费率、是否分层计费、是否有内置峰谷表）
+  - `POST /api/all-usage/pricing` — 保存同步、mapping、手工价，以及上下文费率档位与峰谷时段规则（请求形状不变）
   - `POST /api/all-usage/pricing/sync` — 手动同步 models.dev 并回填未计价调用
+  - `POST /api/all-usage/pricing/holidays` — 按年份抓取中国法定节假日安排（holiday-cn 数据集，jsDelivr 主源、GitHub raw 兜底，主机侧缓存 24 小时），只返回放假日日期列表与来源；**不写入任何配置**，由客户端冻结进峰谷计划
   - `GET /api/all-usage/client-env` — 客户端环境诊断上报（UA、窗口控件遮罩高度、预留顶栏值**及其来源**、视口、面板矩形）；客户端在加载与打开面板时各上报一次，只在内存保留
 - **Client 端**：可读源码位于 `src/client.js`，`npm run build:client` 使用固定版本 Terser 生成 `window.__ModuleLoader__` 工厂格式的 `lib/client.js` 浏览器 bundle，并注册侧边栏「用量统计」入口（`sidebar.footer.action` 槽位）。所有 API 仅接受本机 loopback 请求并拒绝显式跨域请求；余额读取与别名写入还要求插件启动时生成、仅在当前进程有效的令牌（余额 GET 兼容浏览器省略 Origin）。英文模式的日期分桶、范围筛选、连续使用、热力图和导出时间统一按 UTC；中文模式按本地时区。
 
@@ -189,9 +190,11 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - records 接口只返回短 hash、时间、工作区 ID、结构化模型身份、turn/step、Token buckets 和当前物化来源，不返回原始 session ID、路径、提示词、回复或凭据
 - 看板中的总处理量 = 输入 + 输出 + 缓存读写 + 推理；缓存命中表示复用的上下文 Token，不等于新生成 Token 或实际费用
 - 成本计算沿用 cc-switch 的四桶公式：输入、输出、缓存读取和缓存写入分别乘每百万价格，四项相加后再乘倍率；context tier 在输入上下文严格大于阈值时为整次请求切换四项费率，不做渐进分段；DSH 的 reasoning 字段不再次加到 output，避免底层 completion/thoughts 已含推理时重复计费
+- 分时段计费以 UTC 周几与半开时间窗判定：命中规则的请求使用峰时四项费率，未命中时使用该行基础价（谷时＝基础价）；生效起点之前的用量没有可验证档位，会失败关闭为未计价而不会套用今天的费率；同一峰谷计划被所有使用该价格条目的行共享；开启节假日规则后，节假日当天不再命中任何峰时规则，成本快照会记下 pricingHoliday，明细里显示为「节假日谷时」而不是普通「谷时」
 - 历史账本中带 `tiered` 标志的旧 flat 成本会在加载升级时迁移为 `unsupported`（`tiered-pricing-not-modeled`），不再继续显示为当前精确 priced；Token 统计不受影响。
-- 价格同步默认关闭；models.dev 不可用时保留最近一次成功目录，未匹配模型不会套用默认价格；成本设置可展开查看官方档位，并为显式 override 增删 context tier；看板范围与明细视图保存在浏览器本地，6 小时自动同步开关会立即写入受保护的 pricing API
+- 价格同步默认关闭；models.dev 不可用时保留最近一次成功目录，未匹配模型不会套用默认价格；成本设置的价格框即手工价入口（同一官方模型的所有行共享该价格），每行可展开配置上下文档位与 UTC 峰谷规则（含可选的中国法定节假日全天谷价），内置 DeepSeek 峰谷表可一键复制后自定义、也可恢复；看板范围与明细视图保存在浏览器本地，6 小时自动同步开关会立即写入受保护的 pricing API
 - Mapping 语义：带 `identityKey` 的 mapping 只对精确路由身份生效；不带身份键的 mapping 才按模型做全局回退；旧配置中的 `usageIdentityKey` 会在加载时归一化。
+- 节假日日历只在用户点击「从公开日历载入」时抓取：目标主机是 `cdn.jsdelivr.net`（失败时 `raw.githubusercontent.com`），请求里只有年份，**不发送任何用量、会话或凭据数据**；返回的日期串在用户保存前不会生效，保存后连同来源说明一起冻结进该模型的峰谷计划（来源不参与政策哈希）
 - 余额查询走 DeepSeek 官方 `/user/balance` 接口；未配置 API Key 时卡片显示引导文案
 - 账本按 session ID 稳定 hash 到 32 个 JSON shard，单次 flush 只重写对应 shard；旧的 `all_usage_ledger.json` 会在首次加载时迁移，异步写失败或退出前未落盘不会丢失内存统计，只会让下次启动重新扫描
 - 仅统计能归属到已注册工作区（按会话 cwd 匹配）的会话
@@ -211,7 +214,7 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, est
 - **Heatmap**: a 53-week activity heatmap with workspace filters and daily turn/token details
 - **Model analytics**: mixed view, model-merged view, and provider summary with calls, token categories, and cache hit rate; model rows and the model filter dropdown render vendor brand SVG icons (neutral for unknown or mixed brands)
 - **Summary and workspaces**: processed tokens, cache hits, estimated cost, account balance, usage streaks, workspace distribution, and details
-- **Cost statistics**: sync model prices from models.dev, calculate four cost buckets, persist price snapshots, and distinguish priced, free, ambiguous, and unpriced calls
+- **Cost statistics / price table**: sync model prices from models.dev, calculate four cost buckets, persist price snapshots, and distinguish priced, free, ambiguous, and unpriced calls. Cost Settings is one editable price table: each row is a ledger model, its price boxes write that model's manual price, the official-model column switches the row to the catalog price, and every row can carry context rate bands and time-of-day (UTC peak/off-peak) rules, including an optional "Chinese statutory holidays price as off-peak all day" switch whose explicit date list lives in that model's peak plan (China Standard Time calendar days, 2026-10-01..2026-10-07 ranges supported, and one click loads the year's arrangement from a public calendar before it is frozen into the policy); rows that exist only in the saved configuration stay visible, editable, and removable
 - **CSV export**: export data using the selected time range and aggregation mode
 - **Time ranges**: today, last 30 days, last 90 days, all time, or a custom start/end date across all available historical daily data; the heatmap always shows the latest 53 weeks
 - **Workspace aliases**: manage aliases from the sidebar dashboard; values persist in the $DSH_HOME/storages KV cell `all_usage_aliases`
@@ -256,7 +259,7 @@ This plugin reports replayable statistics from local DSH event logs; it is not a
 
 - Local statistics read DSH `assistant/chunk`, final `assistant/message`, and related session events, then deduplicate and replace samples by logical `turn / step`. Official billing may use a provider tokenizer, rounding rules, discounts, free quotas, and billing periods.
 - A failed request is included locally whenever it leaves a usage chunk; whether the provider charged for that failed request must be checked against the official bill.
-- Prices come from the public models.dev catalog and local explicit overrides. Catalog prices can differ from provider prices, regional rates, and invoice discounts, so the cost field is an estimate.
+- Prices come from the public models.dev catalog and local explicit overrides. Catalog prices can differ from provider prices, regional rates, and invoice discounts, so the cost field is an estimate. A price belongs to the model, so every row priced from the same official model shares one manual entry; price edits never rewrite existing positive costs, while a peak-plan change reconciles that model's history against the new policy.
 - Local statistics include registered workspaces only; old ledger rows for unregistered cwds are excluded. Usage recorded for a **deleted workspace** is kept and summed into one "Deleted" row, so removing a workspace never shrinks historical totals. Totals can still be lower than the official bill when logs are damaged, cleaned up, or the upstream emits no usage event.
 
 ### Reproducible Event Examples
@@ -353,10 +356,11 @@ The profile patch layer hot-reloads; save the file and refresh the page.
   - `GET /api/all-usage/records` — paginated privacy-safe canonical usage rows
   - `GET /api/all-usage/balance?force=1` — account balance using the configured `llm-deepseek` API key
   - `POST /api/all-usage/alias` — update workspace aliases
-  - `GET /api/all-usage/pricing` — inspect models.dev sync status, used-model matches, and explicit overrides
-  - `GET /api/all-usage/pricing/models?q=...` — search official model IDs and display-name matches
-  - `POST /api/all-usage/pricing` — save sync, mappings, and explicit price overrides, including context-tier bands
+  - `GET /api/all-usage/pricing` — read the full editable price table: per-row effective rates and status, mappings, manual prices, peak plans (with their built-in/explicit origin and full rules), and rows that exist only in the configuration
+  - `GET /api/all-usage/pricing/models?q=...` — search official model IDs and display names, including preview rates, tiered-pricing flags, and whether a built-in peak table exists
+  - `POST /api/all-usage/pricing` — save sync, mappings, manual prices, context rate bands, and peak-window rules (request shape unchanged)
   - `POST /api/all-usage/pricing/sync` — sync models.dev and backfill unpriced calls
+  - `POST /api/all-usage/pricing/holidays` — fetch one year of the Chinese holiday arrangement (the holiday-cn dataset, jsDelivr first with a GitHub raw fallback, cached host-side for 24 hours) and return only the off-day list plus its source; **nothing is written to the configuration** — the client freezes the dates into a peak plan
   - `GET /api/all-usage/client-env` — client environment report (user agent, window-controls overlay height, the reserved strip **and its source**, viewport, panel rectangles); the client reports it at load and whenever the sheet opens, kept in memory only
 - **Client**: readable source lives in `src/client.js`; `npm run build:client` uses the pinned Terser version to generate the `window.__ModuleLoader__` bundle at `lib/client.js`, which registers the “Usage statistics” sidebar entry through the `sidebar.footer.action` slot. All API routes accept loopback requests and reject an explicit cross-origin Origin; balance reads and alias writes also require a process-scoped token generated when the plugin starts (the balance GET tolerates browsers omitting Origin).
 
@@ -372,9 +376,11 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 - The records endpoint returns only a short hash, time, workspace ID, structured model identity, turn/step, token buckets, and current materialization source. It omits raw session IDs, paths, prompts, replies, and credentials
 - Processed tokens = input + output + cache read/write + reasoning; a cache hit means reused context, not newly generated tokens or actual cost
 - Cost follows the cc-switch four-bucket formula: input, output, cache-read, and cache-write tokens are priced independently, summed, then multiplied by the final multiplier; when input context is strictly greater than a context-tier threshold, all four rates switch for the whole request instead of progressive band splitting, and DSH reasoning is not added to output a second time
+- Time-of-day pricing matches UTC weekdays against half-open windows: a matching request uses the rule's peak rates, anything else uses the row base rates (off-peak = base); usage before a plan's effective instant has no verifiable band and fails closed as unpriced instead of inheriting today's rates, and one plan is shared by every row priced from the same entry (for DeepSeek the built-in plan carries the official State Council holiday list, refreshed with plugin releases); with the holiday switch on, a statutory holiday never matches a peak window and the cost snapshot records pricingHoliday, so records show "Holiday off-peak" instead of a plain off-peak band. The built-in DeepSeek table already ships the 2026 arrangement (refreshed with plugin releases), so first-party or mapped DeepSeek rows price holidays as off-peak with no configuration; reseller routes stay static until they are mapped to the official entry
 - Legacy ledger costs carrying `tiered` are migrated to `unsupported` (`tiered-pricing-not-modeled`) on load instead of remaining falsely marked as current flat priced estimates; token statistics are unchanged.
-- Pricing sync is off by default; when models.dev is unavailable the last good catalog remains in use, and unmatched models never receive a guessed default price; Cost Statistics can expand official tier schedules and add or remove context tiers on explicit overrides; dashboard range and detail-view preferences are stored in browser storage, while the 6-hour sync toggle is immediately saved through the protected pricing API
+- Pricing sync is off by default; when models.dev is unavailable the last good catalog remains in use, and unmatched models never receive a guessed default price; the Cost Settings price boxes are the manual-price entry point (shared by every row priced from the same official model), each row expands into context bands and UTC peak rules (including optional all-day off-peak pricing on Chinese statutory holidays), and the built-in DeepSeek table can be copied for customisation or restored; dashboard range and detail-view preferences are stored in browser storage, while the 6-hour sync toggle is immediately saved through the protected pricing API
 - Mapping semantics: a mapping with `identityKey` applies only to that exact route identity; a mapping without an identity key is the model-wide fallback. Legacy `usageIdentityKey` values are normalized when loaded.
+- The holiday calendar is fetched only when the user clicks "Load from public calendar": the request goes to `cdn.jsdelivr.net` (falling back to `raw.githubusercontent.com`), carries nothing but the year, and **never includes usage, session, or credential data**; the returned dates stay inert until saved, and saving freezes them together with their source note into that model's peak plan (the source is excluded from the policy hash)
 - Balance data comes from DeepSeek’s official `/user/balance` endpoint; the card shows guidance when no API key is configured
 - English mode uses UTC for date buckets, range filters, streaks, heatmap dates, and export timestamps; Chinese mode uses local time
 - The ledger assigns each session ID to one of 32 stable-hash JSON shards, so a flush rewrites only its shard; the old `all_usage_ledger.json` is migrated on first load. An async write failure or an unflushed shutdown does not lose in-memory statistics; the next startup simply scans that session again
