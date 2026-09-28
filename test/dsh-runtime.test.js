@@ -197,7 +197,7 @@ async function runRuntimeSmoke(runtime) {
     // Every exact route the plugin owns, in one list. The count assertions below
     // are derived from it, so adding a route can no longer leave a stale magic
     // number behind: /api/all-usage/client-env did exactly that in v1.1.11.
-    const pluginPaths = ['/api/all-usage', '/api/all-usage/status', '/api/all-usage/query', '/api/all-usage/records', '/api/all-usage/pricing', '/api/all-usage/pricing/models', '/api/all-usage/pricing/sync', '/api/all-usage/balance', '/api/all-usage/alias', '/api/all-usage/client-env']
+    const pluginPaths = ['/api/all-usage', '/api/all-usage/status', '/api/all-usage/query', '/api/all-usage/records', '/api/all-usage/pricing', '/api/all-usage/pricing/models', '/api/all-usage/pricing/sync', '/api/all-usage/pricing/holidays', '/api/all-usage/balance', '/api/all-usage/alias', '/api/all-usage/client-env']
     for (const path of pluginPaths) assert.equal(webServer.exact.has(path), true, 'real webServer must register ' + path)
     const eventHooksAfterLoad = {
       event: hookCount(root, 'session/event'),

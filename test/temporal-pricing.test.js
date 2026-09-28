@@ -8,6 +8,7 @@ import {
   resolvePricing,
   temporalBand,
   temporalPlanFor,
+  temporalPolicyHash,
 } from '../lib/pricing.js'
 
 // ---------- helpers (same shape as aggregation.test.js) ----------
@@ -230,7 +231,7 @@ test('temporal band rules are local-timezone independent (UTC methods only)', ()
 
 test('normalizeTemporalPricing rejects ambiguous or invalid configurations', () => {
   const base = { policyId: 'p', rules: [{ id: 'peak', weekdays: [1, 2], windows: [{ startMinute: 60, endMinute: 240 }], rates: { input: '1', output: '1', cacheRead: '1', cacheWrite: '0' } }] }
-  assert.deepEqual(normalizeTemporalPricing(base), { policies: [{ policyId: 'p', sourceUrl: '', timezone: 'UTC', effectiveFrom: 0, effectiveUntil: null, defaultPlan: null, rules: [{ id: 'peak', weekdays: [1, 2], windows: [{ startMinute: 60, endMinute: 240 }], rates: { input: '1', output: '1', cacheRead: '1', cacheWrite: '0' } }] }] })
+  assert.deepEqual(normalizeTemporalPricing(base), { policies: [{ policyId: 'p', sourceUrl: '', timezone: 'UTC', effectiveFrom: 0, effectiveUntil: null, defaultPlan: null, holidays: [], holidaysSource: '', rules: [{ id: 'peak', weekdays: [1, 2], windows: [{ startMinute: 60, endMinute: 240 }], rates: { input: '1', output: '1', cacheRead: '1', cacheWrite: '0' } }] }] })
   assert.equal(normalizeTemporalPricing({ ...base, timezone: 'Asia/Shanghai' }), null)
   assert.equal(normalizeTemporalPricing({ ...base, policyId: '' }), null)
   assert.equal(normalizeTemporalPricing({ ...base, effectiveFrom: -1 }), null)
@@ -1149,4 +1150,78 @@ test('a baseline tail rolled back by a live fallback still reconciles on the fol
     if (body.totals.input === 80) { aligned = 80; break }
   }
   assert.equal(aligned, 80)
+})
+
+// ---------- statutory holidays ----------
+
+test('statutory holidays force a full off-peak day on the China Standard Time calendar', () => {
+  const base = {
+    policyId: 'holiday-plan',
+    timezone: 'UTC',
+    effectiveFrom: 0,
+    effectiveUntil: null,
+    defaultPlan: null,
+    holidays: ['2026-10-01'],
+    rules: [{ id: 'all-day', weekdays: [0, 1, 2, 3, 4, 5, 6], windows: [{ startMinute: 0, endMinute: 1440 }], rates: { input: '1', output: '2', cacheRead: '0.1', cacheWrite: '0' } }],
+  }
+  const normalized = normalizeTemporalPricing(base)
+  assert.deepEqual(normalized.policies[0].holidays, ['2026-10-01'])
+  const profile = { policies: normalized.policies.map((policy) => ({ ...policy, policyHash: temporalPolicyHash(policy) })) }
+  // China Standard Time day boundary: 2026-10-01 CST runs 2026-09-30T16:00Z to 2026-10-01T16:00Z.
+  assert.equal(temporalBand(profile, Date.UTC(2026, 8, 30, 15, 59, 59)), 'peak')
+  assert.equal(temporalBand(profile, Date.UTC(2026, 8, 30, 16, 0, 0)), 'off-peak')
+  assert.equal(temporalBand(profile, Date.UTC(2026, 9, 1, 15, 59, 59)), 'off-peak')
+  assert.equal(temporalBand(profile, Date.UTC(2026, 9, 1, 16, 0, 0)), 'peak')
+  const resolved = { status: 'priced', currency: 'USD', source: 'manual', pricingModel: 'deepseek-v4-flash', providerId: 'deepseek', inputTokenSemantics: 'fresh', multiplier: '1', tiered: false, rates: { input: '0.22', output: '0.66', cacheRead: '0.007', cacheWrite: '0' }, temporalProfile: profile, temporalRoute: 'official' }
+  const values = { input: 1000000, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }
+  const holiday = calculateCost(values, resolved, Date.UTC(2026, 9, 1, 2, 0, 0), 'usage-event')
+  assert.equal(holiday.status, 'priced')
+  assert.equal(holiday.pricingBand, 'off-peak')
+  assert.equal(holiday.pricingHoliday, true)
+  assert.equal(holiday.total, '0.22')
+  const plain = calculateCost(values, resolved, Date.UTC(2026, 8, 30, 2, 0, 0), 'usage-event')
+  assert.equal(plain.pricingBand, 'peak')
+  assert.equal(plain.pricingHoliday, false)
+  // The recorded snapshot keeps the verdict, so a ledger row can explain itself.
+  const snapshot = normalizeCostSnapshot(holiday)
+  assert.equal(snapshot.pricingHoliday, true)
+  assert.equal(normalizeCostSnapshot(plain).pricingHoliday, false)
+})
+
+test('holiday lists are validated, canonical and part of the policy hash', () => {
+  const base = { policyId: 'p', rules: [{ id: 'peak', weekdays: [1], windows: [{ startMinute: 60, endMinute: 240 }], rates: { input: '1', output: '1', cacheRead: '0', cacheWrite: '0' } }] }
+  assert.deepEqual(normalizeTemporalPricing({ ...base, holidays: ['2026-10-02', '2026-10-01', '2026-10-01'] }).policies[0].holidays, ['2026-10-01', '2026-10-02'])
+  assert.deepEqual(normalizeTemporalPricing(base).policies[0].holidays, [])
+  assert.equal(normalizeTemporalPricing({ ...base, holidays: ['2026-02-30'] }), null)
+  assert.equal(normalizeTemporalPricing({ ...base, holidays: ['2026-2-1'] }), null)
+  assert.equal(normalizeTemporalPricing({ ...base, holidays: ['20261001'] }), null)
+  assert.equal(normalizeTemporalPricing({ ...base, holidays: '2026-10-01' }), null)
+  assert.equal(normalizeTemporalPricing({ ...base, holidays: ['1999-01-01'] }), null)
+  const withHoliday = normalizeTemporalPricing({ ...base, holidays: ['2026-10-01'] }).policies[0]
+  const withoutHoliday = normalizeTemporalPricing(base).policies[0]
+  assert.notEqual(temporalPolicyHash(withHoliday), temporalPolicyHash(withoutHoliday))
+  // Two policies that differ only in their holiday list resolve to the same band plan otherwise.
+  assert.equal(temporalPolicyHash(withHoliday), temporalPolicyHash(normalizeTemporalPricing({ ...base, holidays: ['2026-10-01'] }).policies[0]))
+})
+
+test('the built-in DeepSeek plan already excludes statutory holidays', () => {
+  const state = { catalogEntries: [{ providerId: 'deepseek', modelId: 'deepseek-v4-flash', displayName: 'DeepSeek V4 Flash', input: '0.15', output: '0.6', cacheRead: '0.003', cacheWrite: '0', source: 'models.dev', fetchedAt: 0 }], overrides: [], mappings: [], providerAliases: {} }
+  const resolved = resolvePricing({ provider: 'deepseek', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', label: 'deepseek-v4-flash', legacy: false }, state)
+  assert.equal(resolved.temporalRoute, 'official')
+  const policy = resolved.temporalProfile.policies[0]
+  assert.equal(policy.holidays.length, 33)
+  assert.ok(policy.holidays.includes('2026-10-01'))
+  assert.ok(String(policy.holidaysSource).includes('gov.cn'))
+  // 2026-10-01 is a Thursday inside the 01:00-04:00 UTC peak window, but it is a holiday.
+  assert.equal(temporalBand(resolved.temporalProfile, Date.UTC(2026, 9, 1, 2, 0, 0)), 'off-peak')
+  assert.equal(temporalBand(resolved.temporalProfile, Date.UTC(2026, 8, 24, 2, 0, 0)), 'peak')
+  const values = { input: 1000000, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }
+  const holiday = calculateCost(values, resolved, Date.UTC(2026, 9, 1, 2, 0, 0), 'usage-event')
+  assert.equal(holiday.pricingBand, 'off-peak')
+  assert.equal(holiday.pricingHoliday, true)
+  assert.equal(holiday.total, '0.15')
+  const peak = calculateCost(values, resolved, Date.UTC(2026, 8, 24, 2, 0, 0), 'usage-event')
+  assert.equal(peak.pricingBand, 'peak')
+  assert.equal(peak.pricingHoliday, false)
+  assert.equal(peak.total, '0.44')
 })
