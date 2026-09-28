@@ -115,11 +115,12 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 ### 最近更新
 
-**v1.1.14**
+**v1.1.15**
 
-- **`deepseek-flash`（DeepSeek V4.1 Flash）现在正确按峰谷计价**：它与 `deepseek-v4-flash` 同 family、同基础价（0.15 / 0.6 / 0.003），但内置峰谷表里只有 v4 那几个 id，导致它的每条记录都按静态价计、面板显示「静态价（无峰谷计划）」—— 峰值时段成本被少算约 **57%**。现已把该模型写入内置表（峰值档 0.44 / 1.32 / 0.014）；非峰值费率仍取目录实时值，峰谷计划仍只对第一方路由生效。由 @baileyh8 在 #2 报告。
-- **历史记录自动修正**：升级后首次启动时，此前以「无峰谷计划」结论落盘的记录会被 `reconcileTemporalPricing()` 按各自用量发生时刻一次性迁移重算并回写账本，无需手动操作（已带档位的记录不会被目录刷新改写，仍需显式 `repriceTemporal`）。
-- README 顶部徽章更新：npm 版本 / **全量下载** / stars / license / CI / DSH 兼容 / status。
+- **成本设置合并成一张可编辑的价格表**：取消「模型映射」「显式价格覆盖」两个独立窗口，改成每个账本模型一行——价格框直接编辑即写入该模型的手工价（同一官方模型的所有行共享该价格），「官方模型」列选定映射后该行自动改用官方目录价，另有两个按钮分别展开**上下文费率档位**与 **UTC 峰谷规则**编辑器；只存在于配置、账本暂无用量 的行同样可见可改可删。
+- **中国法定节假日全天按谷时**：峰谷计划可携带显式节假日日期列表（按北京时间 UTC+8 日历日判定，支持 `2026-10-01..2026-10-07` 区间写法）；**内置 DeepSeek 峰谷表已自带 2026 年官方放假安排（33 天，取自国务院办公厅通知，来源随日期一起保存）**，官方直连或已映射的行零配置即按节假日谷价，成本快照新增 `pricingHoliday`，明细显示「节假日谷时」。自定义模型或其它年份可在面板里一键「从公开日历载入」（新增 `POST /api/all-usage/pricing/holidays`，抓取结果在你保存时才冻结进策略）。
+- **面板体验与性能**：合并表按行 memo（500 行时改一个价格只重渲染该行）、行查找改为索引后极限配置由 282 ms/次 降到 3.6 ms；表头不再被输入框盖住、表格不再横向滚动；修复「点官方模型输入框会清空当前模型」（改为保留并全选）以及快照丢弃 `providerId`/`temporalPricing` 导致「映射 + 手工价」保存后失效的问题。
+- **历史记录自动修正**：内置峰谷表政策哈希变化后，官方直连/已映射的 DeepSeek 记录会按各自用量发生时刻一次性重新对账（实测 9/25–9/27 中秋假日的 237 条峰值记录全部改为「节假日谷时」，费率 0.44 → 0.15）。
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -309,11 +310,12 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 
 ### Latest Update
 
-**v1.1.14**
+**v1.1.15**
 
-- **`deepseek-flash` (DeepSeek V4.1 Flash) is now priced with the peak/off-peak plan**: models.dev lists it in the same `deepseek-flash` family and at the same standard rates as `deepseek-v4-flash` (0.15 / 0.6 / 0.003), but the built-in table only carried the v4 ids, so every record for it was priced flat — the cost panel said "static (no band plan)" and a peak-hour request was under-reported by roughly **57%**. The model is now declared in the built-in table (peak band 0.44 / 1.32 / 0.014); off-peak rates still come from the live catalog entry, and the plan still applies to first-party routes only. Reported by @baileyh8 in #2.
-- **Existing history is corrected automatically**: on the first start after upgrading, records stored with the "no band plan" verdict are migrated once by `reconcileTemporalPricing()` against their own usage instant and written back to the ledger — no manual step. Records that already carry a band are still never rewritten by a catalog refresh; those need an explicit `repriceTemporal`.
-- README badges updated: npm version / **total downloads** / stars / license / CI / DSH compatibility / status.
+- **Cost Settings is one editable price table**: the separate "Model mappings" and "Explicit price overrides" sections are gone. Each ledger model gets a row whose four price boxes write that model's manual price (shared by every row priced from the same official model), whose official-model column switches the row to the catalog price, and whose two buttons expand a **context rate band** editor and a **UTC peak/off-peak** editor; rows that exist only in the configuration stay visible, editable, and removable.
+- **Chinese statutory holidays price as a full off-peak day**: a peak plan can carry an explicit holiday date list (China Standard Time calendar days, `2026-10-01..2026-10-07` ranges supported), and the **built-in DeepSeek plan now ships the 2026 arrangement (33 days from the State Council notice, saved together with its provenance)**, so first-party and mapped DeepSeek rows price holidays as off-peak with no configuration. Cost snapshots record `pricingHoliday`, and records show "Holiday off-peak". Other models or years can load one year from a public calendar in the panel (`POST /api/all-usage/pricing/holidays`); the fetched dates are frozen into the plan only when you save.
+- **Panel and performance work**: rows are memoized (editing one price re-renders that row only), indexed lookups cut a worst-case configuration from 282 ms to 3.6 ms per keystroke, the sticky header no longer hides behind row inputs and the table no longer scrolls sideways. Fixes: focusing the official-model field no longer clears the current model, and the pricing snapshot no longer drops `providerId`/`temporalPricing` (which made a mapped manual price silently fall back to the catalog).
+- **Existing history is corrected automatically**: when the built-in plan's policy hash changes, first-party and mapped DeepSeek records are reconciled once against their own usage instant (in practice the 237 peak records of the 9/25-9/27 Mid-Autumn holidays moved to "Holiday off-peak", 0.44 to 0.15).
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 
