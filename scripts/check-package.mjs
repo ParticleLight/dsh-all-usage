@@ -7,8 +7,8 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const dshCompatibility = packageJson.dsh && packageJson.dsh.compatibility
 if (!packageJson.engines || packageJson.engines.node !== '>=22 <25') throw new Error('package.json must declare Node.js engines >=22 <25')
-const EXPECTED_RUNTIME_RANGE = '>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0 || >=0.1.7-rc.2 <0.1.8-0'
-const REQUIRED_VERIFIED = ['0.1.7-rc.2', '0.1.5-rc.2', '0.1.5-rc.1', '0.1.1-rc.2', '0.1.1-rc.1']
+const EXPECTED_RUNTIME_RANGE = '>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0 || >=0.1.7-rc.2 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0'
+const REQUIRED_VERIFIED = ['0.2.0-rc.2', '0.1.7-rc.2', '0.1.5-rc.2', '0.1.5-rc.1', '0.1.1-rc.2', '0.1.1-rc.1']
 if (!dshCompatibility || dshCompatibility.runtime !== EXPECTED_RUNTIME_RANGE || !Array.isArray(dshCompatibility.verified)) throw new Error('package.json must declare the verified DSH compatibility range')
 const missingVerified = REQUIRED_VERIFIED.filter((version) => !dshCompatibility.verified.includes(version))
 if (missingVerified.length > 0) throw new Error('package.json must list these verified DSH runtimes: ' + missingVerified.join(', '))

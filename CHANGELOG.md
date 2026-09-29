@@ -2,6 +2,11 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [1.1.16] - 2026-09-29
+
+### Added
+
+- **DSH 0.2.0-rc.2 is a supported runtime.** The real Cordis smoke passes on it — every route, the session hooks, the ledger flush, the revision fast path and disposal — so `dsh.compatibility.runtime` gains `>=0.2.0-rc.2 <0.2.1-0`, `0.2.0-rc.2` joins the verified list (now six runtimes) and the CI smoke matrix (Node 22/24, twelve jobs). The line keeps the 0.1.7 Cordis pairing (cordis 4.0.4 / loader 1.0.5 / timer 1.1.6) and the abstract settings seam instead of the file-backed provider, which is exactly what the smoke runs against. README (both languages, including the badge and the verified matrix) follows the new declaration.
 ## [1.1.15] - 2026-09-28
 
 ### Added

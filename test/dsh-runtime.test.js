@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const RUNTIME_ROOT = process.env.DSH_RUNTIME_ROOT || 'F:\\dsh-web\\runtime'
 const requestedRuntimeVersion = process.env.DSH_RUNTIME_VERSION
-const RUNTIME_VERSIONS = requestedRuntimeVersion ? [requestedRuntimeVersion] : ['0.1.7-rc.2', '0.1.5-rc.1', '0.1.1-rc.2', '0.1.1-rc.1']
+const RUNTIME_VERSIONS = requestedRuntimeVersion ? [requestedRuntimeVersion] : ['0.2.0-rc.2', '0.1.7-rc.2', '0.1.5-rc.1', '0.1.1-rc.2', '0.1.1-rc.1']
 const REQUIRE_RUNTIME_SMOKE = process.env.DSH_REQUIRE_RUNTIME_SMOKE === '1'
 // Each DSH runtime pins its own Cordis/loader/timer line; an unknown runtime
 // falls back to any installed version so a new release still gets smoke-tested.
@@ -25,6 +25,8 @@ const RUNTIME_PROFILES = {
   '0.1.5-rc.1': { cordis: '4.0.2', loader: '1.0.3', timer: '1.1.4', settings: FILE_SETTINGS },
   '0.1.5-rc.2': { cordis: '4.0.2', loader: '1.0.3', timer: '1.1.4', settings: FILE_SETTINGS },
   '0.1.7-rc.2': { cordis: '4.0.4', loader: '1.0.5', timer: '1.1.6', settings: null },
+  // 0.2.0 keeps the 0.1.7 Cordis line and the abstract settings seam.
+  '0.2.0-rc.2': { cordis: '4.0.4', loader: '1.0.5', timer: '1.1.6', settings: null },
 }
 
 async function findPackage(packageName, version) {

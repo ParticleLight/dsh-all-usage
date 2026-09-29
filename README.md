@@ -6,7 +6,7 @@
 [![stars](https://img.shields.io/github/stars/ParticleLight/dsh-all-usage?label=stars&logo=github)](https://github.com/ParticleLight/dsh-all-usage/stargazers)
 [![license](https://img.shields.io/github/license/ParticleLight/dsh-all-usage?label=license&color=green)](LICENSE)
 [![CI](https://github.com/ParticleLight/dsh-all-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/ParticleLight/dsh-all-usage/actions/workflows/ci.yml)
-[![DSH](https://img.shields.io/badge/DSH-0.1.1--0.1.7-4D6BFE)](#兼容性与已知限制)
+[![DSH](https://img.shields.io/badge/DSH-0.1.1--0.2.0-4D6BFE)](#兼容性与已知限制)
 [![status](https://img.shields.io/badge/status-stable-brightgreen)](https://github.com/ParticleLight/dsh-all-usage/releases)
 
 [中文](#中文) · [English](#english)
@@ -38,12 +38,13 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 ### 兼容性与已知限制
 
 - **运行环境**：需要 Node.js `>=22 <25`；CI 会在 Node 22 和 Node 24 上运行测试、语法检查和 npm 包内容检查。
-- **DSH 兼容**：`package.json` 声明 DSH runtime `>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0 || >=0.1.7-rc.2 <0.1.8-0`，已使用 `0.1.7-rc.2`、`0.1.5-rc.2`、`0.1.5-rc.1`、`0.1.1-rc.2` 和 `0.1.1-rc.1` 的真实 Cordis 服务链验证，且全部纳入 CI smoke 矩阵（Node 22/24 双档）；`0.1.2-rc.1` 已通过实际使用验证兼容，但未纳入 CI smoke 矩阵。声明按元组拆成三段而非写成单一区间，是因为 node-semver 只有在范围里存在与目标版本同 `major.minor.patch` 且自身带预发布标签的比较符时，才会放行该预发布版本 —— 例如必须写成 `>=0.1.7-rc.2` 才能让 `0.1.7-rc.2` 进入范围。
+- **DSH 兼容**：`package.json` 声明 DSH runtime `>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0 || >=0.1.7-rc.2 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0`，已使用 `0.2.0-rc.2`、`0.1.7-rc.2`、`0.1.5-rc.2`、`0.1.5-rc.1`、`0.1.1-rc.2` 和 `0.1.1-rc.1` 的真实 Cordis 服务链验证，且全部纳入 CI smoke 矩阵（Node 22/24 双档）；`0.1.2-rc.1` 已通过实际使用验证兼容，但未纳入 CI smoke 矩阵。声明按元组拆成四段而非写成单一区间，是因为 node-semver 只有在范围里存在与目标版本同 `major.minor.patch` 且自身带预发布标签的比较符时，才会放行该预发布版本 —— 例如必须写成 `>=0.2.0-rc.2` 才能让 `0.2.0-rc.2` 进入范围。
 - **桌面客户端（Electron，Windows）**：本插件在 DSH 桌面客户端上实测运行正常（实测 `@deepseek-ai/dsh-desktop` `0.1.7-rc.2`）。桌面客户端会在窗口顶部为自身的最小化 / 最大化 / 关闭按钮保留一条 40px 顶栏，并在文档上标记 `data-windows-titlebar` 与 `--dsh-windows-titlebar-height`；面板据此从该条**下方**开始绘制，所以桌面端自己的关闭按钮永远不会被面板盖住。浏览器端没有该标记，不留白。顶栏高度优先取宿主声明，其次取 Window Controls Overlay 矩形，最后退回 UA；需要微调时可在 DevTools 执行 `localStorage.setItem('dsh-all-usage:topInset', '48')` 后刷新（`0` 表示不留白），无需重新构建。桌面客户端自带运行时，其运行时 `0.1.7-rc.2` 已纳入声明区间与 CI smoke 矩阵（见下表）。
 - **Web 服务依赖**：Host 将 `webServer` 声明为必需依赖，确保服务晚挂载时由 DSH 等待后再执行插件；该包面向 DSH Web profile，不提供无 WebServer 的 headless 路由。HTTP 守卫还会检查真实 socket peer，反向代理只有在连接本身来自 loopback 时才会被接受。
 
 | DSH runtime | Node.js 支持 | 真实 Cordis smoke | 结论 |
 | --- | --- | --- | --- |
+| `0.2.0-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证（DSH 官方 `next` 线；本机 web profile 即运行于此版本） |
 | `0.1.7-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证（DSH 桌面客户端即运行于此版本） |
 | `0.1.5-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证 |
 | `0.1.5-rc.1` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证 |
@@ -115,12 +116,10 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 ### 最近更新
 
-**v1.1.15**
+**v1.1.16**
 
-- **成本设置合并成一张可编辑的价格表**：取消「模型映射」「显式价格覆盖」两个独立窗口，改成每个账本模型一行——价格框直接编辑即写入该模型的手工价（同一官方模型的所有行共享该价格），「官方模型」列选定映射后该行自动改用官方目录价，另有两个按钮分别展开**上下文费率档位**与 **UTC 峰谷规则**编辑器；只存在于配置、账本暂无用量 的行同样可见可改可删。
-- **中国法定节假日全天按谷时**：峰谷计划可携带显式节假日日期列表（按北京时间 UTC+8 日历日判定，支持 `2026-10-01..2026-10-07` 区间写法）；**内置 DeepSeek 峰谷表已自带 2026 年官方放假安排（33 天，取自国务院办公厅通知，来源随日期一起保存）**，官方直连或已映射的行零配置即按节假日谷价，成本快照新增 `pricingHoliday`，明细显示「节假日谷时」。自定义模型或其它年份可在面板里一键「从公开日历载入」（新增 `POST /api/all-usage/pricing/holidays`，抓取结果在你保存时才冻结进策略）。
-- **面板体验与性能**：合并表按行 memo（500 行时改一个价格只重渲染该行）、行查找改为索引后极限配置由 282 ms/次 降到 3.6 ms；表头不再被输入框盖住、表格不再横向滚动；修复「点官方模型输入框会清空当前模型」（改为保留并全选）以及快照丢弃 `providerId`/`temporalPricing` 导致「映射 + 手工价」保存后失效的问题。
-- **历史记录自动修正**：内置峰谷表政策哈希变化后，官方直连/已映射的 DeepSeek 记录会按各自用量发生时刻一次性重新对账（实测 9/25–9/27 中秋假日的 237 条峰值记录全部改为「节假日谷时」，费率 0.44 → 0.15）。
+- **正式支持 DSH 0.2.0-rc.2**：真实 Cordis 服务链 smoke 在该运行时上全部通过（全部路由、session 钩子、账本 flush、revision 快路径、dispose），声明区间新增 `>=0.2.0-rc.2 <0.2.1-0`，已验证列表增至 6 个运行时，CI smoke 矩阵扩到 **6 个版本 × Node 22/24 = 12 个作业**；该运行时线沿用 0.1.7 的 Cordis 组合（cordis 4.0.4 / loader 1.0.5 / timer 1.1.6）与抽象 settings seam，插件无需代码改动。
+- 本版只改**兼容性声明、CI 矩阵与文档**（README 中英同步：声明引用、验证表、徽章）。上一个版本的功能（1.1.15：可编辑价格表、中国法定节假日全天谷价、面板性能修复）见 CHANGELOG。
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -233,12 +232,13 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, est
 ### Compatibility and Known Limitations
 
 - **Runtime**: Node.js `>=22 <25` is required. CI runs the test suite, syntax checks, and package-content checks on Node 22 and Node 24.
-- **DSH compatibility**: `package.json` declares DSH runtime `>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0 || >=0.1.7-rc.2 <0.1.8-0`; the real Cordis service chain is verified on `0.1.7-rc.2`, `0.1.5-rc.2`, `0.1.5-rc.1`, `0.1.1-rc.2` and `0.1.1-rc.1`, all of them covered by the CI smoke matrix on Node 22 and 24. `0.1.2-rc.1` has also been verified compatible through real-world use, but is not covered by the CI smoke matrix. The declaration is split per tuple rather than written as one interval because node-semver only admits a prerelease version when some comparator shares its exact `major.minor.patch` tuple and itself carries a prerelease tag — `0.1.7-rc.2` is admitted only because the range says `>=0.1.7-rc.2`.
+- **DSH compatibility**: `package.json` declares DSH runtime `>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0 || >=0.1.7-rc.2 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0`; the real Cordis service chain is verified on `0.2.0-rc.2`, `0.1.7-rc.2`, `0.1.5-rc.2`, `0.1.5-rc.1`, `0.1.1-rc.2` and `0.1.1-rc.1`, all of them covered by the CI smoke matrix on Node 22 and 24. `0.1.2-rc.1` has also been verified compatible through real-world use, but is not covered by the CI smoke matrix. The declaration is split per tuple rather than written as one interval because node-semver only admits a prerelease version when some comparator shares its exact `major.minor.patch` tuple and itself carries a prerelease tag — `0.2.0-rc.2` is admitted only because the range says `>=0.2.0-rc.2`.
 - **Desktop client (Electron, Windows)**: the plugin is verified running in the DSH desktop client (`@deepseek-ai/dsh-desktop` `0.1.7-rc.2` as measured). The desktop client keeps a 40px caption strip across the top of its window for its own minimise / maximise / close buttons and marks the document with `data-windows-titlebar` and `--dsh-windows-titlebar-height`; the panel draws from **below** that strip, so the client's own close button is never covered. Browsers carry no such marker and reserve nothing. The strip height comes from the host's declaration first, then the Window Controls Overlay rectangle, then the user agent; to tune it, run `localStorage.setItem('dsh-all-usage:topInset', '48')` in DevTools and reload (`0` reserves nothing) — no rebuild required. The desktop client ships its own runtime, and that runtime — `0.1.7-rc.2` — is now part of the declared range and of the CI smoke matrix below.
 - **Web service dependency**: the Host declares `webServer` as a required dependency, so DSH waits for a late-mounted service before applying the plugin; this package targets the DSH Web profile and does not expose routes without WebServer. The HTTP guard also checks the actual socket peer, so a reverse proxy is accepted only when the connection itself is loopback.
 
 | DSH runtime | Node.js support | Real Cordis smoke | Conclusion |
 | --- | --- | --- | --- |
+| `0.2.0-rc.2` | `>=22 <25`, CI covers 22/24 | Passed (real Cordis service chain, CI covers Node 22/24) | Declared and verified (the current DSH `next` line; this machine's web profile runs it) |
 | `0.1.7-rc.2` | `>=22 <25`, CI covers 22/24 | Passed (real Cordis service chain, CI covers Node 22/24) | Declared and verified (the DSH desktop client runs this version) |
 | `0.1.5-rc.2` | `>=22 <25`, CI covers 22/24 | Passed (real Cordis service chain, CI covers Node 22/24) | Declared and verified |
 | `0.1.5-rc.1` | `>=22 <25`, CI covers 22/24 | Passed (real Cordis service chain, CI covers Node 22/24) | Declared and verified |
@@ -310,12 +310,10 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 
 ### Latest Update
 
-**v1.1.15**
+**v1.1.16**
 
-- **Cost Settings is one editable price table**: the separate "Model mappings" and "Explicit price overrides" sections are gone. Each ledger model gets a row whose four price boxes write that model's manual price (shared by every row priced from the same official model), whose official-model column switches the row to the catalog price, and whose two buttons expand a **context rate band** editor and a **UTC peak/off-peak** editor; rows that exist only in the configuration stay visible, editable, and removable.
-- **Chinese statutory holidays price as a full off-peak day**: a peak plan can carry an explicit holiday date list (China Standard Time calendar days, `2026-10-01..2026-10-07` ranges supported), and the **built-in DeepSeek plan now ships the 2026 arrangement (33 days from the State Council notice, saved together with its provenance)**, so first-party and mapped DeepSeek rows price holidays as off-peak with no configuration. Cost snapshots record `pricingHoliday`, and records show "Holiday off-peak". Other models or years can load one year from a public calendar in the panel (`POST /api/all-usage/pricing/holidays`); the fetched dates are frozen into the plan only when you save.
-- **Panel and performance work**: rows are memoized (editing one price re-renders that row only), indexed lookups cut a worst-case configuration from 282 ms to 3.6 ms per keystroke, the sticky header no longer hides behind row inputs and the table no longer scrolls sideways. Fixes: focusing the official-model field no longer clears the current model, and the pricing snapshot no longer drops `providerId`/`temporalPricing` (which made a mapped manual price silently fall back to the catalog).
-- **Existing history is corrected automatically**: when the built-in plan's policy hash changes, first-party and mapped DeepSeek records are reconciled once against their own usage instant (in practice the 237 peak records of the 9/25-9/27 Mid-Autumn holidays moved to "Holiday off-peak", 0.44 to 0.15).
+- **DSH 0.2.0-rc.2 is a supported runtime**: the real Cordis service chain smoke passes on it (every route, the session hooks, the ledger flush, the revision fast path and disposal), so the declaration gains `>=0.2.0-rc.2 <0.2.1-0`, the verified list grows to six runtimes and the CI smoke matrix to **six versions × Node 22/24 (twelve jobs)**. The line keeps the 0.1.7 Cordis pairing (cordis 4.0.4 / loader 1.0.5 / timer 1.1.6) and the abstract settings seam, so no plugin code change was needed.
+- This release only touches the **compatibility declaration, the CI matrix and the documentation** (README in both languages: quoted range, verified table, badge). The feature work of v1.1.15 (the editable price table, Chinese statutory holiday pricing, panel performance fixes) is recorded in the changelog.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 
