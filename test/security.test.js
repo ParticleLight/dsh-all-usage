@@ -633,6 +633,11 @@ test('serves a lightweight status snapshot with full stats route protections', a
   assert.equal(body.sync.sessionsRead, 1)
   assert.equal(body.sync.persistenceSnapshotsAvailable, false)
   assert.equal(Object.hasOwn(body, 'requestToken'), false)
+  // The poll carries a derived capability id so the page can notice a rotated
+  // write capability without being handed the capability itself.
+  assert.match(body.capabilityId, /^[A-Za-z0-9_-]{16}$/)
+  assert.notEqual(body.capabilityId, full.json().requestToken)
+  assert.equal(typeof body.pluginVersion, 'string')
   assert.equal(Object.hasOwn(body, 'totals'), false)
   assert.equal(Object.hasOwn(body, 'aliases'), false)
   assert.equal(Object.hasOwn(body, 'workspaces'), false)
@@ -755,6 +760,39 @@ test('protects pricing configuration writes with loopback, origin, and process c
   assert.equal(allowed.status, 200)
   assert.equal(allowed.json().ok, true)
   assert.equal(allowed.json().pricing.sync.autoEnabled, false)
+})
+
+test('accepts writes from the desktop shell, which cannot send an Origin', async () => {
+  const app = await createApp({ workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }] })
+  const stats = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  const token = stats.json().requestToken
+  const body = JSON.stringify({ sync: { autoEnabled: false } })
+  // The DSH desktop shell forwards page requests through Electron, which strips
+  // Origin before the host sees it, so the capability is the only credential a
+  // desktop write can present.
+  const noOrigin = await call(app, '/api/all-usage/pricing', makeRequest('POST', {
+    host: '127.0.0.1:3080',
+    'x-all-usage-request-token': token,
+  }, body))
+  assert.equal(noOrigin.status, 200)
+  assert.equal(noOrigin.json().ok, true)
+  // The shell's own scheme is accepted when it does forward one.
+  const shellOrigin = await call(app, '/api/all-usage/pricing', makeRequest('POST', {
+    host: '127.0.0.1:3080',
+    origin: 'dsh-app://app',
+    'x-all-usage-request-token': token,
+  }, body))
+  assert.equal(shellOrigin.status, 200)
+  // A foreign origin is still rejected even with the capability.
+  const foreign = await call(app, '/api/all-usage/pricing', makeRequest('POST', {
+    host: '127.0.0.1:3080',
+    origin: 'https://evil.example',
+    'x-all-usage-request-token': token,
+  }, body))
+  assert.equal(foreign.status, 403)
+  // And the capability is still mandatory.
+  const anonymous = await call(app, '/api/all-usage/pricing', makeRequest('POST', { host: '127.0.0.1:3080' }, body))
+  assert.equal(anonymous.status, 403)
 })
 
 test('waits for the persisted pricing state before serving reads and writes', async () => {
