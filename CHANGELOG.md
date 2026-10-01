@@ -2,6 +2,18 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- **Writes work in the DSH desktop client again.** The write routes (price save, immediate sync, holiday fetch, alias) required an `Origin` header equal to the loopback host. The desktop shell serves the UI on its own scheme and forwards page requests through Electron, which strips `Origin` along with `Host`, `Cookie` and `Sec-Fetch-*`, so every desktop write was rejected with 403: saving prices reported "no permission", the models.dev catalog could never be synced, and the auto-sync checkbox rolled back. Writes are now authorized by the process capability alone — an unguessable secret that a cross-origin page can neither read (the read routes send no CORS headers) nor attach to a form POST — while a present `Origin` must still be loopback or the shell's own scheme, and `Host` must still be loopback so a rebound DNS name cannot reach the API.
+- **A missing `usageBacked` no longer reads as a verdict.** A host that predates the merged price table sends no `usageBacked`, and the panel rendered that as "no ledger usage" even for rows with recorded calls; it now degrades to "usage unknown" (distinct flag, row style and footer count), and says so when the payload carries no model list at all.
+- **A rotated write capability heals itself.** The status poll now carries a derived `capabilityId` (never the capability itself), the page treats a rotation as a full refresh, and a write rejected with 403 re-reads the capability from the full snapshot and retries once before reporting anything; the message now names a stale capability instead of claiming a permission problem.
+
+### Added
+
+- `GET /api/all-usage/status` reports the running plugin version and the derived capability id, so a page served by a newer package than the running host can say "host plugin vX / this page vY differ — restart DSH" instead of leaving that mismatch invisible.
+
 ## [1.1.16] - 2026-09-29
 
 ### Added

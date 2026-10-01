@@ -8,6 +8,11 @@ window.__ModuleLoader__.load({
     Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
     const React = require("react");
 
+    // Replaced at build time by scripts/build-client.mjs with the package
+    // version, so the page can tell the user when the running host is older
+    // than the bundle it is serving (DSH only imports the plugin at startup).
+    const clientPluginVersion = /* __PLUGIN_VERSION__ */ "0.0.0"
+
     function pad2(n) {
       return String(n).padStart(2, '0')
     }
@@ -168,6 +173,13 @@ window.__ModuleLoader__.load({
     function statusRefreshKind(status, snapshot) {
       if (status === null || typeof status !== 'object' || snapshot === null || typeof snapshot !== 'object') return 'full'
       if (typeof status.instanceId !== 'string' || typeof snapshot.instanceId !== 'string' || status.instanceId === '' || status.instanceId !== snapshot.instanceId) return 'full'
+      // The write capability rotates whenever the host re-applies the plugin,
+      // which can leave the instance id and every revision untouched. The status
+      // payload carries only its derived id (never the capability itself), which
+      // is enough to notice the rotation and pull a full snapshot.
+      const statusCapability = typeof status.capabilityId === 'string' ? status.capabilityId : ''
+      const snapshotCapability = typeof snapshot.capabilityId === 'string' ? snapshot.capabilityId : ''
+      if (statusCapability !== '' && statusCapability !== snapshotCapability) return 'full'
       if (hasSplitRevisions(status) && hasSplitRevisions(snapshot)) {
         if (status.metadataRevision !== snapshot.metadataRevision) return 'full'
         // Check pricing first: when data and pricing move together a query-only
@@ -689,7 +701,10 @@ window.__ModuleLoader__.load({
           key,
           row: model,
           identityKey: typeof model.identityKey === 'string' ? model.identityKey : '',
-          usageBacked: model.usageBacked !== false,
+          // A host that predates this field says nothing about ledger usage;
+          // "unknown" must not be rendered as either verdict (see the row
+          // flags), and only an explicit false means "no ledger usage".
+          usageBacked: model.usageBacked === true ? true : model.usageBacked === false ? false : null,
           model: typeof model.model === 'string' ? model.model : '',
           status: typeof model.status === 'string' ? model.status : 'unpriced',
           reason: typeof model.reason === 'string' ? model.reason : '',
@@ -2246,6 +2261,10 @@ window.__ModuleLoader__.load({
 .uh-pricing-row-flags { display:flex; align-items:center; flex-wrap:wrap; gap:4px; margin-top:5px; }
 .uh-pricing-flag { padding:2px 6px; border-radius:999px; background:var(--dsw-alias-bg-layer-1); color:var(--dsw-alias-label-secondary); font-size:10px; white-space:nowrap; }
 .uh-pricing-configured-row { background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 42%, transparent); }
+/* Unknown usage (the host did not label the row) is not the same verdict as
+   "no ledger usage", so it must not read like one. */
+.uh-pricing-unknown-row { background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 24%, transparent); }
+.uh-pricing-flag-unknown { border-style:dashed; opacity:.75; }
 .uh-pricing-rate-input { box-sizing:border-box; width:100%; min-width:0; min-height:30px; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; padding:4px 7px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; font-size:11px; font-variant-numeric:tabular-nums; outline:none; }
 .uh-pricing-rate-input:focus { border-color:var(--dsw-alias-brand-primary); }
 .uh-pricing-map-cell { display:flex; flex-direction:column; gap:6px; }
@@ -2846,6 +2865,9 @@ window.__ModuleLoader__.load({
       const recordsGate = recordsGateRef.current
       const pricingGate = pricingGateRef.current
       const refreshRef = React.useRef(() => {})
+  // Latest write capability seen by the poller: the host rotates it on every
+  // plugin apply, and writes must not keep using the one the page loaded with.
+  const requestTokenRef = React.useRef('')
       // All hooks must run before the stats-null early return below; keep this
       // callback (and the ref sync effect) in the hook region of the component.
       const refreshOpenPricing = React.useCallback(() => {
@@ -2934,6 +2956,7 @@ window.__ModuleLoader__.load({
             const nextToken = typeof data.requestToken === 'string' ? data.requestToken : ''
             const tokenChanged = nextToken !== '' && nextToken !== requestToken
             requestToken = nextToken
+            if (nextToken !== '') requestTokenRef.current = nextToken
             fullFailures = 0
             clearRetry()
             setStatsError('')
@@ -3275,14 +3298,38 @@ window.__ModuleLoader__.load({
       const sync = statusPayload && statusPayload.sync ? statusPayload.sync : (stats.sync || {})
       const dayRows = displayedDays
 
+      // A rejected write usually means the host rotated its write capability
+      // (the plugin was re-applied) while this page stayed open. Re-read the
+      // capability from the status endpoint and retry once, so an open panel
+      // heals itself instead of reporting a permission error the user cannot act
+      // on. Only a 403 is retried; every other failure is surfaced as-is.
+      const writeWithFreshToken = (send, onSuccess, onFailure) => {
+        const token = requestTokenRef.current
+        if (token === '') { onFailure(null); return Promise.resolve() }
+        const retry = (reason) => {
+          if (reason === null || typeof reason !== 'object' || reason.status !== 403) { onFailure(reason); return Promise.resolve() }
+          // The capability only travels in the full snapshot (the status poll
+          // carries its derived id), so re-read it from there.
+          return getStats().then((data) => {
+            const next = data !== null && typeof data === 'object' && typeof data.requestToken === 'string' ? data.requestToken : ''
+            if (next === '' || next === token) { onFailure(reason); return undefined }
+            requestTokenRef.current = next
+            return send(next).then(onSuccess, () => { onFailure(reason) })
+          }, () => { onFailure(reason) })
+        }
+        return send(token).then(onSuccess, retry)
+      }
       const saveAlias = (wsId, value) => {
-        const requestToken = typeof stats.requestToken === 'string' ? stats.requestToken : ''
-        if (requestToken === '') return
-        setAliasRpc(wsId, String(value === undefined ? '' : value).trim(), requestToken).then((res) => {
-          if (res && res.ok && res.aliases) {
-            setStats((prev) => (prev === null ? prev : Object.assign({}, prev, { aliases: res.aliases })))
-          }
-        }, () => {})
+        if (requestTokenRef.current === '') return
+        writeWithFreshToken(
+          (token) => setAliasRpc(wsId, String(value === undefined ? '' : value).trim(), token),
+          (res) => {
+            if (res && res.ok && res.aliases) {
+              setStats((prev) => (prev === null ? prev : Object.assign({}, prev, { aliases: res.aliases })))
+            }
+          },
+          () => {}
+        )
       }
       const openAliasPanel = () => {
         const drafts = {}
@@ -3350,29 +3397,33 @@ window.__ModuleLoader__.load({
         const validationError = pricingDraftValidationError(pricingDraft, pricingTemporalDrafts)
         if (validationError !== '') { setPricingError(validationError); return }
         if (pricingDraftPayloadTooLarge(pricingDraft)) { setPricingError('too-large'); return }
-        const requestToken = typeof stats.requestToken === 'string' ? stats.requestToken : ''
-        if (requestToken === '') { setPricingError('token'); return }
+        if (requestTokenRef.current === '') { setPricingError('token'); return }
         const seq = pricingGate.next()
         setPricingSaving(true)
         setPricingError('')
-        setPricingRpc(pricingDraft, backfill, requestToken).then((data) => {
-          if (!pricingGate.isCurrent(seq)) return
-          if (!data || data.ok !== true || !data.pricing) { setPricingError('save'); return }
-          setStats((prev) => prev === null ? prev : Object.assign({}, prev, { pricing: data.pricing }))
-          setPricingDetails(data.pricing)
-          setPricingDraft(pricingDraftOf(data.pricing))
-          resetPricingTransients()
-          closePricingPanel()
-          refreshRef.current()
-        }, (reason) => { if (pricingGate.isCurrent(seq)) setPricingError(reason && reason.status === 403 ? 'forbidden' : 'save') }).finally(() => setPricingSaving(false))
+        writeWithFreshToken(
+          (token) => setPricingRpc(pricingDraft, backfill, token),
+          (data) => {
+            if (!pricingGate.isCurrent(seq)) return
+            if (!data || data.ok !== true || !data.pricing) { setPricingError('save'); return }
+            setStats((prev) => prev === null ? prev : Object.assign({}, prev, { pricing: data.pricing }))
+            setPricingDetails(data.pricing)
+            setPricingDraft(pricingDraftOf(data.pricing))
+            resetPricingTransients()
+            closePricingPanel()
+            refreshRef.current()
+          },
+          (reason) => { if (pricingGate.isCurrent(seq)) setPricingError(reason && reason.status === 403 ? 'stale' : 'save') }
+        ).finally(() => setPricingSaving(false))
       }
       const syncPricingNow = () => {
         if (pricingSaving || pricingSyncing || pricingSyncSaving) return
-        const requestToken = typeof stats.requestToken === 'string' ? stats.requestToken : ''
-        if (requestToken === '') { setPricingError('token'); return }
+        if (requestTokenRef.current === '') { setPricingError('token'); return }
         setPricingSyncing(true)
         setPricingError('')
-        syncPricingRpc(requestToken).then((data) => {
+        writeWithFreshToken(
+          (token) => syncPricingRpc(token),
+          (data) => {
           if (!data || data.ok !== true || !data.pricing) { setPricingError('sync'); return }
           // The synced catalog replaces the search corpus; invalidate searches
           // issued against the previous one before updating the panel.
@@ -3384,9 +3435,11 @@ window.__ModuleLoader__.load({
           setPricingModelSearchText({})
           setPricingModelSearchOpen(null)
           setPricingPickedTargets({})
-          setPricingTemporalDrafts({})
-          refreshRef.current()
-        }, (reason) => { setPricingError(reason && reason.status === 403 ? 'forbidden' : 'sync') }).finally(() => setPricingSyncing(false))
+            setPricingTemporalDrafts({})
+            refreshRef.current()
+          },
+          (reason) => { setPricingError(reason && reason.status === 403 ? 'stale' : 'sync') }
+        ).finally(() => setPricingSyncing(false))
       }
       const updatePricingSync = (enabled) => {
         if (pricingDraft === null || pricingSyncSaving || pricingSaving || pricingSyncing) return
@@ -3394,8 +3447,7 @@ window.__ModuleLoader__.load({
         const previousEnabled = pricingDraft.sync && pricingDraft.sync.autoEnabled === true
         setPricingDraft((prev) => prev === null ? prev : Object.assign({}, prev, { sync: Object.assign({}, prev.sync, { autoEnabled: nextEnabled }) }))
         persistUsageUiState({ pricingAutoSync: nextEnabled })
-        const requestToken = typeof stats.requestToken === 'string' ? stats.requestToken : ''
-        if (requestToken === '') {
+        if (requestTokenRef.current === '') {
           setPricingDraft((prev) => prev === null ? prev : Object.assign({}, prev, { sync: Object.assign({}, prev.sync, { autoEnabled: previousEnabled }) }))
           persistUsageUiState({ pricingAutoSync: previousEnabled })
           setPricingError('token')
@@ -3408,14 +3460,18 @@ window.__ModuleLoader__.load({
         }
         setPricingSyncSaving(true)
         setPricingError('')
-        setPricingRpc({ sync: { autoEnabled: nextEnabled } }, false, requestToken).then((data) => {
-          if (!data || data.ok !== true || !data.pricing) { rollback('save'); return }
-          const savedEnabled = data.pricing.sync && data.pricing.sync.autoEnabled === true
-          setStats((prev) => prev === null ? prev : Object.assign({}, prev, { pricing: data.pricing }))
-          setPricingDetails(data.pricing)
-          setPricingDraft((prev) => prev === null ? prev : Object.assign({}, prev, { sync: Object.assign({}, prev.sync, { autoEnabled: savedEnabled, intervalMs: data.pricing.sync && data.pricing.sync.intervalMs }) }))
-          persistUsageUiState({ pricingAutoSync: savedEnabled })
-        }, (reason) => rollback(reason && reason.status === 403 ? 'forbidden' : 'save')).finally(() => setPricingSyncSaving(false))
+        writeWithFreshToken(
+          (token) => setPricingRpc({ sync: { autoEnabled: nextEnabled } }, false, token),
+          (data) => {
+            if (!data || data.ok !== true || !data.pricing) { rollback('save'); return }
+            const savedEnabled = data.pricing.sync && data.pricing.sync.autoEnabled === true
+            setStats((prev) => prev === null ? prev : Object.assign({}, prev, { pricing: data.pricing }))
+            setPricingDetails(data.pricing)
+            setPricingDraft((prev) => prev === null ? prev : Object.assign({}, prev, { sync: Object.assign({}, prev.sync, { autoEnabled: savedEnabled, intervalMs: data.pricing.sync && data.pricing.sync.intervalMs }) }))
+            persistUsageUiState({ pricingAutoSync: savedEnabled })
+          },
+          (reason) => rollback(reason && reason.status === 403 ? 'stale' : 'save')
+        ).finally(() => setPricingSyncSaving(false))
       }
       const updateRowRate = (view, field, value) => {
         setPricingDraft((prev) => prev === null ? prev : pricingDraftSetRate(prev, view, field, value))
@@ -3522,8 +3578,7 @@ window.__ModuleLoader__.load({
       }
       const loadRowHolidays = (view) => {
         if (pricingHolidayLoading === true) return
-        const requestToken = typeof stats.requestToken === 'string' ? stats.requestToken : ''
-        if (requestToken === '') {
+        if (requestTokenRef.current === '') {
           setPricingHolidayStatus(tr('当前进程令牌不可用，请刷新看板', 'The process capability is unavailable; refresh the dashboard'))
           return
         }
@@ -3534,7 +3589,9 @@ window.__ModuleLoader__.load({
         }
         setPricingHolidayLoading(true)
         setPricingHolidayStatus('')
-        loadHolidayCalendarRpc(year, requestToken).then((data) => {
+        writeWithFreshToken(
+          (token) => loadHolidayCalendarRpc(year, token),
+          (data) => {
           if (data === null || typeof data !== 'object' || data.ok !== true || !Array.isArray(data.dates)) {
             const reason = data && typeof data === 'object' && typeof data.message === 'string' && data.message !== '' ? data.message : 'unavailable'
             setPricingHolidayStatus(tr('抓取失败：', 'Fetch failed: ') + reason)
@@ -3556,9 +3613,11 @@ window.__ModuleLoader__.load({
           // applyTemporalDraft freezes the merged list into the plan draft; the
           // actual freeze happens when the user saves the panel.
           applyTemporalDraft(view, next)
-        }, () => {
-          setPricingHolidayStatus(tr('抓取失败：网络不可用', 'Fetch failed: network unavailable'))
-        }).finally(() => setPricingHolidayLoading(false))
+          },
+          () => {
+            setPricingHolidayStatus(tr('抓取失败：网络不可用', 'Fetch failed: network unavailable'))
+          }
+        ).finally(() => setPricingHolidayLoading(false))
       }
       const toggleRowEditor = (view, section) => {
         const key = view.key + '|' + section
@@ -3796,11 +3855,27 @@ window.__ModuleLoader__.load({
       const pricingSync = currentPricing.sync && typeof currentPricing.sync === 'object' ? currentPricing.sync : {}
       const pricingBusy = pricingSaving || pricingSyncing || pricingSyncSaving
       const pricingWeekdayLabels = language === 'en' ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] : ['日', '一', '二', '三', '四', '五', '六']
-      const pricingConfiguredCount = pricingRows.filter((view) => view.usageBacked !== true).length
-      const pricingErrorMessage = (code) => code === 'forbidden'
-        ? tr('没有权限保存成本设置', 'Not allowed to save cost settings')
-        : code === 'token'
-          ? tr('当前进程令牌不可用，请刷新看板', 'The process capability is unavailable; refresh the dashboard')
+      const pricingConfiguredCount = pricingRows.filter((view) => view.usageBacked === false).length
+      const pricingUnknownCount = pricingRows.filter((view) => view.usageBacked === null).length
+      // The page is served from the same package as the host, so a version
+      // difference means DSH still runs the plugin it imported at startup while
+      // the browser already has a newer bundle. Say it, instead of letting the
+      // user guess why a new panel behaves oddly.
+      const pricingHostVersion = typeof statusPayload.pluginVersion === 'string' ? statusPayload.pluginVersion : ''
+      const pricingHostMismatch = pricingHostVersion !== '' && clientPluginVersion !== '' && pricingHostVersion !== clientPluginVersion
+      // A payload without `usedModels` comes from a host that predates the merged
+      // panel: the table is empty because no model list was sent, not because the
+      // ledger has no usage.
+      const pricingModelsMissing = !Array.isArray(currentPricing.usedModels)
+      // The host rotates its write capability whenever the plugin is applied, so
+      // a rejected write is a stale capability far more often than a permission
+      // problem. Say both, and report the automatic retry when it already failed.
+      const pricingErrorMessage = (code) => code === 'stale'
+        ? tr('写入被拒绝：进程令牌已失效，自动重取令牌后仍失败，请刷新看板', 'Write rejected: the process capability had rotated and the automatic retry still failed; refresh the dashboard')
+        : code === 'forbidden'
+          ? tr('写入被拒绝：权限校验未通过（也可能是进程令牌已失效），请刷新看板后重试', 'Write rejected: the permission check failed (a stale process capability is also possible); refresh the dashboard and retry')
+          : code === 'token'
+            ? tr('当前进程令牌不可用，请刷新看板', 'The process capability is unavailable; refresh the dashboard')
           : code === 'load'
             ? tr('完整费率设置加载失败', 'Full pricing settings could not be loaded')
             : code === 'sync'
@@ -3988,14 +4063,18 @@ window.__ModuleLoader__.load({
         const searchText = pricingSearchTextFor(view)
         const options = Array.isArray(pricingModelSearchOptions[view.key]) ? pricingModelSearchOptions[view.key] : []
         return React.createElement(React.Fragment, { key: view.key },
-          React.createElement('tr', { className: 'uh-pricing-model-row' + (view.usageBacked === true ? '' : ' uh-pricing-configured-row') },
+          React.createElement('tr', { className: 'uh-pricing-model-row' + (view.usageBacked === true ? '' : view.usageBacked === false ? ' uh-pricing-configured-row' : ' uh-pricing-unknown-row') },
             React.createElement('td', { className: 'uh-pricing-model-name' },
               React.createElement('span', { className: 'uh-model-label', title: view.model }, React.createElement(MemoModelIcon, { row: view.row, size: 16 }), React.createElement('span', { className: 'uh-model-text' }, view.model || tr('未知模型', 'Unknown model'))),
               React.createElement('div', { className: 'uh-pricing-row-flags' },
                 React.createElement('span', { className: 'uh-pricing-status uh-pricing-status-' + view.status, title: view.reason || '' }, pricingStatusLabel(view.status, language)),
                 React.createElement('span', { className: 'uh-pricing-tier-badge uh-flat' }, pricingSourceLabel(view)),
                 view.mapped ? React.createElement('span', { className: 'uh-pricing-flag' }, tr('已映射', 'Mapped')) : null,
-                view.usageBacked === true ? null : React.createElement('span', { className: 'uh-pricing-flag' }, tr('账本无用量', 'No ledger usage')),
+                view.usageBacked === true
+                  ? null
+                  : view.usageBacked === false
+                    ? React.createElement('span', { className: 'uh-pricing-flag' }, tr('账本无用量', 'No ledger usage'))
+                    : React.createElement('span', { className: 'uh-pricing-flag uh-pricing-flag-unknown', title: tr('宿主未在模型清单里标注账本用量（通常是宿主插件版本较旧）；这不代表没有用量', 'The host did not label ledger usage for this row (usually an older host plugin); it does not mean the row has none') }, tr('用量未知', 'Usage unknown')),
               ),
             ),
             React.createElement('td', { className: 'uh-pricing-map-cell' },
@@ -4079,8 +4158,10 @@ window.__ModuleLoader__.load({
           React.createElement('button', { type: 'button', className: 'uh-refresh', onClick: syncPricingNow, disabled: pricingBusy }, React.createElement(LineIcon, { name: 'refresh', size: 14 }), pricingSyncing ? tr('同步中…', 'Syncing…') : tr('立即同步', 'Sync now')),
         ),
         pricingSync.lastError ? React.createElement('div', { className: 'uh-pricing-error', role: 'alert' }, tr('上次同步失败：', 'Last sync failed: ') + pricingSync.lastError) : null,
+        pricingHostMismatch ? React.createElement('div', { className: 'uh-pricing-error', role: 'status' }, tr('宿主插件 v', 'Host plugin v') + pricingHostVersion + tr(' 与当前页面 v', ' and this page v') + clientPluginVersion + tr(' 不一致：DSH 只在启动时加载插件，请重启 DSH 让新版本生效（本面板正按旧宿主的数据降级显示）', ' differ: DSH imports the plugin only at startup, so restart DSH for the new version (this panel is showing the older host payload)')) : null,
+        pricingModelsMissing ? React.createElement('div', { className: 'uh-pricing-error', role: 'status' }, tr('宿主未提供模型清单（插件版本较旧）：无法列出账本模型；请重启 DSH 后重新打开本面板', 'The host sent no model list (older plugin): the ledger models cannot be listed; restart DSH and reopen this panel')) : null,
         React.createElement('div', { className: 'uh-pricing-table-note' },
-          tr('共 ', '') + pricingRows.length + tr(' 个模型', ' models') + (pricingConfiguredCount > 0 ? tr('（', ' (') + pricingConfiguredCount + tr(' 项仅存在于配置中，账本暂无用量）', ' configured rows have no ledger usage)') : '') + (pricingRows.length >= 500 ? tr(' · 已达 500 行上限', ' · capped at 500 rows') : ''),
+          tr('共 ', '') + pricingRows.length + tr(' 个模型', ' models') + (pricingConfiguredCount > 0 ? tr('（', ' (') + pricingConfiguredCount + tr(' 项仅存在于配置中，账本暂无用量）', ' configured rows have no ledger usage)') : '') + (pricingUnknownCount > 0 ? tr('（其中 ', ' (') + pricingUnknownCount + tr(' 项用量未知：宿主未标注账本用量）', ' rows have unknown usage: the host did not label ledger usage)') : '') + (pricingRows.length >= 500 ? tr(' · 已达 500 行上限', ' · capped at 500 rows') : ''),
         ),
         React.createElement('div', { className: 'uh-pricing-table-wrap' },
           React.createElement('table', { className: 'uh-pricing-model-table uh-pricing-price-table' },

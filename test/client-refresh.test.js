@@ -51,6 +51,18 @@ test('classifies split revisions without promoting data changes to full snapshot
   assert.equal(statusRequiresFullSnapshot({ ...base, revision: 11, dataRevision: 5, queryRevision: '5:1' }, base), false)
 })
 
+test('treats a rotated write capability as a full refresh', () => {
+  const snapshot = { instanceId: 'host-a', revision: 7, scan: { done: true }, capabilityId: 'cap-a' }
+  assert.equal(statusRefreshKind({ instanceId: 'host-a', revision: 7, scan: { done: true }, capabilityId: 'cap-a' }, snapshot), 'none')
+  // The host mints a new capability every time it applies the plugin, and that can
+  // leave the instance id and every revision untouched. The status payload carries
+  // only its derived id, never the capability itself.
+  assert.equal(statusRefreshKind({ instanceId: 'host-a', revision: 7, scan: { done: true }, capabilityId: 'cap-b' }, snapshot), 'full')
+  assert.equal(statusRequiresFullSnapshot({ instanceId: 'host-a', revision: 7, scan: { done: true }, capabilityId: 'cap-b' }, snapshot), true)
+  // A host that predates the field must not look like a rotation.
+  assert.equal(statusRefreshKind({ instanceId: 'host-a', revision: 7, scan: { done: true } }, { instanceId: 'host-a', revision: 7, scan: { done: true } }), 'none')
+})
+
 test('uses bounded exponential refresh retry delays', () => {
   assert.equal(retryDelayFor(1), 5000)
   assert.equal(retryDelayFor(2), 10000)
@@ -409,7 +421,14 @@ test('renders cost totals, pricing status, and the merged price table controls',
   assert.ok(source.includes('refreshPricingPanelRef.current'))
   assert.match(source, /pricingDraftAfterSync\(prev, data\.pricing\)/)
   assert.match(source, /const closePricingPanel = \(\) => \{\s*if \(pricingSaving \|\| pricingSyncing \|\| pricingSyncSaving\) return/)
-  assert.match(source, /setPricingRpc\(pricingDraft, backfill, requestToken\)\.then\(\(data\) => \{\s*if \(!pricingGate\.isCurrent\(seq\)\) return/)
+  assert.match(source, /\(token\) => setPricingRpc\(pricingDraft, backfill, token\)/)
+  // Every write goes through the capability refresh wrapper, and a rejected
+  // write is reported as a stale capability rather than a permission error.
+  assert.match(source, /const writeWithFreshToken = \(send, onSuccess, onFailure\) => \{/)
+  assert.match(source, /reason\.status !== 403\) \{ onFailure\(reason\); return Promise\.resolve\(\) \}/)
+  assert.match(source, /const retry = \(reason\) => \{/)
+  assert.match(source, /setPricingError\(reason && reason\.status === 403 \? 'stale' : 'save'\)/)
+  assert.doesNotMatch(source, /stats\.requestToken/)
   assert.match(source, /disabled: pricingBusy, onClick: closePricingPanel/)
   assert.match(source, /pricingLoading/)
   // The two legacy sections are gone and the read-only match table moved into
@@ -495,6 +514,19 @@ function flashRow(extra) {
 function jsonOf(value) {
   return JSON.stringify(value)
 }
+
+test('an unlabelled usage flag degrades to unknown instead of a verdict', () => {
+  const draft = { sync: {}, mappings: [], overrides: [] }
+  // A host that predates the merged panel sends no usageBacked at all: the panel
+  // must not claim either "has ledger usage" or "no ledger usage".
+  const old = pricingRowsOf({ usedModels: [{ identityKey: PRICING_ROUTE_KEY, model: 'deepseek-v4-flash', status: 'priced' }] }, draft, {})
+  assert.equal(old.length, 1)
+  assert.equal(old[0].usageBacked, null)
+  const configured = pricingRowsOf({ usedModels: [{ identityKey: PRICING_ROUTE_KEY, model: 'deepseek-v4-flash', status: 'priced', usageBacked: false }] }, draft, {})
+  assert.equal(configured[0].usageBacked, false)
+  const backed = pricingRowsOf({ usedModels: [{ identityKey: PRICING_ROUTE_KEY, model: 'deepseek-v4-flash', status: 'priced', usageBacked: true }] }, draft, {})
+  assert.equal(backed[0].usageBacked, true)
+})
 
 test('pricing rows merge draft prices, mapping previews and configured rows', () => {
   const pricing = {

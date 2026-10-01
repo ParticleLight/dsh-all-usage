@@ -7,6 +7,10 @@ const sourceUrl = new URL('../src/client.js', import.meta.url)
 const outputUrl = new URL('../lib/client.js', import.meta.url)
 const iconsUrl = new URL('../assets/model-icons/', import.meta.url)
 const ICON_PLACEHOLDER = '/* __MODEL_ICON_DATA__ */ null'
+// The client compares this against the host's `pluginVersion`: DSH imports the
+// plugin only at startup, so a page served by a newer package than the running
+// host has to be able to say so.
+const VERSION_PLACEHOLDER = '/* __PLUGIN_VERSION__ */ "0.0.0"'
 
 /** Build the icon table that the client bundle embeds (data: URIs only). */
 async function buildIconTable() {
@@ -58,8 +62,11 @@ async function buildIconTable() {
 
 const rawSource = await readFile(sourceUrl, 'utf8')
 if (!rawSource.includes(ICON_PLACEHOLDER)) throw new Error('src/client.js must contain the model icon placeholder: ' + ICON_PLACEHOLDER)
+if (!rawSource.includes(VERSION_PLACEHOLDER)) throw new Error('src/client.js must contain the plugin version placeholder: ' + VERSION_PLACEHOLDER)
+const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+if (typeof packageJson.version !== 'string' || packageJson.version === '') throw new Error('package.json must declare a version')
 const iconTable = await buildIconTable()
-const source = rawSource.replace(ICON_PLACEHOLDER, JSON.stringify(iconTable))
+const source = rawSource.replace(ICON_PLACEHOLDER, JSON.stringify(iconTable)).replace(VERSION_PLACEHOLDER, JSON.stringify(packageJson.version))
 const result = await minify(source, {
   ecma: 2022,
   compress: { passes: 2 },
