@@ -116,10 +116,10 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 ### 最近更新
 
-**v1.1.16**
+**v1.1.17**
 
-- **正式支持 DSH 0.2.0-rc.2**：真实 Cordis 服务链 smoke 在该运行时上全部通过（全部路由、session 钩子、账本 flush、revision 快路径、dispose），声明区间新增 `>=0.2.0-rc.2 <0.2.1-0`，已验证列表增至 6 个运行时，CI smoke 矩阵扩到 **6 个版本 × Node 22/24 = 12 个作业**；该运行时线沿用 0.1.7 的 Cordis 组合（cordis 4.0.4 / loader 1.0.5 / timer 1.1.6）与抽象 settings seam，插件无需代码改动。
-- 本版只改**兼容性声明、CI 矩阵与文档**（README 中英同步：声明引用、验证表、徽章）。上一个版本的功能（1.1.15：可编辑价格表、中国法定节假日全天谷价、面板性能修复）见 CHANGELOG。
+- **修复：DSH 桌面端无法保存成本设置。** 写接口（保存价格、立即同步、节假日抓取、别名）原先要求请求带 `Origin` 且与 loopback Host 同源，而桌面端把 UI 跑在自定义协议 `dsh-app://app` 上、请求由 Electron 主进程转发时会删掉 `Origin`（连同 `Host`/`Cookie`/`Sec-Fetch-*`），于是桌面端的所有写入必然 403——保存价格报「没有权限」、models.dev 目录永远同步不下来、自动同步勾选后回滚。现在写入以**进程令牌**为授权凭据（跨域页面既读不到也塞不进表单 POST），`Origin` 存在时仍必须是 loopback 或桌面端自身 scheme，`Host` 仍必须是 loopback（防 DNS rebinding）。
+- **健壮性修复**：宿主未下发 `usageBacked` 时不再断言「账本无用量」，改为「用量未知」三态（独立标记、行样式与页脚计数）；`/api/all-usage/status` 新增派生的 `capabilityId`（令牌轮换时变化，令牌本身只在完整快照里下发）与 `pluginVersion`，页面据此察觉宿主被重新加载、写入遇 403 时自动重取令牌并重试一次，宿主与页面版本不一致时直接提示「请重启 DSH」。
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -310,10 +310,10 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 
 ### Latest Update
 
-**v1.1.16**
+**v1.1.17**
 
-- **DSH 0.2.0-rc.2 is a supported runtime**: the real Cordis service chain smoke passes on it (every route, the session hooks, the ledger flush, the revision fast path and disposal), so the declaration gains `>=0.2.0-rc.2 <0.2.1-0`, the verified list grows to six runtimes and the CI smoke matrix to **six versions × Node 22/24 (twelve jobs)**. The line keeps the 0.1.7 Cordis pairing (cordis 4.0.4 / loader 1.0.5 / timer 1.1.6) and the abstract settings seam, so no plugin code change was needed.
-- This release only touches the **compatibility declaration, the CI matrix and the documentation** (README in both languages: quoted range, verified table, badge). The feature work of v1.1.15 (the editable price table, Chinese statutory holiday pricing, panel performance fixes) is recorded in the changelog.
+- **Fixed: the DSH desktop client could not save cost settings.** The write routes (price save, immediate sync, holiday fetch, alias) required an `Origin` header matching the loopback host, but the desktop shell serves the UI on its own `dsh-app://app` scheme and forwards page requests through Electron, which strips `Origin` (along with `Host`, `Cookie` and `Sec-Fetch-*`) — so every desktop write was rejected with 403: saving prices reported "no permission", the models.dev catalog could never be synced, and the auto-sync checkbox rolled back. Writes are now authorized by the process capability (which a cross-origin page can neither read nor attach to a form POST), a present `Origin` must still be loopback or the shell's own scheme, and `Host` must still be loopback against DNS rebinding.
+- **Robustness fixes**: a host that omits `usageBacked` no longer reads as "no ledger usage" (the panel now has a distinct "usage unknown" state, flag, row style and footer count); `GET /api/all-usage/status` reports a derived `capabilityId` (changes when the capability rotates, while the capability itself is only ever sent in the full snapshot) and the running `pluginVersion`, so the page notices a plugin reload, re-reads the capability and retries once when a write is rejected with 403, and says "restart DSH" when the host and the page disagree on the version.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 

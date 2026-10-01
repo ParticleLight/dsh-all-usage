@@ -2,7 +2,7 @@
 
 All notable changes to `dsh-all-usage` are documented here.
 
-## [Unreleased]
+## [1.1.17] - 2026-10-01
 
 ### Fixed
 
