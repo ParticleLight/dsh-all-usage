@@ -3,3 +3,8 @@ node_modules/
 .DS_Store
 *.tgz
 MEMORY.md
+
+# Internal working notes: never publish them (see workspace-probe-plan.md, 5cd3a8e).
+AGENTS.md
+*-plan.md
+*-notes.md
