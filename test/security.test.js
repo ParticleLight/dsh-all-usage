@@ -610,7 +610,10 @@ test('stops folding events after disposal', async () => {
 test('reads the registry version through the host, caches it and stays loopback-only', async () => {
   const originalFetch = globalThis.fetch
   let calls = 0
-  let version = '1.1.18'
+  // Deliberately far ahead of the running plugin: asserting against a version that
+  // happens to be next in line breaks on every release (this test did exactly that
+  // when 1.1.18 shipped).
+  let version = '99.0.0'
   globalThis.fetch = async () => {
     calls += 1
     return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ version }) }
@@ -621,7 +624,7 @@ test('reads the registry version through the host, caches it and stays loopback-
     assert.equal(first.status, 200)
     const body = first.json()
     assert.equal(body.status, 'outdated')
-    assert.equal(body.latest, '1.1.18')
+    assert.equal(body.latest, '99.0.0')
     assert.equal(body.cached, false)
     assert.equal(typeof body.current, 'string')
     assert.equal(body.error, null)
@@ -634,12 +637,12 @@ test('reads the registry version through the host, caches it and stays loopback-
     // force=1 is the refresh button, but the host still enforces its floor: this
     // route is a read (no capability needed), so a burst of requests must not turn
     // into a burst of registry requests. Inside the floor the known answer is used.
-    version = '1.1.19'
+    version = '99.0.1'
     const forceRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
     forceRequest.url = '/api/all-usage/version?force=1'
     const forced = await call(app, '/api/all-usage/version', forceRequest)
     assert.equal(forced.json().cached, false)
-    assert.equal(forced.json().latest, '1.1.18')
+    assert.equal(forced.json().latest, '99.0.0')
     assert.equal(calls, 1)
     // Reads stay loopback-only and GET-only.
     assert.equal((await call(app, '/api/all-usage/version', makeRequest('GET', { host: '192.0.2.10:3080' }))).status, 403)
