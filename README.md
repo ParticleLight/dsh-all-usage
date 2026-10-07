@@ -118,10 +118,11 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 ### 最近更新
 
-**v1.1.17**
+**v1.1.18**
 
-- **修复：DSH 桌面端无法保存成本设置。** 写接口（保存价格、立即同步、节假日抓取、别名）原先要求请求带 `Origin` 且与 loopback Host 同源，而桌面端把 UI 跑在自定义协议 `dsh-app://app` 上、请求由 Electron 主进程转发时会删掉 `Origin`（连同 `Host`/`Cookie`/`Sec-Fetch-*`），于是桌面端的所有写入必然 403——保存价格报「没有权限」、models.dev 目录永远同步不下来、自动同步勾选后回滚。现在写入以**进程令牌**为授权凭据（跨域页面既读不到也塞不进表单 POST），`Origin` 存在时仍必须是 loopback 或桌面端自身 scheme，`Host` 仍必须是 loopback（防 DNS rebinding）。
-- **健壮性修复**：宿主未下发 `usageBacked` 时不再断言「账本无用量」，改为「用量未知」三态（独立标记、行样式与页脚计数）；`/api/all-usage/status` 新增派生的 `capabilityId`（令牌轮换时变化，令牌本身只在完整快照里下发）与 `pluginVersion`，页面据此察觉宿主被重新加载、写入遇 403 时自动重取令牌并重试一次，宿主与页面版本不一致时直接提示「请重启 DSH」。
+- **新增「近 7 天」时间范围**：预设行变为 今日 / **近 7 天** / 近 30 天 / 近 90 天 / 全部 / 自定义；口径是含今天的 7 个日历日，摘要、趋势、模型表、请求日志、筛选与 CSV 导出同步生效，选择会记在浏览器里。
+- **热力图跨度可切换（30 天 / 90 天 / 12 个月）**：列数随跨度变化（5 / 13 / 53 列），每列一周、格子保持 1:1，所以跨度越短格子越大（实测 12 个月 18×18px、30/90 天 34×34px，并做了上限避免少数几列被拉成巨块）；默认仍是 12 个月，与上方时间范围互不影响。
+- **标题旁新增版本指示**：显示当前运行版本，与 npm 最新版一致时小字「已是最新」，落后时高亮「最新 vX.Y.Z」，点击打开 GitHub 仓库；检查由宿主发起（只读一次 npm registry，缓存 6 小时，同一进程 30 秒内不重复请求），拿不到结论时降级为「未知」而不是猜。
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -315,10 +316,11 @@ The command loads the real plugin Host, calls its compatible APIs, checks the do
 
 ### Latest Update
 
-**v1.1.17**
+**v1.1.18**
 
-- **Fixed: the DSH desktop client could not save cost settings.** The write routes (price save, immediate sync, holiday fetch, alias) required an `Origin` header matching the loopback host, but the desktop shell serves the UI on its own `dsh-app://app` scheme and forwards page requests through Electron, which strips `Origin` (along with `Host`, `Cookie` and `Sec-Fetch-*`) — so every desktop write was rejected with 403: saving prices reported "no permission", the models.dev catalog could never be synced, and the auto-sync checkbox rolled back. Writes are now authorized by the process capability (which a cross-origin page can neither read nor attach to a form POST), a present `Origin` must still be loopback or the shell's own scheme, and `Host` must still be loopback against DNS rebinding.
-- **Robustness fixes**: a host that omits `usageBacked` no longer reads as "no ledger usage" (the panel now has a distinct "usage unknown" state, flag, row style and footer count); `GET /api/all-usage/status` reports a derived `capabilityId` (changes when the capability rotates, while the capability itself is only ever sent in the full snapshot) and the running `pluginVersion`, so the page notices a plugin reload, re-reads the capability and retries once when a write is rejected with 403, and says "restart DSH" when the host and the page disagree on the version.
+- **A new “Last 7 Days” range**: the presets are now Today / **Last 7 Days** / Last 30 Days / Last 90 Days / All Time / Custom; it covers seven calendar days including today and applies to the summary, trend, model tables, request log, filters and CSV export, with the choice remembered in the browser.
+- **A switchable heatmap span (30 days / 90 days / 12 months)**: the column count follows the span (5 / 13 / 53 columns); each column is a week and the cells keep a 1:1 aspect ratio, so a shorter span also gets larger cells (18×18px at twelve months, 34×34px at 30/90 days, capped so a few columns cannot stretch into huge tiles). Twelve months stays the default and the span is independent of the time range above.
+- **A version indicator next to the title**: it shows the running version, “Up to date” in small text when it matches the newest release on npm, a highlighted “Latest vX.Y.Z” when it is behind, and a click opens the GitHub repository. The host performs the check (one read-only request to the npm registry, cached for six hours, at most one every 30 seconds per process) and degrades to “unknown” rather than guessing.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 
