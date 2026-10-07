@@ -1195,22 +1195,37 @@ window.__ModuleLoader__.load({
     function wsColor(i) {
       return 'hsl(' + ((i * 137) % 360) + ', 70%, 55%)'
     }
-    function buildCalendarModel(todayKey, utc, language) {
+    // The grid is built from whole weeks, so a span is a column count: 53 covers
+    // about a year, 13 about 90 days and 5 about 30. Fewer columns means wider
+    // cells, and the cell keeps aspect-ratio 1, so a shorter span is also a
+    // taller one - which is what a reader wants when 53 weeks of squares are too
+    // small to read.
+    const HEATMAP_SPANS = { '30d': 5, '90d': 13, '12m': 53 }
+    const HEATMAP_SPAN_KEYS = ['30d', '90d', '12m']
+    const HEATMAP_SPAN_DEFAULT = '12m'
+    function normalizeHeatmapSpan(value) {
+      return HEATMAP_SPAN_KEYS.includes(value) ? value : HEATMAP_SPAN_DEFAULT
+    }
+    function heatmapWeeksOf(span) {
+      return HEATMAP_SPANS[normalizeHeatmapSpan(span)]
+    }
+    function buildCalendarModel(todayKey, utc, language, weeks) {
+      const count = Number.isSafeInteger(weeks) && weeks > 0 && weeks <= 53 ? weeks : HEATMAP_SPANS[HEATMAP_SPAN_DEFAULT]
       const parts = String(todayKey || '').split('-').map(Number)
       const today = utc ? new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])) : new Date(parts[0], parts[1] - 1, parts[2])
       const weekday = utc ? today.getUTCDay() : today.getDay()
       const sunday = shiftCalendarDate(today, -weekday, utc)
-      const start = shiftCalendarDate(sunday, -52 * 7, utc)
+      const start = shiftCalendarDate(sunday, -(count - 1) * 7, utc)
       const cells = []
-      for (let index = 0; index < 53 * 7; index += 1) {
+      for (let index = 0; index < count * 7; index += 1) {
         const date = shiftCalendarDate(start, index, utc)
         cells.push({ date: fmtDate(date, utc), month: utc ? date.getUTCMonth() : date.getMonth(), year: utc ? date.getUTCFullYear() : date.getFullYear() })
       }
       const months = []
-      for (let week = 0; week < 53; week += 1) {
+      for (let week = 0; week < count; week += 1) {
         const first = cells[week * 7]
         const previous = week > 0 ? cells[(week - 1) * 7] : null
-        if (previous === null || first.month !== previous.month) months.push({ left: (week * 100 / 53) + '%', text: monthLabel(first.year, first.month, language) })
+        if (previous === null || first.month !== previous.month) months.push({ left: (week * 100 / count) + '%', text: monthLabel(first.year, first.month, language) })
       }
       return { cells, months, weekdays: language === 'en' ? ['', 'Mon', '', 'Wed', '', 'Fri', ''] : ['', '周一', '', '周三', '', '周五', ''] }
     }
@@ -1228,6 +1243,8 @@ window.__ModuleLoader__.load({
         end = normalized.end
       } else if (range === 'today') {
         start = fmtDate(new Date(), utc)
+      } else if (range === '7d') {
+        start = fmtDate(shiftCalendarDate(new Date(), -6, utc), utc)
       } else if (range === '30d') {
         start = fmtDate(shiftCalendarDate(new Date(), -29, utc), utc)
       } else {
@@ -1283,6 +1300,7 @@ window.__ModuleLoader__.load({
         return normalized === null ? null : { start: normalized.start, end: normalized.end }
       }
       if (range === 'today') return { start: latest, end: latest }
+      if (range === '7d') return { start: fmtDate(shiftCalendarDate(new Date(), -6, utc), utc), end: latest }
       if (range === '30d') return { start: fmtDate(shiftCalendarDate(new Date(), -29, utc), utc), end: latest }
       if (range === '90d') return { start: fmtDate(shiftCalendarDate(new Date(), -89, utc), utc), end: latest }
       const bounds = availableDateBounds(days, latest)
@@ -1835,7 +1853,19 @@ window.__ModuleLoader__.load({
       const workspaceSelectRef = React.useRef(props.onWorkspaceSelect)
       dateClickRef.current = props.onDateClick
       workspaceSelectRef.current = props.onWorkspaceSelect
-      const calendar = React.useMemo(() => buildCalendarModel(props.todayKey, props.utc === true, language), [props.todayKey, props.utc, language])
+      const weeks = heatmapWeeksOf(props.span)
+      // A short span must not stretch a handful of columns across the whole card:
+      // five full-width columns would be 200px squares. Cap the strip so the cells
+      // stop growing at a readable size and the grid stays left-aligned under its
+      // month labels (which share the same width).
+      const heatmapCap = weeks < HEATMAP_SPANS[HEATMAP_SPAN_DEFAULT] ? (weeks * 34 + (weeks - 1) * 3) + 'px' : null
+      const monthsStyle = { minWidth: (weeks * 13) + 'px' }
+      const gridStyle = { gridTemplateColumns: 'repeat(' + weeks + ', minmax(10px, 1fr))', minWidth: (weeks * 13) + 'px' }
+      if (heatmapCap !== null) {
+        monthsStyle.maxWidth = heatmapCap
+        gridStyle.maxWidth = heatmapCap
+      }
+      const calendar = React.useMemo(() => buildCalendarModel(props.todayKey, props.utc === true, language, weeks), [props.todayKey, props.utc, language, weeks])
       const heatmapMap = React.useMemo(() => {
         const result = new Map()
         for (const day of heatmapRows) if (day && typeof day.date === 'string') result.set(day.date, day)
@@ -1930,17 +1960,28 @@ window.__ModuleLoader__.load({
             React.createElement('span', { className: 'uh-dot', style: { background: wsColor(index) } }),
             React.createElement('span', { className: 'uh-chip-title' }, workspaceLookup.titles.get(workspace.id)),
           ))),
-          React.createElement('div', { className: 'uh-legend' },
-            React.createElement('span', {}, tr('少', 'Less')),
-            [0, 1, 2, 3, 4].map((level) => React.createElement('span', { key: level, className: 'uh-cell', style: { background: cellBg(level) } })),
-            React.createElement('span', {}, tr('多', 'More')),
+          React.createElement('div', { className: 'uh-hm-tools' },
+            React.createElement('div', { className: 'uh-range uh-heatmap-spans', role: 'group', 'aria-label': tr('热力图范围', 'Heatmap span') },
+              HEATMAP_SPAN_KEYS.map((key) => React.createElement('button', {
+                key,
+                type: 'button',
+                className: normalizeHeatmapSpan(props.span) === key ? 'uh-on' : '',
+                title: key === '30d' ? tr('最近 30 天（格子更大）', 'Last 30 days (larger cells)') : key === '90d' ? tr('最近 90 天', 'Last 90 days') : tr('最近 12 个月', 'Last 12 months'),
+                onClick: () => { if (typeof props.onSpanChange === 'function') props.onSpanChange(key) },
+              }, key === '30d' ? tr('30 天', '30 days') : key === '90d' ? tr('90 天', '90 days') : tr('12 个月', '12 months'))),
+            ),
+            React.createElement('div', { className: 'uh-legend' },
+              React.createElement('span', {}, tr('少', 'Less')),
+              [0, 1, 2, 3, 4].map((level) => React.createElement('span', { key: level, className: 'uh-cell', style: { background: cellBg(level) } })),
+              React.createElement('span', {}, tr('多', 'More')),
+            ),
           ),
         ),
         React.createElement('div', { className: 'uh-hm-scroll' },
-          React.createElement('div', { className: 'uh-months' }, calendar.months.map((month, index) => React.createElement('span', { key: index, style: { left: month.left } }, month.text))),
+          React.createElement('div', { className: 'uh-months', style: monthsStyle }, calendar.months.map((month, index) => React.createElement('span', { key: index, style: { left: month.left } }, month.text))),
           React.createElement('div', { className: 'uh-hm-body' },
             React.createElement('div', { className: 'uh-wdays' }, calendar.weekdays.map((weekday, index) => React.createElement('span', { key: index }, weekday))),
-            React.createElement('div', { className: 'uh-grid' }, cellElements),
+            React.createElement('div', { className: 'uh-grid', style: gridStyle }, cellElements),
           ),
         ),
         React.createElement('div', { className: 'uh-note', style: { marginTop: 10 } }, tr('口径：每完成一个回合点亮一次（含子代理会话）；悬停查看按工作区明细，点击工作区可筛选热力图与明细表。日期按本地时区。', 'Methodology: one cell lights up for each completed turn, including subagent sessions. Hover to view workspace details; click a workspace to filter the heatmap and detail tables. English dates and day boundaries use UTC.')),
@@ -2442,6 +2483,8 @@ window.__ModuleLoader__.load({
 .uh-panel { background:var(--dsw-alias-bg-layer-1); border:1px solid var(--dsw-alias-border-l1); border-radius:12px; padding:14px; }
 .uh-hm-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
 .uh-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.uh-hm-tools { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.uh-heatmap-spans button { white-space:nowrap; }
 .uh-chip { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--dsw-alias-border-l2); background:transparent; color:var(--dsw-alias-label-primary); border-radius:999px; padding:2px 10px; font-size:11px; cursor:pointer; font-family:inherit; max-width:190px; transition:border-color .15s ease, background-color .15s ease, color .15s ease, transform .1s ease; }
 .uh-chip .uh-chip-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .uh-chip.uh-on { border-color:var(--dsw-alias-brand-primary); background:color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); }
@@ -2754,7 +2797,8 @@ window.__ModuleLoader__.load({
         const state = {}
         if (['logs', 'model', 'workspace'].includes(value.detailView)) state.detailView = value.detailView
         if (['route', 'model', 'provider'].includes(value.modelView)) state.modelView = value.modelView
-        if (['today', '30d', '90d', 'all'].includes(value.range)) state.range = value.range
+        if (['today', '7d', '30d', '90d', 'all'].includes(value.range)) state.range = value.range
+        if (HEATMAP_SPAN_KEYS.includes(value.heatmapSpan)) state.heatmapSpan = value.heatmapSpan
         if (typeof value.pricingAutoSync === 'boolean') state.pricingAutoSync = value.pricingAutoSync
         return state
       } catch (_) { return {} }
@@ -2782,6 +2826,7 @@ window.__ModuleLoader__.load({
       const [lastStatsAt, setLastStatsAt] = React.useState(0)
       const [balance, setBalance] = React.useState(null)
       const [range, setRange] = React.useState(() => usageUiState.range || 'today')
+      const [heatmapSpan, setHeatmapSpan] = React.useState(() => normalizeHeatmapSpan(usageUiState.heatmapSpan))
       const [customRange, setCustomRange] = React.useState({ start: '', end: '' })
       const [customDraft, setCustomDraft] = React.useState({ start: '', end: '' })
       const [customRangeOpen, setCustomRangeOpen] = React.useState(false)
@@ -2893,6 +2938,7 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { persistUsageUiState({ detailView }) }, [detailView])
       React.useEffect(() => { persistUsageUiState({ modelView }) }, [modelView])
       React.useEffect(() => { if (range !== 'custom') persistUsageUiState({ range }) }, [range])
+      React.useEffect(() => { persistUsageUiState({ heatmapSpan }) }, [heatmapSpan])
 
       const queryScope = React.useMemo(() => stats === null ? null : makeUsageScope(stats, range, useUtc, customRange, wsFilter, providerFilter, modelFilter), [stats, range, useUtc, customRange.start, customRange.end, wsFilter, providerFilter, modelFilter])
       const queryKey = usageScopeKey(queryScope)
@@ -3185,6 +3231,7 @@ window.__ModuleLoader__.load({
         setRange('custom')
         setCustomRangeOpen(false)
       }
+      const chooseHeatmapSpan = (next) => { setHeatmapSpan(normalizeHeatmapSpan(next)) }
       const chooseRange = (next) => {
         setRange(next)
         setCustomRangeOpen(false)
@@ -4219,7 +4266,7 @@ window.__ModuleLoader__.load({
 
       const rangeLabel = range === 'custom' && activeCustomRange !== null
         ? (language === 'en' ? activeCustomRange.start + ' to ' + activeCustomRange.end + ' (UTC)' : activeCustomRange.start + ' 至 ' + activeCustomRange.end)
-        : range === 'today' ? tr('今日', 'Today') : range === '30d' ? tr('近 30 天', 'Last 30 Days') : range === '90d' ? tr('近 90 天', 'Last 90 Days') : tr('全部', 'All Time')
+        : range === 'today' ? tr('今日', 'Today') : range === '7d' ? tr('近 7 天', 'Last 7 Days') : range === '30d' ? tr('近 30 天', 'Last 30 Days') : range === '90d' ? tr('近 90 天', 'Last 90 Days') : tr('全部', 'All Time')
       const rangeFilePart = rangeFilenamePart(range, activeCustomRange, useUtc)
       const customRangeErrorText = customDraftIssue === 'invalid'
         ? tr('请选择有效的开始日期和结束日期', 'Choose valid start and end dates')
@@ -4231,7 +4278,7 @@ window.__ModuleLoader__.load({
       const customRangePanel = customRangeOpen ? React.createElement('div', { className: 'uh-custom-range', role: 'group', 'aria-label': tr('自定义时间范围', 'Custom date range') },
         React.createElement('div', { className: 'uh-custom-range-meta' },
           React.createElement('div', { className: 'uh-custom-range-title' }, React.createElement(LineIcon, { name: 'calendar', size: 15 }), tr('自定义时间范围', 'Custom date range')),
-          React.createElement('div', { className: 'uh-custom-range-note' }, tr('可查看全部可扫描历史日数据；中文按本地日期，English 按 UTC。热力图始终展示最近 53 周。', 'All available historical daily data can be selected. Chinese uses local dates; English uses UTC. The heatmap always shows the latest 53 weeks.')),
+          React.createElement('div', { className: 'uh-custom-range-note' }, tr('可查看全部可扫描历史日数据；中文按本地日期，English 按 UTC。热力图可切换最近 30 天 / 90 天 / 12 个月。', 'All available historical daily data can be selected. Chinese uses local dates; English uses UTC. The heatmap switches between the last 30 days, 90 days and 12 months.')),
         ),
         React.createElement('div', { className: 'uh-custom-range-fields' },
           React.createElement('label', { className: 'uh-custom-range-field' },
@@ -4390,13 +4437,13 @@ window.__ModuleLoader__.load({
               ) : null,
             ),
             React.createElement('div', { className: 'uh-range' },
-              ['today', '30d', '90d', 'all', 'custom'].map((r) => React.createElement('button', {
+              ['today', '7d', '30d', '90d', 'all', 'custom'].map((r) => React.createElement('button', {
                 key: r,
                 type: 'button',
                 className: range === r ? 'uh-on' : '',
                 title: r === 'custom' && range === 'custom' ? rangeLabel : undefined,
                 onClick: () => { if (r === 'custom') openCustomRange(); else chooseRange(r) },
-              }, r === 'today' ? tr('今日', 'Today') : r === '30d' ? tr('近 30 天', 'Last 30 Days') : r === '90d' ? tr('近 90 天', 'Last 90 Days') : r === 'all' ? tr('全部', 'All Time') : tr('自定义', 'Custom'))),
+              }, r === 'today' ? tr('今日', 'Today') : r === '7d' ? tr('近 7 天', 'Last 7 Days') : r === '30d' ? tr('近 30 天', 'Last 30 Days') : r === '90d' ? tr('近 90 天', 'Last 90 Days') : r === 'all' ? tr('全部', 'All Time') : tr('自定义', 'Custom'))),
             ),
             React.createElement('button', { className: 'uh-refresh', title: tr('导出当前时间范围与模型查看模式的 CSV 数据', 'Export CSV data for the current time range and model view'), onClick: exportCsv }, React.createElement(LineIcon, { name: 'export', size: 14 }), tr('导出数据', 'Export Data')),
             React.createElement('button', { className: 'uh-refresh uh-icon-button', title: tr('刷新统计数据', 'Refresh usage statistics'), 'aria-label': tr('刷新统计数据', 'Refresh usage statistics'), onClick: onRefresh }, React.createElement(LineIcon, { name: 'refresh', size: 16 })),
@@ -4494,6 +4541,8 @@ window.__ModuleLoader__.load({
             todayKey: latestCalendarDate,
             utc: useUtc,
             language,
+            span: heatmapSpan,
+            onSpanChange: chooseHeatmapSpan,
             onWorkspaceSelect: toggleFilter,
             onDateClick: openAuditForDate,
           }),

@@ -18,12 +18,12 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 
 ### 功能
 
-- **热力图**：53 周使用热力图；按工作区筛选并查看每日回合与 Token 明细
+- **热力图**：使用热力图可选**最近 30 天 / 90 天 / 12 个月**三种跨度（格子随跨度自适应，跨度越短格子越大）；按工作区筛选并查看每日回合与 Token 明细
 - **模型统计**：支持混合查看、按模型合并、按供应商汇总三种维度，展示调用次数、各类 Token 与缓存命中率；模型行与筛选下拉显示真实厂商品牌 SVG 图标（未知/混牌保持中性）
 - **摘要与工作区**：Token 用量、缓存命中、估算成本、账户余额、连续使用、工作区 Token 分布和明细
 - **成本统计 / 价格表**：从 models.dev 同步模型价格；按输入、输出、缓存读取和缓存写入四个桶计算，保存价格快照，明确区分已计价、免费模型和未计价调用。成本设置是一张可编辑的价格表：每行一个账本模型，价格框直接编辑即写入该模型的手工价，「官方模型」列选定映射后该行自动改用官方目录价，并可为每行配置**上下文费率档位**与**分时段（UTC 峰谷）计费**；配置里存在但账本暂无用量的行同样可见、可改、可删。峰谷规则可额外开启「中国法定节假日全天按谷时计价」，节假日日期以显式列表保存在该模型的峰谷计划里（按北京时间 UTC+8 日历日判定，支持 2026-10-01..2026-10-07 区间写法，也可一键「从公开日历载入」当年放假安排后冻结进策略）。内置 DeepSeek 峰谷表已自带 2026 年官方放假安排（随插件版本更新），官方直连或已映射到官方条目的行无需任何配置即按节假日谷价计价；非官方直连的中转行仍按静态价，映射后生效
 - **导出**：按当前时间范围和模型聚合方式导出 CSV
-- **时间范围**：今日、近 30 天、近 90 天、全部，或在全部可扫描历史日数据中自定义起止日期；热力图始终展示最近 53 周
+- **时间范围**：今日、**近 7 天**、近 30 天、近 90 天、全部，或在全部可扫描历史日数据中自定义起止日期；热力图跨度独立切换（30 天 / 90 天 / 12 个月），与时间范围互不影响
 - **工作区别名**：在侧栏入口打开看板后管理，持久化保存到 $DSH_HOME/storages 的 KV 单元 `all_usage_aliases`
 - **界面语言**：在看板顶部切换中文与 English；选择会保存到浏览器本地
 - **完整历史与增量重建**：基线扫描全部可读历史会话；独立用量账本同时作为每会话游标——未变化的会话直接复用账本，新增事件只增量回填，长历史重启不再全量重建
@@ -182,7 +182,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 ### 数据说明
 
 - 使用次数与 Token 来自 DSH 会话日志；`session/flush` 只在存在新的相关事件时重建并将派生账本写入异步队列，同一 session 的 pending record 会合并，插件退出时 drain；插件激活时会回填日志与账本历史，插件卸载/重启后已成功持久化的数据不丢
-- 按日范围统计会保留全部可读取历史会话的有使用记录日期；热力图仅作为最近 53 周的固定视图窗口
+- 按日范围统计会保留全部可读取历史会话的有使用记录日期；热力图是可切换跨度的视图窗口（最近 30 天 / 90 天 / 12 个月，默认 12 个月）
 - 会话删除后，已成功 flush 的用量仍从独立账本恢复；工作区删除同样不会丢数据——其历史用量汇总为一行「已删除」（含未落账的实时用量）。会话销毁提示和周期对账只负责触发重建，不会删除账本记录
 - 同一会话的同一 `turn / step` 只保留一份最终 usage；重试或替换消息会替换旧贡献，不重复累计
 - 输入 Token 按「未含缓存命中」计（缓存命中 / 写入独立成桶）；全 0 用量的重放事件不会覆盖已记录的真实用量，纯缓存命中的请求仍会计入
@@ -212,12 +212,12 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, est
 
 ### Features
 
-- **Heatmap**: a 53-week activity heatmap with workspace filters and daily turn/token details
+- **Heatmap**: an activity heatmap with a switchable span (**last 30 days / 90 days / 12 months**; shorter spans get larger cells), workspace filters and daily turn/token details
 - **Model analytics**: mixed view, model-merged view, and provider summary with calls, token categories, and cache hit rate; model rows and the model filter dropdown render vendor brand SVG icons (neutral for unknown or mixed brands)
 - **Summary and workspaces**: processed tokens, cache hits, estimated cost, account balance, usage streaks, workspace distribution, and details
 - **Cost statistics / price table**: sync model prices from models.dev, calculate four cost buckets, persist price snapshots, and distinguish priced, free, ambiguous, and unpriced calls. Cost Settings is one editable price table: each row is a ledger model, its price boxes write that model's manual price, the official-model column switches the row to the catalog price, and every row can carry context rate bands and time-of-day (UTC peak/off-peak) rules, including an optional "Chinese statutory holidays price as off-peak all day" switch whose explicit date list lives in that model's peak plan (China Standard Time calendar days, 2026-10-01..2026-10-07 ranges supported, and one click loads the year's arrangement from a public calendar before it is frozen into the policy); rows that exist only in the saved configuration stay visible, editable, and removable
 - **CSV export**: export data using the selected time range and aggregation mode
-- **Time ranges**: today, last 30 days, last 90 days, all time, or a custom start/end date across all available historical daily data; the heatmap always shows the latest 53 weeks
+- **Time ranges**: today, **last 7 days**, last 30 days, last 90 days, all time, or a custom start/end date across all available historical daily data; the heatmap span switches independently (30 days / 90 days / 12 months)
 - **Workspace aliases**: manage aliases from the sidebar dashboard; values persist in the $DSH_HOME/storages KV cell `all_usage_aliases`
 - **Interface language**: switch between Chinese and English from the dashboard header; your choice persists locally in the browser
 - **Full history & incremental rebuild**: the baseline scans every readable historical session; the durable usage ledger doubles as a per-session cursor, so unchanged sessions are reused straight from the ledger and only newly appended events are folded — long histories restart without a full rebuild
@@ -368,7 +368,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 ### Data semantics
 
 - Calls and tokens come from DSH session logs; `session/flush` rebuilds and queues the derived ledger only when related events are dirty, coalescing the latest pending record per session and draining on plugin disposal. Readable logs and ledger history are backfilled when the plugin activates, so successfully persisted data survives reloads or session deletion; deleting a workspace likewise keeps its history, summed into one "Deleted" row together with usage that had not reached the ledger yet
-- Day-level range data retains every readable historical session date with tracked usage; the heatmap is only a fixed latest-53-week view
+- Day-level range data retains every readable historical session date with tracked usage; the heatmap is a switchable-span view (last 30 days / 90 days / 12 months, 12 months by default), not a fixed latest-53-week view
 - After a session is deleted, successfully flushed usage is restored from the separate ledger; disposal hints and periodic reconciliation trigger rebuilds without deleting ledger rows
 - For each session and logical `turn / step`, only the final usage contribution is kept; retries or replaced messages do not double-count
 - Input tokens are fresh (exclude cache hits/writes, which sit in their own buckets); all-zero usage replays do not overwrite recorded usage and pure cache-read requests still count

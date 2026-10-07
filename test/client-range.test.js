@@ -10,8 +10,8 @@ assert.notEqual(start, -1, 'client date helpers must exist')
 assert.notEqual(end, -1, 'client range helper boundary must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel }', context)
-const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel } = context.__rangeHelpers
+vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan }', context)
+const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan } = context.__rangeHelpers
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
   return {
@@ -113,6 +113,67 @@ test('groups model view by normalized model ID instead of provider labels', () =
   assert.equal(aggregateModelRows([{ provider: 'p', actualModel: 'm / alpha', model: 'p / m / alpha', calls: 1, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }], 'model', 'Unknown provider', 'Unknown model')[0].model, 'm / alpha')
   assert.equal(grouped[0].provider, 'opencode-go')
   assert.equal(grouped[0].calls, 74)
+})
+
+test('offers a seven-day range next to the existing presets', () => {
+  const now = new Date()
+  const keyFor = (offset) => {
+    const date = new Date(now)
+    date.setDate(date.getDate() + offset)
+    return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0')
+  }
+  const stats = {
+    byDay: [day(keyFor(0), 1, 10), day(keyFor(-6), 1, 20), day(keyFor(-7), 1, 40)],
+    byDayUtc: [],
+    totals: { turns: 3, calls: 3, sessions: 3, input: 70, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: {} },
+    perWorkspace: [],
+    perModel: [],
+  }
+  const bounds = resolveRangeBounds(stats, '7d', false, { start: '', end: '' })
+  assert.equal(bounds.start, keyFor(-6))
+  assert.equal(bounds.end, keyFor(0))
+  // Seven calendar days inclusive: today and six days back, not seven.
+  const scoped = rangeAgg(stats, '7d', false, { start: '', end: '' })
+  assert.equal(scoped.totals.turns, 2)
+  assert.equal(scoped.totals.input, 30)
+  // The neighbouring presets keep their own windows.
+  assert.equal(resolveRangeBounds(stats, '30d', false, { start: '', end: '' }).start, keyFor(-29))
+  assert.equal(resolveRangeBounds(stats, '90d', false, { start: '', end: '' }).start, keyFor(-89))
+  assert.match(source, /\['today', '7d', '30d', '90d', 'all', 'custom'\]/)
+  assert.match(source, /range === '7d' \? tr\('近 7 天', 'Last 7 Days'\)/)
+})
+
+test('builds a shorter heatmap calendar for a shorter span', () => {
+  const today = '2026-05-12'
+  const thirty = buildCalendarModel(today, true, 'en', heatmapWeeksOf('30d'))
+  assert.equal(thirty.cells.length, 5 * 7)
+  assert.equal(new Date(thirty.cells[0].date + 'T00:00:00Z').getUTCDay(), 0)
+  assert.equal(thirty.cells.at(-1).date, '2026-05-16')
+  const ninety = buildCalendarModel(today, true, 'en', heatmapWeeksOf('90d'))
+  assert.equal(ninety.cells.length, 13 * 7)
+  assert.equal(ninety.cells.at(-1).date, '2026-05-16')
+  assert.equal(buildCalendarModel(today, true, 'en', heatmapWeeksOf('12m')).cells.length, 53 * 7)
+  // An unknown or out-of-range span falls back to the year view instead of
+  // stretching the grid.
+  assert.equal(heatmapWeeksOf('nope'), 53)
+  assert.equal(heatmapWeeksOf(undefined), 53)
+  assert.equal(normalizeHeatmapSpan('30d'), '30d')
+  assert.equal(normalizeHeatmapSpan(null), '12m')
+  assert.equal(buildCalendarModel(today, true, 'en', 999).cells.length, 53 * 7)
+  assert.equal(buildCalendarModel(today, true, 'en', 0).cells.length, 53 * 7)
+  // Month labels stay inside the strip whatever the span.
+  for (const span of ['30d', '90d', '12m']) {
+    const calendar = buildCalendarModel(today, true, 'en', heatmapWeeksOf(span))
+    for (const month of calendar.months) {
+      const left = Number(String(month.left).replace('%', ''))
+      assert.ok(left >= 0 && left < 100, span + ' label at ' + month.left)
+    }
+  }
+  // Each column is a week, so a shorter span is also a taller one: the grid must
+  // follow the span rather than the fixed 53-column template.
+  assert.match(source, /gridTemplateColumns: 'repeat\(\' \+ weeks \+ ', minmax\(10px, 1fr\)\)'/)
+  assert.match(source, /HEATMAP_SPANS = \{ '30d': 5, '90d': 13, '12m': 53 \}/)
+  assert.match(source, /className: 'uh-range uh-heatmap-spans'/)
 })
 
 test('builds a stable scope and zero-fills daily trend rows', () => {
