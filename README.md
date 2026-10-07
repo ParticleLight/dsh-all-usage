@@ -170,7 +170,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
   - `GET /api/all-usage/status` — 轻量 revision 与同步健康状态，并附带最近一次客户端环境报告（`clientEnv`）、运行中插件的版本号（`pluginVersion`）与写入令牌的派生 ID（`capabilityId`，令牌轮换时变化，用于让页面察觉宿主被重新加载；令牌本身只在完整快照里下发）
   - `GET /api/all-usage/query` — 按 scope 返回聚合、daily/hourly 趋势和 heatmap 数据；单日 scope 填充 `hourly`，跨日 scope 的 `hourly` 为空
   - `GET /api/all-usage/records` — 按 scope 分页返回脱敏 canonical usage rows
-  - `GET /api/all-usage/version?force=1` — 版本检查：返回运行中版本与 npm 上最新版本、比较结论（`latest` / `outdated` / `unknown`）、检查时间与来源；Host 侧缓存 6 小时，`force=1` 来自刷新按钮
+  - `GET /api/all-usage/version?force=1` — 版本检查：返回运行中版本与 npm 上最新版本、比较结论（`latest` / `outdated` / `unknown`）、检查时间与来源；Host 侧缓存 6 小时，同一进程内对上游的请求最多每 30 秒一次（`force=1` 也受此下限约束），`force=1` 来自刷新按钮
   - `GET /api/all-usage/balance?force=1` — 账户余额（复用 `llm-deepseek` 的 API Key 配置）
   - `POST /api/all-usage/alias` — 设置工作区别名
   - `GET /api/all-usage/pricing` — 读取可编辑价格表所需的完整配置：逐模型的生效费率与状态、映射、手工价、峰谷计划（含内置表来源与完整规则）以及仅存在于配置中的行
@@ -359,7 +359,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
   - `GET /api/all-usage/status` — lightweight revision and sync health, plus the last client environment report (`clientEnv`), the running plugin version (`pluginVersion`) and a derived id of the write capability (`capabilityId`, changes when the capability rotates so the page can notice a plugin reload; the capability itself is only ever sent in the full snapshot)
   - `GET /api/all-usage/query` — scoped aggregate, daily/hourly trend, and heatmap data; single-day scopes populate `hourly`, while cross-day scopes return an empty `hourly` array
   - `GET /api/all-usage/records` — paginated privacy-safe canonical usage rows
-  - `GET /api/all-usage/version?force=1` — version check: the running version, the newest published version, the verdict (`latest` / `outdated` / `unknown`), when it was checked and where it came from; cached on the host for 6 hours, `force=1` comes from the refresh button
+  - `GET /api/all-usage/version?force=1` — version check: the running version, the newest published version, the verdict (`latest` / `outdated` / `unknown`), when it was checked and where it came from; cached on the host for 6 hours with at most one upstream request every 30 seconds per process (the floor applies to `force=1` too), `force=1` comes from the refresh button
   - `GET /api/all-usage/balance?force=1` — account balance using the configured `llm-deepseek` API key
   - `POST /api/all-usage/alias` — update workspace aliases
   - `GET /api/all-usage/pricing` — read the full editable price table: per-row effective rates and status, mappings, manual prices, peak plans (with their built-in/explicit origin and full rules), and rows that exist only in the configuration

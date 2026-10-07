@@ -631,15 +631,16 @@ test('reads the registry version through the host, caches it and stays loopback-
     const cached = await call(app, '/api/all-usage/version', makeRequest('GET', { host: '127.0.0.1:3080' }))
     assert.equal(cached.json().cached, true)
     assert.equal(calls, 1)
-    // force=1 is the refresh button: it asks the registry again.
+    // force=1 is the refresh button, but the host still enforces its floor: this
+    // route is a read (no capability needed), so a burst of requests must not turn
+    // into a burst of registry requests. Inside the floor the known answer is used.
     version = '1.1.19'
     const forceRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
     forceRequest.url = '/api/all-usage/version?force=1'
     const forced = await call(app, '/api/all-usage/version', forceRequest)
     assert.equal(forced.json().cached, false)
-    assert.equal(forced.json().status, 'outdated')
-    assert.equal(forced.json().latest, '1.1.19')
-    assert.equal(calls, 2)
+    assert.equal(forced.json().latest, '1.1.18')
+    assert.equal(calls, 1)
     // Reads stay loopback-only and GET-only.
     assert.equal((await call(app, '/api/all-usage/version', makeRequest('GET', { host: '192.0.2.10:3080' }))).status, 403)
     assert.equal((await call(app, '/api/all-usage/version', makeRequest('GET', { host: '127.0.0.1:3080', 'sec-fetch-site': 'cross-site' }))).status, 403)

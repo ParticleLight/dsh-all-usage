@@ -51,7 +51,8 @@ test('caches the registry answer, honours force, and keeps the last good verdict
     if (fail) throw new Error('offline')
     return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ version: '1.1.18' }) }
   }
-  const check = createVersionCheck({ currentVersion: '1.1.17', fetchImpl, ttlMs: 60000 })
+  // minIntervalMs: 0 pins the force path itself; the floor has its own test below.
+  const check = createVersionCheck({ currentVersion: '1.1.17', fetchImpl, ttlMs: 60000, minIntervalMs: 0 })
   assert.equal(check.snapshot().status, 'unknown')
   assert.equal(check.snapshot().latest, null)
   assert.equal(check.snapshot().sourceUrl, VERSION_CHECK_URL)
@@ -80,4 +81,40 @@ test('caches the registry answer, honours force, and keeps the last good verdict
   assert.equal(none.latest, null)
   assert.equal(none.checkedAt, null)
   assert.equal(none.error, 'version-fetch-failed')
+})
+
+test('never turns a burst of reads into a burst of registry requests', async () => {
+  let calls = 0
+  const fetchImpl = async () => {
+    calls += 1
+    return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ version: '1.1.18' }) }
+  }
+  const check = createVersionCheck({ currentVersion: '1.1.17', fetchImpl, ttlMs: 60000, minIntervalMs: 50 })
+  const first = await check.read(false)
+  assert.equal(first.cached, false)
+  assert.equal(calls, 1)
+  // A forced read inside the floor answers from what is already known instead of
+  // asking again, so a page cannot amplify its own requests into registry requests.
+  const rushed = await check.read(true)
+  assert.equal(rushed.cached, false)
+  assert.equal(rushed.latest, '1.1.18')
+  assert.equal(calls, 1)
+  await new Promise((resolve) => setTimeout(resolve, 60))
+  const later = await check.read(true)
+  assert.equal(calls, 2)
+  assert.equal(later.latest, '1.1.18')
+  // A failure is held for the floor too: a broken registry is not retried in a loop.
+  let failingCalls = 0
+  const failing = createVersionCheck({
+    currentVersion: '1.1.17',
+    fetchImpl: async () => { failingCalls += 1; throw new Error('offline') },
+    ttlMs: 60000,
+    minIntervalMs: 50,
+  })
+  const failed = await failing.read(false)
+  assert.equal(failed.status, 'unknown')
+  assert.equal(failingCalls, 1)
+  await failing.read(false)
+  await failing.read(true)
+  assert.equal(failingCalls, 1)
 })

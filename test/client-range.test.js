@@ -210,6 +210,10 @@ test('summarizes the version chip without inventing a verdict', () => {
   // A host that predates the route says so instead of looking like a failed check.
   assert.match(source, /\(reason\.status === 401 \|\| reason\.status === 404\) \? 'endpoint' : 'failed'/)
   assert.match(source, /重启 DSH 后可用', '\\nThe host does not provide the version check yet/)
+  // A restarted host runs a different version, so a verdict cached for the previous
+  // one is dropped instead of being shown next to the new version number.
+  assert.match(source, /nextHostVersion !== previousHostVersion\) refreshVersionRef\.current\(\)/)
+  assert.match(source, /refreshVersionRef\.current = \(\) => load\(false\)/)
 })
 
 test('builds a stable scope and zero-fills daily trend rows', () => {

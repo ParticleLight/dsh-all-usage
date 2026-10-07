@@ -1987,6 +1987,7 @@ window.__ModuleLoader__.load({
                 key,
                 type: 'button',
                 className: normalizeHeatmapSpan(props.span) === key ? 'uh-on' : '',
+                'aria-pressed': normalizeHeatmapSpan(props.span) === key,
                 title: key === '30d' ? tr('最近 30 天（格子更大）', 'Last 30 days (larger cells)') : key === '90d' ? tr('最近 90 天', 'Last 90 days') : tr('最近 12 个月', 'Last 12 months'),
                 onClick: () => { if (typeof props.onSpanChange === 'function') props.onSpanChange(key) },
               }, key === '30d' ? tr('30 天', '30 days') : key === '90d' ? tr('90 天', '90 days') : tr('12 个月', '12 months'))),
@@ -2921,6 +2922,7 @@ window.__ModuleLoader__.load({
       const pricingModelSearchTimerRef = React.useRef({})
       const pricingOpenRef = React.useRef(false)
       const refreshPricingPanelRef = React.useRef(() => {})
+      const refreshVersionRef = React.useRef(() => {})
       const invalidatePricingSearches = () => {
         // Any catalog replacement (sync, refresh, close/reopen) invalidates all
         // in-flight official-model searches: bump the row generation and cancel
@@ -2986,11 +2988,16 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { persistUsageUiState({ heatmapSpan }) }, [heatmapSpan])
       React.useEffect(() => {
         let alive = true
-        getVersionCheck(false).then(
+        const load = (force) => getVersionCheck(force).then(
           (data) => { if (alive) { setVersionInfo(data); setVersionError('') } },
           (reason) => { if (alive) setVersionError(reason && (reason.status === 401 || reason.status === 404) ? 'endpoint' : 'failed') },
         )
-        return () => { alive = false }
+        refreshVersionRef.current = () => load(false)
+        load(false)
+        return () => {
+          alive = false
+          refreshVersionRef.current = () => {}
+        }
       }, [])
 
       const queryScope = React.useMemo(() => stats === null ? null : makeUsageScope(stats, range, useUtc, customRange, wsFilter, providerFilter, modelFilter), [stats, range, useUtc, customRange.start, customRange.end, wsFilter, providerFilter, modelFilter])
@@ -3050,8 +3057,13 @@ window.__ModuleLoader__.load({
               scheduleRetry('full')
               return
             }
+            const previousHostVersion = appliedSnapshot !== null && typeof appliedSnapshot.pluginVersion === 'string' ? appliedSnapshot.pluginVersion : ''
             appliedSnapshot = data
             if (data.scan) scanDone = !!data.scan.done
+            // A restarted host runs a different version, so a verdict cached for the
+            // previous one no longer applies (the new host also has a fresh cache).
+            const nextHostVersion = typeof data.pluginVersion === 'string' ? data.pluginVersion : ''
+            if (nextHostVersion !== '' && nextHostVersion !== previousHostVersion) refreshVersionRef.current()
             const nextToken = typeof data.requestToken === 'string' ? data.requestToken : ''
             const tokenChanged = nextToken !== '' && nextToken !== requestToken
             requestToken = nextToken
