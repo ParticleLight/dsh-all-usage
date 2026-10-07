@@ -8,6 +8,8 @@ All notable changes to `dsh-all-usage` are documented here.
 
 - **A seven-day range.** The time-range presets gain 近 7 天 / Last 7 Days next to today, 30 days, 90 days and all time; it scopes the summary, trend, model tables, audit log, filters and CSV export like every other preset (seven calendar days, today included), and the choice persists in the browser like the others.
 - **A switchable heatmap span.** The activity heatmap no longer forces 53 columns: 30 天 / 90 天 / 12 个月 buttons redraw it with 5, 13 or 53 week columns. The grid follows the span (each column is a week and every cell keeps a 1:1 aspect ratio), so a shorter span also gets taller, readable cells instead of 10px squares. The span is stored with the other UI preferences and is independent of the time range above: changing the range never resizes the heatmap and vice versa.
+- **A version indicator in the header.** The dashboard title now carries the running plugin version: “已是最新 / Up to date” in small text when it matches the newest release on npm, “最新 vX.Y.Z / Latest vX.Y.Z” highlighted when it is behind, and clicking it opens the GitHub repository. The host performs the check (`GET /api/all-usage/version`, one read-only request to `registry.npmjs.org`, cached for 6 hours, never initiated by the page itself), so a desktop shell that cannot reach the network still shows its running version, and the refresh button forces a fresh check. An unreachable registry or an unparseable tag degrades to “unknown” (the chip shows the version alone) rather than claiming either verdict.
+
 ## [1.1.17] - 2026-10-01
 
 ### Fixed

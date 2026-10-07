@@ -607,6 +607,48 @@ test('stops folding events after disposal', async () => {
 })
 
 
+test('reads the registry version through the host, caches it and stays loopback-only', async () => {
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  let version = '1.1.18'
+  globalThis.fetch = async () => {
+    calls += 1
+    return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ version }) }
+  }
+  try {
+    const app = await createApp({})
+    const first = await call(app, '/api/all-usage/version', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    assert.equal(first.status, 200)
+    const body = first.json()
+    assert.equal(body.status, 'outdated')
+    assert.equal(body.latest, '1.1.18')
+    assert.equal(body.cached, false)
+    assert.equal(typeof body.current, 'string')
+    assert.equal(body.error, null)
+    assert.ok(String(body.sourceUrl).startsWith('https://registry.npmjs.org/'))
+    assert.equal(calls, 1)
+    // The host caches, so a dashboard left open does not hammer the registry.
+    const cached = await call(app, '/api/all-usage/version', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    assert.equal(cached.json().cached, true)
+    assert.equal(calls, 1)
+    // force=1 is the refresh button: it asks the registry again.
+    version = '1.1.19'
+    const forceRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+    forceRequest.url = '/api/all-usage/version?force=1'
+    const forced = await call(app, '/api/all-usage/version', forceRequest)
+    assert.equal(forced.json().cached, false)
+    assert.equal(forced.json().status, 'outdated')
+    assert.equal(forced.json().latest, '1.1.19')
+    assert.equal(calls, 2)
+    // Reads stay loopback-only and GET-only.
+    assert.equal((await call(app, '/api/all-usage/version', makeRequest('GET', { host: '192.0.2.10:3080' }))).status, 403)
+    assert.equal((await call(app, '/api/all-usage/version', makeRequest('GET', { host: '127.0.0.1:3080', 'sec-fetch-site': 'cross-site' }))).status, 403)
+    assert.equal((await call(app, '/api/all-usage/version', makeRequest('POST', { host: '127.0.0.1:3080' }, '{}'))).status, 405)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('serves a lightweight status snapshot with full stats route protections', async () => {
   const eventTime = Date.now() - 60 * 1000
   const app = await createApp({

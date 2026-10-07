@@ -26,6 +26,7 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 - **时间范围**：今日、**近 7 天**、近 30 天、近 90 天、全部，或在全部可扫描历史日数据中自定义起止日期；热力图跨度独立切换（30 天 / 90 天 / 12 个月），与时间范围互不影响
 - **工作区别名**：在侧栏入口打开看板后管理，持久化保存到 $DSH_HOME/storages 的 KV 单元 `all_usage_aliases`
 - **界面语言**：在看板顶部切换中文与 English；选择会保存到浏览器本地
+- **版本指示**：标题旁显示当前运行版本号——与 npm 上最新发布版一致时小字标注「已是最新」，落后时标出「最新 vX.Y.Z」并高亮，点击任意状态都打开 GitHub 仓库；检查由 Host 缓存（默认 6 小时），只有点「刷新统计数据」才会强制重新检查
 - **完整历史与增量重建**：基线扫描全部可读历史会话；独立用量账本同时作为每会话游标——未变化的会话直接复用账本，新增事件只增量回填，长历史重启不再全量重建
 - **重启免读**：用持久化日志的 revision 作为每会话的变更信号（只读头部行 + stat，不读全量）——日志未变的会话重启时连事件都不读，直接从账本复用；仅日志变化（新增/修改）的会话才做增量读取
 - **数据健康与按需刷新**：扫描完成后浏览器只检查轻量状态版本，只有用量、别名或同步状态变化时才拉完整历史；显示本次数据更新时间、历史扫描健康、revision 免读、实际读取、账本恢复和失败，网络异常保留上次成功数据并可重试
@@ -169,6 +170,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
   - `GET /api/all-usage/status` — 轻量 revision 与同步健康状态，并附带最近一次客户端环境报告（`clientEnv`）、运行中插件的版本号（`pluginVersion`）与写入令牌的派生 ID（`capabilityId`，令牌轮换时变化，用于让页面察觉宿主被重新加载；令牌本身只在完整快照里下发）
   - `GET /api/all-usage/query` — 按 scope 返回聚合、daily/hourly 趋势和 heatmap 数据；单日 scope 填充 `hourly`，跨日 scope 的 `hourly` 为空
   - `GET /api/all-usage/records` — 按 scope 分页返回脱敏 canonical usage rows
+  - `GET /api/all-usage/version?force=1` — 版本检查：返回运行中版本与 npm 上最新版本、比较结论（`latest` / `outdated` / `unknown`）、检查时间与来源；Host 侧缓存 6 小时，`force=1` 来自刷新按钮
   - `GET /api/all-usage/balance?force=1` — 账户余额（复用 `llm-deepseek` 的 API Key 配置）
   - `POST /api/all-usage/alias` — 设置工作区别名
   - `GET /api/all-usage/pricing` — 读取可编辑价格表所需的完整配置：逐模型的生效费率与状态、映射、手工价、峰谷计划（含内置表来源与完整规则）以及仅存在于配置中的行
@@ -186,6 +188,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - 会话删除后，已成功 flush 的用量仍从独立账本恢复；工作区删除同样不会丢数据——其历史用量汇总为一行「已删除」（含未落账的实时用量）。会话销毁提示和周期对账只负责触发重建，不会删除账本记录
 - 同一会话的同一 `turn / step` 只保留一份最终 usage；重试或替换消息会替换旧贡献，不重复累计
 - 输入 Token 按「未含缓存命中」计（缓存命中 / 写入独立成桶）；全 0 用量的重放事件不会覆盖已记录的真实用量，纯缓存命中的请求仍会计入
+- 版本检查会向 `registry.npmjs.org` 发一次只读 GET（仅读取 `dsh-all-usage` 的版本号，无请求体、无 Cookie；由 Host 发起并缓存 6 小时，页面自身不联网），失败时降级为「未知」而非猜测
 - 轻量状态接口只公开 Host 实例、统计 revision、扫描进度、同步计数与最近一次客户端环境报告（UA、视口、预留顶栏值及其来源、面板矩形——由本机客户端上报且只存内存），不公开会话 ID、工作区路径、提示词或回复正文；完整快照仅在状态变化或手动刷新时获取
 - scope query 将回合（turns）、模型调用（calls）和去重会话（sessions）分开统计；Provider/模型筛选缺少路由信息时明确归为 Unknown，不从展示字符串猜测
 - records 接口只返回短 hash、时间、工作区 ID、结构化模型身份、turn/step、Token buckets 和当前物化来源，不返回原始 session ID、路径、提示词、回复或凭据
@@ -226,6 +229,7 @@ A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, est
 - **Data health and on-demand refresh**: after a scan completes, the browser polls only a lightweight status revision and fetches full history only after usage, alias, or sync state changes; it shows the latest full-data update, historical scan health, revision skips, rereads, ledger recovery, and failures while preserving last-good data on network errors
 - **Performance**: Host maintains ingest-time local/UTC day, workspace, model-identity cubes and single-day hour buckets; scope queries merge buckets, exact costs use BigInt decimal accumulators, and the 53-week heatmap emits only the fields it consumes, while revision-scoped snapshot/records caches and recyclable live-event queues remain in place. Client isolates the heatmap, tooltip, trend, donuts, request records, and pricing dialog behind memoized boundaries; pointer coordinates update through refs plus requestAnimationFrame instead of rerendering the page, and the browser entry is deterministically minified before packing
 - **Trend line chart**: show input, cache read/write, output, reasoning, and total processed tokens for the active range, timezone, workspace, provider, and model scope; use hourly buckets for a single-day scope and daily buckets for cross-day scopes, with smooth monotone curves, staged entrance animation, hover for exact values, and click a point to inspect that day
+- **Version indicator**: the header shows the running version next to the title — “Up to date” in small text when it matches the newest release on npm, “Latest vX.Y.Z” highlighted when it is behind, and a click opens the GitHub repository; the host caches the check (6 hours by default) and only the refresh button forces a new one
 - **Unified filters and audit**: workspace, provider, model, and date filters apply to the summary, heatmap, trend, tables, and CSV; workspace, provider, and model filters remain independent and can be combined freely, while workspace, provider, and model options are limited to values used in the selected date range and stale selections clear automatically; request logs stay visible as a compact paginated table with grouped Token details for the selected row
 - **Token accounting semantics**: input tokens are fresh (exclude cache hits/writes, which sit in separate buckets along with reasoning); all-zero usage replays never overwrite recorded usage, while cache-only requests still count
 - **Cost semantics**: prices come from the models.dev USD per 1M token catalog; DSH-normalized fresh input and the four cost buckets are snapshotted at calculation time, the multiplier applies only to final total, and existing positive historical costs are not recalculated; matching uses the model's official vendor entry and ignores the DSH provider, while missing official prices stay unpriced
@@ -355,6 +359,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
   - `GET /api/all-usage/status` — lightweight revision and sync health, plus the last client environment report (`clientEnv`), the running plugin version (`pluginVersion`) and a derived id of the write capability (`capabilityId`, changes when the capability rotates so the page can notice a plugin reload; the capability itself is only ever sent in the full snapshot)
   - `GET /api/all-usage/query` — scoped aggregate, daily/hourly trend, and heatmap data; single-day scopes populate `hourly`, while cross-day scopes return an empty `hourly` array
   - `GET /api/all-usage/records` — paginated privacy-safe canonical usage rows
+  - `GET /api/all-usage/version?force=1` — version check: the running version, the newest published version, the verdict (`latest` / `outdated` / `unknown`), when it was checked and where it came from; cached on the host for 6 hours, `force=1` comes from the refresh button
   - `GET /api/all-usage/balance?force=1` — account balance using the configured `llm-deepseek` API key
   - `POST /api/all-usage/alias` — update workspace aliases
   - `GET /api/all-usage/pricing` — read the full editable price table: per-row effective rates and status, mappings, manual prices, peak plans (with their built-in/explicit origin and full rules), and rows that exist only in the configuration
@@ -372,6 +377,7 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 - After a session is deleted, successfully flushed usage is restored from the separate ledger; disposal hints and periodic reconciliation trigger rebuilds without deleting ledger rows
 - For each session and logical `turn / step`, only the final usage contribution is kept; retries or replaced messages do not double-count
 - Input tokens are fresh (exclude cache hits/writes, which sit in their own buckets); all-zero usage replays do not overwrite recorded usage and pure cache-read requests still count
+- The version check is a single read-only GET to `registry.npmjs.org` (the version number of `dsh-all-usage` only: no body, no cookies; issued by the host and cached for 6 hours, the page itself never reaches the network), and a failed check degrades to “unknown” instead of guessing
 - The lightweight status endpoint exposes only the Host instance, stats revision, scan progress, sync counters, and the last client environment report (user agent, viewport, reserved strip and its source, panel rectangles — reported by a local client and kept in memory only). It does not expose session IDs, workspace paths, prompts, or reply bodies; full snapshots are fetched only after status changes or a manual refresh
 - Scoped results keep turns, model calls, and distinct sessions as separate metrics; missing route identity is explicitly Unknown rather than inferred from a display label
 - The records endpoint returns only a short hash, time, workspace ID, structured model identity, turn/step, token buckets, and current materialization source. It omits raw session IDs, paths, prompts, replies, and credentials

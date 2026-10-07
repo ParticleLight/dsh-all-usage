@@ -1229,6 +1229,27 @@ window.__ModuleLoader__.load({
       }
       return { cells, months, weekdays: language === 'en' ? ['', 'Mon', '', 'Wed', '', 'Fri', ''] : ['', '周一', '', '周三', '', '周五', ''] }
     }
+    // The header chip shows the running version and what the registry says. A
+    // missing or failed check degrades to 'unknown' rather than claiming either
+    // verdict, and an unparseable tag never claims an update.
+    function versionSummaryOf(fallbackVersion, info) {
+      const payload = info !== null && typeof info === 'object' ? info : {}
+      const current = typeof payload.current === 'string' && payload.current !== ''
+        ? payload.current
+        : (typeof fallbackVersion === 'string' ? fallbackVersion : '')
+      const latest = typeof payload.latest === 'string' && payload.latest !== '' ? payload.latest : null
+      const raw = payload.status === 'outdated' || payload.status === 'latest' ? payload.status : 'unknown'
+      const checkedAt = Number(payload.checkedAt)
+      return {
+        current,
+        latest,
+        status: latest === null ? 'unknown' : raw,
+        checkedAt: Number.isFinite(checkedAt) && checkedAt > 0 ? checkedAt : null,
+        sourceUrl: typeof payload.sourceUrl === 'string' ? payload.sourceUrl : '',
+        error: typeof payload.error === 'string' ? payload.error : '',
+      }
+    }
+    const GITHUB_REPOSITORY_URL = 'https://github.com/ParticleLight/dsh-all-usage'
     function rangeAgg(stats, range, utc, customRange) {
       const empty = { totals: { turns: 0, calls: 0, sessions: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: emptyCostAggregate() }, perWs: [], perModel: [] }
       if (stats === null) return empty
@@ -2160,6 +2181,14 @@ window.__ModuleLoader__.load({
 .uh-page { display:flex; flex-direction:column; gap:14px; padding:2px 2px 28px; font-family:inherit; }
 .uh-head { position:relative; z-index:20; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
 .uh-title { margin:0; font-size:15px; font-weight:600; color:var(--dsw-alias-label-primary); }
+.uh-title-wrap { display:flex; align-items:center; gap:10px; flex-wrap:wrap; min-width:0; }
+/* Version chip: the running version plus the registry verdict, clickable to the repo. */
+.uh-version { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-secondary); border-radius:999px; padding:2px 9px; font:inherit; font-size:12px; cursor:pointer; transition:background-color .15s ease, border-color .15s ease, color .15s ease; }
+.uh-version:hover { background:var(--dsw-alias-bg-layer-1); color:var(--dsw-alias-label-primary); }
+.uh-version-number { font-variant-numeric:tabular-nums; }
+.uh-version-status { color:var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); }
+.uh-version-outdated { border-color:color-mix(in srgb, var(--dsw-alias-brand-primary) 55%, transparent); color:var(--dsw-alias-brand-primary); }
+.uh-version-outdated .uh-version-status { color:inherit; font-weight:600; }
 .uh-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .uh-language-menu, .uh-filter-menu { position:relative; z-index:12; }
 .uh-filter-menu { flex:0 1 auto; min-width:0; }
@@ -2710,6 +2739,18 @@ window.__ModuleLoader__.load({
       if (!r.ok) throw new Error('HTTP ' + r.status)
       return r.json()
     })
+    // The host asks the registry (the page cannot reach it from the desktop shell)
+    // and caches the verdict; force only comes from the refresh button.
+    const getVersionCheck = (force) => fetch('/api/all-usage/version' + (force === true ? '?force=1' : ''), { headers: { accept: 'application/json' } }).then((r) => {
+      if (!r.ok) {
+        // The status distinguishes a host that predates this route (401/404 - DSH
+        // answers unknown API paths itself) from a registry that could not be read.
+        const error = new Error('HTTP ' + r.status)
+        error.status = r.status
+        throw error
+      }
+      return r.json()
+    })
     const getUsageQuery = (scope) => {
       const params = new URLSearchParams({ start: scope.start, end: scope.end, utc: scope.utc ? '1' : '0' })
       if (scope.workspaceId) params.set('workspaceId', scope.workspaceId)
@@ -2827,6 +2868,10 @@ window.__ModuleLoader__.load({
       const [balance, setBalance] = React.useState(null)
       const [range, setRange] = React.useState(() => usageUiState.range || 'today')
       const [heatmapSpan, setHeatmapSpan] = React.useState(() => normalizeHeatmapSpan(usageUiState.heatmapSpan))
+      // The registry verdict for the header chip. The host caches it for hours, so
+      // opening the dashboard asks at most once per cache window.
+      const [versionInfo, setVersionInfo] = React.useState(null)
+      const [versionError, setVersionError] = React.useState('')
       const [customRange, setCustomRange] = React.useState({ start: '', end: '' })
       const [customDraft, setCustomDraft] = React.useState({ start: '', end: '' })
       const [customRangeOpen, setCustomRangeOpen] = React.useState(false)
@@ -2939,6 +2984,14 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { persistUsageUiState({ modelView }) }, [modelView])
       React.useEffect(() => { if (range !== 'custom') persistUsageUiState({ range }) }, [range])
       React.useEffect(() => { persistUsageUiState({ heatmapSpan }) }, [heatmapSpan])
+      React.useEffect(() => {
+        let alive = true
+        getVersionCheck(false).then(
+          (data) => { if (alive) { setVersionInfo(data); setVersionError('') } },
+          (reason) => { if (alive) setVersionError(reason && (reason.status === 401 || reason.status === 404) ? 'endpoint' : 'failed') },
+        )
+        return () => { alive = false }
+      }, [])
 
       const queryScope = React.useMemo(() => stats === null ? null : makeUsageScope(stats, range, useUtc, customRange, wsFilter, providerFilter, modelFilter), [stats, range, useUtc, customRange.start, customRange.end, wsFilter, providerFilter, modelFilter])
       const queryKey = usageScopeKey(queryScope)
@@ -3197,7 +3250,15 @@ window.__ModuleLoader__.load({
         recordsPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
         return undefined
       }, [detailSelection && usageScopeKey(detailSelection.scope), detailView])
-      const onRefresh = React.useCallback(() => { refreshRef.current() }, [])
+      const onRefresh = React.useCallback(() => {
+        refreshRef.current()
+        // The refresh button is the one place allowed to bypass the host cache: it is
+        // an explicit user action, so "is there a newer release" is answered fresh.
+        getVersionCheck(true).then(
+          (data) => { if (data) { setVersionInfo(data); setVersionError('') } },
+          (reason) => setVersionError(reason && (reason.status === 401 || reason.status === 404) ? 'endpoint' : 'failed'),
+        )
+      }, [])
       const toggleFilter = React.useCallback((id) => {
         setWsFilter((prev) => (prev === id ? null : id))
       }, [])
@@ -4264,6 +4325,35 @@ window.__ModuleLoader__.load({
       )
       const pricingPanel = pricingOpen ? React.createElement(MemoUsagePricingDialog, { revision: pricingRenderRevision, render: renderPricingPanel }) : null
 
+      const versionView = versionSummaryOf(stats !== null && typeof stats.pluginVersion === 'string' ? stats.pluginVersion : clientPluginVersion, versionInfo)
+      const versionStatusText = versionView.status === 'latest'
+        ? tr('已是最新', 'Up to date')
+        : versionView.status === 'outdated' && versionView.latest !== null
+          ? tr('最新 v', 'Latest v') + versionView.latest
+          : ''
+      const versionTip = tr('当前版本 v', 'Running version v') + versionView.current
+        + (versionView.status === 'latest' ? tr('\n已是最新版本', '\nThis is the newest release') : '')
+        + (versionView.status === 'outdated' && versionView.latest !== null ? tr('\n最新版本 v', '\nNewest release v') + versionView.latest : '')
+        + (versionView.status === 'unknown' && versionError === 'endpoint'
+          ? tr('\n宿主尚未提供版本检查（运行中的插件较早）：重启 DSH 后可用', '\nThe host does not provide the version check yet (an older plugin is running): restart DSH')
+          : versionView.status === 'unknown'
+            ? tr('\n尚未确认是否有新版本', '\nWhether a newer release exists is not confirmed')
+            : '')
+        + (versionView.checkedAt !== null ? tr('\n检查时间：', '\nChecked: ') + new Date(versionView.checkedAt).toLocaleString() : '')
+        + (versionView.error !== '' ? tr('\n版本检查失败：', '\nVersion check failed: ') + versionView.error : '')
+        + tr('\n点击打开 GitHub 仓库', '\nClick to open the GitHub repository')
+      const versionBadge = React.createElement('button', {
+        type: 'button',
+        className: 'uh-version' + (versionView.status === 'outdated' ? ' uh-version-outdated' : ''),
+        title: versionTip,
+        'aria-label': versionTip,
+        onClick: () => {
+          try { window.open(GITHUB_REPOSITORY_URL, '_blank', 'noopener,noreferrer') } catch (err) { /* popup blocked */ }
+        },
+      },
+        React.createElement('span', { className: 'uh-version-number' }, 'v' + versionView.current),
+        versionStatusText === '' ? null : React.createElement('span', { className: 'uh-version-status' }, versionStatusText),
+      )
       const rangeLabel = range === 'custom' && activeCustomRange !== null
         ? (language === 'en' ? activeCustomRange.start + ' to ' + activeCustomRange.end + ' (UTC)' : activeCustomRange.start + ' 至 ' + activeCustomRange.end)
         : range === 'today' ? tr('今日', 'Today') : range === '7d' ? tr('近 7 天', 'Last 7 Days') : range === '30d' ? tr('近 30 天', 'Last 30 Days') : range === '90d' ? tr('近 90 天', 'Last 90 Days') : tr('全部', 'All Time')
@@ -4390,6 +4480,7 @@ window.__ModuleLoader__.load({
         React.createElement('div', { className: 'uh-head' },
           React.createElement('div', { className: 'uh-title-wrap' },
             React.createElement('h2', { className: 'uh-title' }, tr('用量统计', 'Usage Statistics')),
+            versionBadge,
           ),
           React.createElement('div', { className: 'uh-actions' },
             React.createElement('button', {

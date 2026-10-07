@@ -10,8 +10,8 @@ assert.notEqual(start, -1, 'client date helpers must exist')
 assert.notEqual(end, -1, 'client range helper boundary must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan }', context)
-const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan } = context.__rangeHelpers
+vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf }', context)
+const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf } = context.__rangeHelpers
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
   return {
@@ -174,6 +174,42 @@ test('builds a shorter heatmap calendar for a shorter span', () => {
   assert.match(source, /gridTemplateColumns: 'repeat\(\' \+ weeks \+ ', minmax\(10px, 1fr\)\)'/)
   assert.match(source, /HEATMAP_SPANS = \{ '30d': 5, '90d': 13, '12m': 53 \}/)
   assert.match(source, /className: 'uh-range uh-heatmap-spans'/)
+})
+
+test('summarizes the version chip without inventing a verdict', () => {
+  const outdated = versionSummaryOf('1.1.17', { current: '1.1.17', latest: '1.1.18', status: 'outdated', checkedAt: 1234, sourceUrl: 'https://registry.npmjs.org/dsh-all-usage/latest' })
+  assert.equal(outdated.current, '1.1.17')
+  assert.equal(outdated.latest, '1.1.18')
+  assert.equal(outdated.status, 'outdated')
+  assert.equal(outdated.checkedAt, 1234)
+  assert.equal(outdated.error, '')
+  const current = versionSummaryOf('1.1.18', { current: '1.1.18', latest: '1.1.18', status: 'latest' })
+  assert.equal(current.status, 'latest')
+  // Nothing checked yet (or a failed check) must not claim either verdict, and the
+  // chip falls back to the version this page was built from.
+  const unknown = versionSummaryOf('1.1.18', null)
+  assert.equal(unknown.status, 'unknown')
+  assert.equal(unknown.latest, null)
+  assert.equal(unknown.current, '1.1.18')
+  assert.equal(unknown.checkedAt, null)
+  const failed = versionSummaryOf('1.1.18', { current: '1.1.18', latest: null, status: 'unknown', error: 'version-fetch-failed' })
+  assert.equal(failed.status, 'unknown')
+  assert.equal(failed.error, 'version-fetch-failed')
+  // A host that reports a version wins over the page's build version.
+  assert.equal(versionSummaryOf('1.1.18', { current: '1.1.17', latest: '1.1.18', status: 'outdated' }).current, '1.1.17')
+  // An unparseable or missing status never becomes 'latest'.
+  assert.equal(versionSummaryOf('1.1.18', { latest: '1.1.18', status: 'something' }).status, 'unknown')
+  assert.equal(versionSummaryOf('1.1.18', { status: 'outdated' }).status, 'unknown')
+  // The chip is clickable through to the repository, and only claims the newest
+  // release when the host said so.
+  assert.match(source, /const GITHUB_REPOSITORY_URL = 'https:\/\/github\.com\/ParticleLight\/dsh-all-usage'/)
+  assert.match(source, /className: 'uh-version' \+ \(versionView\.status === 'outdated' \? ' uh-version-outdated' : ''\)/)
+  assert.match(source, /tr\('已是最新', 'Up to date'\)/)
+  assert.match(source, /tr\('最新 v', 'Latest v'\) \+ versionView\.latest/)
+  assert.match(source, /getVersionCheck\(true\)/)
+  // A host that predates the route says so instead of looking like a failed check.
+  assert.match(source, /\(reason\.status === 401 \|\| reason\.status === 404\) \? 'endpoint' : 'failed'/)
+  assert.match(source, /重启 DSH 后可用', '\\nThe host does not provide the version check yet/)
 })
 
 test('builds a stable scope and zero-fills daily trend rows', () => {

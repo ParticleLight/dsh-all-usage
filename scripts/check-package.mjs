@@ -71,6 +71,7 @@ const expected = [
   'lib/pricing.js',
   'lib/session-sync.js',
   'lib/usage-core.js',
+  'lib/version-check.js',
   'package.json',
   'screenshots.json',
   'fixtures/usage-events.json',
