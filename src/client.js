@@ -293,18 +293,48 @@ window.__ModuleLoader__.load({
       // digits, but never by more letters that form a different word.
       return /[a-z]$/.test(prefix) && /[0-9]/.test(next)
     }
-    function iconForModel(model) {
-      const normalized = normalizeIconModel(model)
-      if (normalized === '') return null
-      for (const icon of MODEL_ICON_TABLE) if (icon.exact.includes(normalized)) return icon
+    // Gateways and clouds wrap the real model in an envelope: `openai-gpt-5.5`,
+    // `databricks-claude-opus-4-5`, `google.gemma-3-12b-it`, `eu.anthropic.claude-*`
+    // or SAP's `anthropic--claude-*`. The raw id is always tried first, so a
+    // first-party id like `deepseek-v4` can never lose its brand to this rule.
+    const ICON_MODEL_ENVELOPES = ['openai', 'google', 'anthropic', 'databricks', 'azure', 'azure-ai', 'microsoft', 'amazon', 'cohere', 'mistral', 'deepseek', 'qwen', 'moonshot', 'zhipu', 'bytedance', 'nvidia', 'ibm', 'ai21', 'upstage', 'voyage', 'baai', 'ai2', 'liquid', 'sensenova', 'internlm', 'longcat', 'stepfun', 'baichuan', 'tencent', 'kling', 'skywork', 'duo-chat', 'bedrock', 'vertex']
+    function iconModelCandidates(normalized) {
+      const candidates = [normalized]
+      // Dotted namespaces can nest (`eu.anthropic.claude-fable-5`), so every
+      // suffix after a dot is a candidate; a version dot simply yields a tail
+      // that matches nothing.
+      let dot = normalized.indexOf('.')
+      while (dot > 0 && dot < normalized.length - 3) {
+        const tail = normalized.slice(dot + 1)
+        if (tail.length >= 3) candidates.push(tail)
+        dot = normalized.indexOf('.', dot + 1)
+      }
+      for (const envelope of ICON_MODEL_ENVELOPES) {
+        if (!normalized.startsWith(envelope + '-')) continue
+        const stripped = normalized.slice(envelope.length + 1).replace(/^[-_.]+/, '')
+        if (stripped.length >= 3) candidates.push(stripped)
+      }
+      return candidates
+    }
+    function matchIcon(candidate) {
+      for (const icon of MODEL_ICON_TABLE) if (icon.exact.includes(candidate)) return icon
       let best = null
       let bestLength = 0
       for (const icon of MODEL_ICON_TABLE) {
         for (const prefix of icon.prefixes) {
-          if (modelPrefixMatches(normalized, prefix) && prefix.length > bestLength) { best = icon; bestLength = prefix.length }
+          if (modelPrefixMatches(candidate, prefix) && prefix.length > bestLength) { best = icon; bestLength = prefix.length }
         }
       }
       return best
+    }
+    function iconForModel(model) {
+      const normalized = normalizeIconModel(model)
+      if (normalized === '') return null
+      for (const candidate of iconModelCandidates(normalized)) {
+        const icon = matchIcon(candidate)
+        if (icon !== null) return icon
+      }
+      return null
     }
     /**
      * Resolve one row to a brand icon. Model namespaces win over the DSH

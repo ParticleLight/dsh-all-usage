@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import test from 'node:test'
 import vm from 'node:vm'
 import { assertSafeSvg, decodeEntities } from '../scripts/svg-guard.mjs'
@@ -49,11 +49,23 @@ function aggregateRows(rows, view) {
 }
 
 
-test('the manifest ships one valid entry per bundled brand icon', () => {
+test('the manifest ships one valid entry per bundled brand icon', async () => {
   assert.equal(manifest.schemaVersion, 2)
-  assert.equal(manifest.icons.length, 11)
   const keys = manifest.icons.map((icon) => icon.key)
   assert.equal(new Set(keys).size, keys.length)
+  // Derived from the directory, not hand-counted: a new icon file without an
+  // entry (or an entry whose file is gone) fails here instead of drifting.
+  const files = (await readdir(new URL('../assets/model-icons/', import.meta.url))).filter((name) => name.endsWith('.svg')).sort()
+  assert.deepEqual(manifest.icons.map((icon) => icon.file).sort(), files)
+  for (const icon of manifest.icons) {
+    assert.match(icon.upstreamPath, /^packages\/static-svg\/icons\//, icon.key + ' must record its upstream path')
+    // The upstream file name normally equals the bundled one; openai-color.svg is
+    // the documented exception (it came from the vendor mark set), so compare the
+    // stem with the colour/brand suffixes stripped.
+    const stem = (name) => name.replace(/\.svg$/, '').replace(/-(color|brand-color|brand)$/, '')
+    const upstreamName = icon.upstreamPath.slice(icon.upstreamPath.lastIndexOf('/') + 1)
+    assert.equal(stem(upstreamName), stem(icon.file), icon.key + ' upstream path must name the file it came from')
+  }
   for (const icon of manifest.icons) {
     assert.match(icon.file, /\.svg$/)
     assert.ok(typeof icon.label === 'string' && icon.label !== '')
@@ -277,6 +289,64 @@ test('an unrecognised actual model never inherits the requested brand', () => {
   assert.equal(keyOf({ provider: 'openrouter', actualModel: 'claude-opus-4.7', requestedModel: 'gpt-4o' }), 'claude')
 })
 
+test('gateway and cloud envelopes still resolve to the real brand', () => {
+  const optionKey = (model) => { const icon = resolveModelIcon({ actualModel: model, requestedModel: model }); return icon === null ? null : icon.key }
+  // Wrapping must never steal a first-party brand: the raw id wins whenever it matches.
+  assert.equal(optionKey('deepseek-v4-flash'), 'deepseek')
+  assert.equal(optionKey('openai-gpt-5.5'), 'openai')
+  assert.equal(optionKey('databricks-claude-opus-4-5'), 'claude')
+  assert.equal(optionKey('google.gemma-3-12b-it'), 'gemini')
+  assert.equal(optionKey('eu.anthropic.claude-fable-5'), 'claude')
+  assert.equal(optionKey('anthropic--claude-4-opus'), 'claude')
+  assert.equal(optionKey('duo-chat-gpt-5-4-nano'), 'openai')
+  assert.equal(optionKey('meta.llama-3.3-70b'), 'meta')
+  assert.equal(optionKey('amazon.nova-lite-v1'), 'nova')
+  // Ids that drop the hyphen between family and version.
+  assert.equal(optionKey('llama3-70b'), 'meta')
+  assert.equal(optionKey('gemma3-12b'), 'gemini')
+  assert.equal(optionKey('glm4-9b'), 'zhipu')
+  assert.equal(optionKey('gpt4o'), 'openai')
+  // An envelope around an unknown model stays neutral instead of guessing.
+  assert.equal(optionKey('databricks-house-model-9'), null)
+  assert.equal(optionKey('openai-vendor-private'), null)
+})
+
+test('the added brands resolve, the uncovered ones stay neutral', () => {
+  const optionKey = (model) => { const icon = resolveModelIcon({ actualModel: model, requestedModel: model }); return icon === null ? null : icon.key }
+  const cases = [
+    ['mistral-large-2411', 'mistral'], ['magistral-medium', 'mistral'], ['codestral-latest', 'mistral'],
+    ['nemotron-3-nano-30b-a3b', 'nemotron'], ['command-a-03-2025', 'cohere'], ['north-mini-code-1-0', 'cohere'],
+    ['nova-pro-v1', 'nova'], ['phi-4-mini-instruct', 'phi'], ['perplexity/sonar-pro', 'sonar'],
+    ['ernie-5.1', 'ernie'], ['wenxin-4', 'ernie'], ['hunyuan-a13b-instruct', 'hunyuan'], ['hy4-preview', 'hunyuan'],
+    ['step-5-preview', 'stepfun'], ['baichuan-m2-32b', 'baichuan'], ['sensenova-6.8-flash-lite', 'sensenova'],
+    ['internlm3-8b', 'internlm'], ['longcat-2.5-preview', 'longcat'], ['jamba-large', 'jamba'],
+    ['granite-4.2-8b', 'granite'], ['solar-pro-3', 'solar'], ['lfm-2.5-2.6b', 'lfm'], ['olmo-3-32b', 'olmo'],
+    ['baai/bge-m3', 'bge'], ['voyage-3-lite', 'voyage'], ['seed-2.0-pro', 'bytedance'], ['kling-v2', 'kling'],
+    ['skywork-13b', 'skywork'],
+  ]
+  for (const [model, key] of cases) assert.equal(optionKey(model), key, model)
+  // The second batch: Xiaomi MiMo (the reporter's own gap), Aion, Nous, TII,
+  // Aleph Alpha, Yandex, Snowflake and iFlytek.
+  const second = [
+    ['mimo-v2.6-pro', 'mimo'], ['mimo-v2.5-flash-free', 'mimo'], ['aion-labs/aion-3.0', 'aion'],
+    ['hermes-3-llama-3.1-405b', 'nous'], ['nousresearch/hermes-4-405b', 'nous'],
+    ['falcon-180b', 'falcon'], ['pharia-1-llm-7b-control', 'aleph'], ['yandexgpt-5-lite', 'yandex'],
+    ['snowflake-llama3.3-70b', 'arctic'], ['spark-max', 'iflytek'], ['generalv3.5', 'iflytek'],
+  ]
+  for (const [model, key] of second) assert.equal(optionKey(model), key, model)
+  // OpenRouter's stealth aliases are not Nous models, so they stay neutral.
+  assert.equal(optionKey('hermes-low'), null)
+  assert.equal(optionKey('hermes-high'), null)
+  // Brands with no upstream icon and gateway-private ids stay neutral.
+  const neutral = ['ling-3.0-flash', 'ring-1t', 'reka-edge-2603', 'laguna-s-2.1', 'sarvam-105b', 'dbrx-instruct', 'minicpm-v-4.5', 'fledge-alpha-free', 'x-preview-f-free']
+  for (const model of neutral) assert.equal(optionKey(model), null, model)
+  // Provider-only rows fall back to the provider alias.
+  assert.equal(keyOf({ provider: 'nvidia', actualModel: '', requestedModel: '' }), 'nemotron')
+  assert.equal(keyOf({ provider: 'tencent', actualModel: '', requestedModel: '' }), 'tencent')
+  assert.equal(keyOf({ provider: 'azure', actualModel: '', requestedModel: '' }), 'phi')
+  assert.equal(keyOf({ provider: 'cohere', actualModel: '', requestedModel: '' }), 'cohere')
+})
+
 test('model filter options resolve to brand icons the same way rows do', () => {
   const optionKey = (model) => { const icon = resolveModelIcon({ actualModel: model, requestedModel: model }); return icon === null ? null : icon.key }
   assert.equal(optionKey('claude-opus-5-thinking'), 'claude')
@@ -284,7 +354,7 @@ test('model filter options resolve to brand icons the same way rows do', () => {
   assert.equal(optionKey('deepseek-v4-flash-free'), 'deepseek')
   assert.equal(optionKey('gpt-5.6-luna'), 'openai')
   assert.equal(optionKey('grok-4.6'), 'grok')
-  assert.equal(optionKey('nemotron-3-ultra-free'), null)
+  assert.equal(optionKey('nemotron-3-ultra-free'), 'nemotron')
   assert.equal(optionKey('x-preview-f-free'), null)
   // The neutral option (empty value) renders the plain line icon, never a brand.
   const neutral = resolveModelIcon({ actualModel: '', requestedModel: '' })

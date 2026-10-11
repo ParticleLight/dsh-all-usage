@@ -39,23 +39,20 @@ const raw = packPath === undefined
 const results = JSON.parse(raw)
 if (!Array.isArray(results) || results.length !== 1 || results[0] === null || typeof results[0] !== 'object') throw new Error('npm pack must return exactly one package record')
 const metadata = results[0]
+// Icon files come from the manifest rather than a hand-written list: adding a
+// brand used to require editing this array too, and forgetting it failed the
+// gate (v1.2.0 added 24 in one go).
+const iconManifest = JSON.parse(readFileSync(join(root, 'assets', 'model-icons', 'manifest.json'), 'utf8'))
+const iconFiles = [
+  'assets/model-icons/LICENSE.upstream-lobe-icons.txt',
+  'assets/model-icons/manifest.json',
+  ...iconManifest.icons.map((icon) => 'assets/model-icons/' + String(icon.file)),
+]
 const expected = [
   'CHANGELOG.md',
   'LICENSE',
   'README.md',
-  'assets/model-icons/LICENSE.upstream-lobe-icons.txt',
-  'assets/model-icons/claude-color.svg',
-  'assets/model-icons/deepseek-color.svg',
-  'assets/model-icons/doubao-color.svg',
-  'assets/model-icons/gemini-color.svg',
-  'assets/model-icons/grok.svg',
-  'assets/model-icons/kimi-color.svg',
-  'assets/model-icons/manifest.json',
-  'assets/model-icons/meta-color.svg',
-  'assets/model-icons/minimax-color.svg',
-  'assets/model-icons/openai-color.svg',
-  'assets/model-icons/qwen-color.svg',
-  'assets/model-icons/zhipu-color.svg',
+  ...iconFiles,
   'assets/screenshot-1.png',
   'assets/screenshot-2.png',
   'assets/screenshot-3.png',

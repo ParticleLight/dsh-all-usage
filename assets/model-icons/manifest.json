@@ -14,7 +14,7 @@
   },
   "modifications": [
     "Whitespace between tags is collapsed at build time before base64 encoding (no visual change).",
-    "grok.svg and openai-color.svg: fill=\"currentColor\" replaced with the fixed neutral #8a8f98, because currentColor does not inherit into an <img> element.",
+    "grok.svg, openai-color.svg and the icons listed with modified: true: currentColor replaced with the fixed neutral #8a8f98, because currentColor does not inherit into an <img> element.",
     "openai-color.svg was taken from the vendor mark set below after the original download produced an HTTP 404 body instead of an SVG."
   ],
   "fallbackKey": null,
@@ -23,14 +23,15 @@
       "key": "deepseek",
       "file": "deepseek-color.svg",
       "label": "DeepSeek",
-      "upstreamPath": "packages/static-svg/svg/deepseek-color.svg",
+      "upstreamPath": "packages/static-svg/icons/deepseek-color.svg",
       "modified": false,
       "providers": [
         "deepseek",
         "deepseek-official"
       ],
       "prefixes": [
-        "deepseek-"
+        "deepseek-",
+        "deepseek"
       ],
       "exact": []
     },
@@ -38,7 +39,7 @@
       "key": "openai",
       "file": "openai-color.svg",
       "label": "OpenAI",
-      "upstreamPath": "packages/static-svg/svg/openai.svg",
+      "upstreamPath": "packages/static-svg/icons/openai.svg",
       "modified": true,
       "providers": [
         "openai",
@@ -50,7 +51,8 @@
         "o3-",
         "o4-",
         "o5-",
-        "codex-"
+        "codex-",
+        "gpt"
       ],
       "exact": [
         "o1",
@@ -63,13 +65,14 @@
       "key": "claude",
       "file": "claude-color.svg",
       "label": "Anthropic Claude",
-      "upstreamPath": "packages/static-svg/svg/claude-color.svg",
+      "upstreamPath": "packages/static-svg/icons/claude-color.svg",
       "modified": false,
       "providers": [
         "anthropic"
       ],
       "prefixes": [
-        "claude-"
+        "claude-",
+        "claude"
       ],
       "exact": []
     },
@@ -77,7 +80,7 @@
       "key": "gemini",
       "file": "gemini-color.svg",
       "label": "Google Gemini",
-      "upstreamPath": "packages/static-svg/svg/gemini-color.svg",
+      "upstreamPath": "packages/static-svg/icons/gemini-color.svg",
       "modified": false,
       "providers": [
         "google",
@@ -86,7 +89,9 @@
       ],
       "prefixes": [
         "gemini-",
-        "gemma-"
+        "gemma-",
+        "gemma",
+        "gemini"
       ],
       "exact": []
     },
@@ -94,7 +99,7 @@
       "key": "meta",
       "file": "meta-color.svg",
       "label": "Meta Llama",
-      "upstreamPath": "packages/static-svg/svg/meta-color.svg",
+      "upstreamPath": "packages/static-svg/icons/meta-color.svg",
       "modified": false,
       "providers": [
         "meta",
@@ -102,7 +107,8 @@
       ],
       "prefixes": [
         "llama-",
-        "meta-llama"
+        "meta-llama",
+        "llama"
       ],
       "exact": []
     },
@@ -110,7 +116,7 @@
       "key": "zhipu",
       "file": "zhipu-color.svg",
       "label": "Zhipu GLM",
-      "upstreamPath": "packages/static-svg/svg/zhipu-color.svg",
+      "upstreamPath": "packages/static-svg/icons/zhipu-color.svg",
       "modified": false,
       "providers": [
         "zhipu",
@@ -120,7 +126,9 @@
       ],
       "prefixes": [
         "glm-",
-        "chatglm-"
+        "chatglm-",
+        "glm",
+        "chatglm"
       ],
       "exact": []
     },
@@ -128,13 +136,14 @@
       "key": "grok",
       "file": "grok.svg",
       "label": "xAI Grok",
-      "upstreamPath": "packages/static-svg/svg/grok.svg",
+      "upstreamPath": "packages/static-svg/icons/grok.svg",
       "modified": true,
       "providers": [
         "xai"
       ],
       "prefixes": [
-        "grok-"
+        "grok-",
+        "grok"
       ],
       "exact": [
         "grok"
@@ -144,7 +153,7 @@
       "key": "qwen",
       "file": "qwen-color.svg",
       "label": "Qwen",
-      "upstreamPath": "packages/static-svg/svg/qwen-color.svg",
+      "upstreamPath": "packages/static-svg/icons/qwen-color.svg",
       "modified": false,
       "providers": [
         "qwen",
@@ -163,7 +172,7 @@
       "key": "doubao",
       "file": "doubao-color.svg",
       "label": "Doubao",
-      "upstreamPath": "packages/static-svg/svg/doubao-color.svg",
+      "upstreamPath": "packages/static-svg/icons/doubao-color.svg",
       "modified": false,
       "providers": [
         "doubao",
@@ -172,7 +181,8 @@
         "ark"
       ],
       "prefixes": [
-        "doubao-"
+        "doubao-",
+        "doubao"
       ],
       "exact": []
     },
@@ -180,7 +190,7 @@
       "key": "kimi",
       "file": "kimi-color.svg",
       "label": "Moonshot Kimi",
-      "upstreamPath": "packages/static-svg/svg/kimi-color.svg",
+      "upstreamPath": "packages/static-svg/icons/kimi-color.svg",
       "modified": false,
       "providers": [
         "moonshot",
@@ -188,7 +198,9 @@
       ],
       "prefixes": [
         "kimi-",
-        "moonshot-"
+        "moonshot-",
+        "kimi",
+        "moonshot"
       ],
       "exact": [
         "kimi"
@@ -198,14 +210,528 @@
       "key": "minimax",
       "file": "minimax-color.svg",
       "label": "MiniMax",
-      "upstreamPath": "packages/static-svg/svg/minimax-color.svg",
+      "upstreamPath": "packages/static-svg/icons/minimax-color.svg",
       "modified": false,
       "providers": [
         "minimax"
       ],
       "prefixes": [
         "minimax-",
-        "abab"
+        "abab",
+        "minimax"
+      ],
+      "exact": []
+    },
+    {
+      "key": "mistral",
+      "file": "mistral-color.svg",
+      "label": "Mistral",
+      "upstreamPath": "packages/static-svg/icons/mistral-color.svg",
+      "modified": false,
+      "providers": [
+        "mistral",
+        "mistralai"
+      ],
+      "prefixes": [
+        "mistral-",
+        "mistralai-",
+        "magistral-",
+        "codestral-",
+        "devstral-",
+        "ministral-",
+        "pixtral-",
+        "mixtral-",
+        "open-mistral-",
+        "open-mixtral-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "nemotron",
+      "file": "nvidia-color.svg",
+      "label": "NVIDIA",
+      "upstreamPath": "packages/static-svg/icons/nvidia-color.svg",
+      "modified": false,
+      "providers": [
+        "nvidia",
+        "nvidia-nim"
+      ],
+      "prefixes": [
+        "nemotron"
+      ],
+      "exact": []
+    },
+    {
+      "key": "cohere",
+      "file": "cohere-color.svg",
+      "label": "Cohere",
+      "upstreamPath": "packages/static-svg/icons/cohere-color.svg",
+      "modified": false,
+      "providers": [
+        "cohere"
+      ],
+      "prefixes": [
+        "command-",
+        "north-",
+        "c4ai-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "nova",
+      "file": "nova-color.svg",
+      "label": "Amazon Nova",
+      "upstreamPath": "packages/static-svg/icons/nova-color.svg",
+      "modified": false,
+      "providers": [
+        "amazon",
+        "amazon-bedrock",
+        "bedrock",
+        "aws-bedrock"
+      ],
+      "prefixes": [
+        "nova-",
+        "amazon.nova-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "phi",
+      "file": "microsoft-color.svg",
+      "label": "Microsoft",
+      "upstreamPath": "packages/static-svg/icons/microsoft-color.svg",
+      "modified": false,
+      "providers": [
+        "microsoft",
+        "azure",
+        "azure-ai",
+        "azure-cognitive-services"
+      ],
+      "prefixes": [
+        "phi-",
+        "microsoft/"
+      ],
+      "exact": []
+    },
+    {
+      "key": "sonar",
+      "file": "perplexity-color.svg",
+      "label": "Perplexity",
+      "upstreamPath": "packages/static-svg/icons/perplexity-color.svg",
+      "modified": false,
+      "providers": [
+        "perplexity",
+        "perplexity-ai"
+      ],
+      "prefixes": [
+        "sonar"
+      ],
+      "exact": []
+    },
+    {
+      "key": "ernie",
+      "file": "baidu-color.svg",
+      "label": "Baidu ERNIE",
+      "upstreamPath": "packages/static-svg/icons/baidu-color.svg",
+      "modified": false,
+      "providers": [
+        "baidu",
+        "qianfan",
+        "baiducloud"
+      ],
+      "prefixes": [
+        "ernie-",
+        "wenxin"
+      ],
+      "exact": []
+    },
+    {
+      "key": "hunyuan",
+      "file": "hunyuan-color.svg",
+      "label": "Tencent Hunyuan",
+      "upstreamPath": "packages/static-svg/icons/hunyuan-color.svg",
+      "modified": false,
+      "providers": [
+        "hunyuan"
+      ],
+      "prefixes": [
+        "hunyuan-",
+        "hy3",
+        "hy4"
+      ],
+      "exact": []
+    },
+    {
+      "key": "tencent",
+      "file": "tencent-color.svg",
+      "label": "Tencent",
+      "upstreamPath": "packages/static-svg/icons/tencent-color.svg",
+      "modified": false,
+      "providers": [
+        "tencent",
+        "tencentcloud",
+        "tencent-hunyuan"
+      ],
+      "prefixes": [],
+      "exact": []
+    },
+    {
+      "key": "stepfun",
+      "file": "stepfun-color.svg",
+      "label": "StepFun",
+      "upstreamPath": "packages/static-svg/icons/stepfun-color.svg",
+      "modified": false,
+      "providers": [
+        "stepfun",
+        "step"
+      ],
+      "prefixes": [
+        "step-",
+        "stepfun-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "baichuan",
+      "file": "baichuan-color.svg",
+      "label": "Baichuan",
+      "upstreamPath": "packages/static-svg/icons/baichuan-color.svg",
+      "modified": false,
+      "providers": [
+        "baichuan"
+      ],
+      "prefixes": [
+        "baichuan"
+      ],
+      "exact": []
+    },
+    {
+      "key": "sensenova",
+      "file": "sensenova-color.svg",
+      "label": "SenseNova",
+      "upstreamPath": "packages/static-svg/icons/sensenova-color.svg",
+      "modified": false,
+      "providers": [
+        "sensenova",
+        "sensetime"
+      ],
+      "prefixes": [
+        "sensenova",
+        "sensechat"
+      ],
+      "exact": []
+    },
+    {
+      "key": "internlm",
+      "file": "internlm-color.svg",
+      "label": "InternLM",
+      "upstreamPath": "packages/static-svg/icons/internlm-color.svg",
+      "modified": false,
+      "providers": [
+        "internlm",
+        "shanghai-ai-lab"
+      ],
+      "prefixes": [
+        "internlm",
+        "intern-lm"
+      ],
+      "exact": []
+    },
+    {
+      "key": "longcat",
+      "file": "longcat-color.svg",
+      "label": "LongCat",
+      "upstreamPath": "packages/static-svg/icons/longcat-color.svg",
+      "modified": true,
+      "providers": [
+        "longcat",
+        "meituan"
+      ],
+      "prefixes": [
+        "longcat"
+      ],
+      "exact": []
+    },
+    {
+      "key": "jamba",
+      "file": "ai21-brand-color.svg",
+      "label": "AI21",
+      "upstreamPath": "packages/static-svg/icons/ai21-brand-color.svg",
+      "modified": true,
+      "providers": [
+        "ai21",
+        "ai21-labs"
+      ],
+      "prefixes": [
+        "jamba"
+      ],
+      "exact": []
+    },
+    {
+      "key": "granite",
+      "file": "ibm.svg",
+      "label": "IBM Granite",
+      "upstreamPath": "packages/static-svg/icons/ibm.svg",
+      "modified": true,
+      "providers": [
+        "ibm",
+        "ibm-granite",
+        "watsonx"
+      ],
+      "prefixes": [
+        "granite-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "solar",
+      "file": "upstage-color.svg",
+      "label": "Upstage",
+      "upstreamPath": "packages/static-svg/icons/upstage-color.svg",
+      "modified": false,
+      "providers": [
+        "upstage"
+      ],
+      "prefixes": [
+        "solar-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "lfm",
+      "file": "liquid.svg",
+      "label": "Liquid AI",
+      "upstreamPath": "packages/static-svg/icons/liquid.svg",
+      "modified": true,
+      "providers": [
+        "liquid",
+        "liquid-ai"
+      ],
+      "prefixes": [
+        "lfm-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "olmo",
+      "file": "ai2-color.svg",
+      "label": "Ai2",
+      "upstreamPath": "packages/static-svg/icons/ai2-color.svg",
+      "modified": false,
+      "providers": [
+        "ai2",
+        "allenai"
+      ],
+      "prefixes": [
+        "olmo",
+        "molmo"
+      ],
+      "exact": []
+    },
+    {
+      "key": "bge",
+      "file": "baai.svg",
+      "label": "BAAI",
+      "upstreamPath": "packages/static-svg/icons/baai.svg",
+      "modified": true,
+      "providers": [
+        "baai",
+        "bge"
+      ],
+      "prefixes": [
+        "bge-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "voyage",
+      "file": "voyage-color.svg",
+      "label": "Voyage AI",
+      "upstreamPath": "packages/static-svg/icons/voyage-color.svg",
+      "modified": false,
+      "providers": [
+        "voyage",
+        "voyageai"
+      ],
+      "prefixes": [
+        "voyage-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "bytedance",
+      "file": "bytedance-color.svg",
+      "label": "ByteDance Seed",
+      "upstreamPath": "packages/static-svg/icons/bytedance-color.svg",
+      "modified": false,
+      "providers": [
+        "bytedance",
+        "seed",
+        "volcengine",
+        "ark"
+      ],
+      "prefixes": [
+        "seed-",
+        "seed1-",
+        "seed2-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "kling",
+      "file": "kling-color.svg",
+      "label": "Kling",
+      "upstreamPath": "packages/static-svg/icons/kling-color.svg",
+      "modified": false,
+      "providers": [
+        "kling",
+        "kuaishou"
+      ],
+      "prefixes": [
+        "kling"
+      ],
+      "exact": []
+    },
+    {
+      "key": "skywork",
+      "file": "skywork-color.svg",
+      "label": "Skywork",
+      "upstreamPath": "packages/static-svg/icons/skywork-color.svg",
+      "modified": false,
+      "providers": [
+        "skywork"
+      ],
+      "prefixes": [
+        "skywork"
+      ],
+      "exact": []
+    },
+    {
+      "key": "mimo",
+      "file": "xiaomimimo.svg",
+      "label": "Xiaomi MiMo",
+      "upstreamPath": "packages/static-svg/icons/xiaomimimo.svg",
+      "modified": true,
+      "providers": [
+        "xiaomimimo",
+        "xiaomi",
+        "mimo"
+      ],
+      "prefixes": [
+        "mimo-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "aion",
+      "file": "aionlabs.svg",
+      "label": "Aion Labs",
+      "upstreamPath": "packages/static-svg/icons/aionlabs.svg",
+      "modified": true,
+      "providers": [
+        "aion-labs",
+        "aionlabs"
+      ],
+      "prefixes": [
+        "aion-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "nous",
+      "file": "nousresearch.svg",
+      "label": "Nous Research",
+      "upstreamPath": "packages/static-svg/icons/nousresearch.svg",
+      "modified": true,
+      "providers": [
+        "nousresearch",
+        "nous",
+        "nous-research"
+      ],
+      "prefixes": [
+        "nous-",
+        "hermes-3",
+        "hermes-4"
+      ],
+      "exact": []
+    },
+    {
+      "key": "falcon",
+      "file": "tii-color.svg",
+      "label": "TII Falcon",
+      "upstreamPath": "packages/static-svg/icons/tii-color.svg",
+      "modified": false,
+      "providers": [
+        "tii",
+        "falcon",
+        "tii-uae"
+      ],
+      "prefixes": [
+        "falcon-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "aleph",
+      "file": "alephalpha.svg",
+      "label": "Aleph Alpha",
+      "upstreamPath": "packages/static-svg/icons/alephalpha.svg",
+      "modified": true,
+      "providers": [
+        "aleph-alpha",
+        "alephalpha"
+      ],
+      "prefixes": [
+        "aleph-",
+        "pharia-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "yandex",
+      "file": "yandex.svg",
+      "label": "Yandex",
+      "upstreamPath": "packages/static-svg/icons/yandex.svg",
+      "modified": true,
+      "providers": [
+        "yandex",
+        "yandex-cloud"
+      ],
+      "prefixes": [
+        "yandex-",
+        "yandexgpt"
+      ],
+      "exact": []
+    },
+    {
+      "key": "arctic",
+      "file": "snowflake-color.svg",
+      "label": "Snowflake",
+      "upstreamPath": "packages/static-svg/icons/snowflake-color.svg",
+      "modified": false,
+      "providers": [
+        "snowflake"
+      ],
+      "prefixes": [
+        "snowflake-",
+        "arctic-"
+      ],
+      "exact": []
+    },
+    {
+      "key": "iflytek",
+      "file": "iflytekcloud-color.svg",
+      "label": "iFlytek Spark",
+      "upstreamPath": "packages/static-svg/icons/iflytekcloud-color.svg",
+      "modified": false,
+      "providers": [
+        "iflytek",
+        "iflytekcloud",
+        "spark"
+      ],
+      "prefixes": [
+        "spark-",
+        "generalv"
       ],
       "exact": []
     }

@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.2.0（未发布）
+### 新功能
+- **模型图标扩到 43 个品牌** —— 从 lobe-icons 固定 revision 取 32 个新商标（Mistral、NVIDIA、Cohere、Amazon Nova、Microsoft、Perplexity、百度、腾讯、阶跃、百川、商汤、InternLM、LongCat、小米 MiMo、AI21、IBM、Upstage、Liquid、Ai2、BAAI、Voyage、字节 Seed、Kling、Skywork、Aion、Nous、TII、Aleph Alpha、Yandex、Snowflake、讯飞星火），其中 9 个 `currentColor` 烘成固定中性色并标 `modified`。
+- **网关与云的包裹写法能还原到真实品牌** —— `openai-gpt-5.5`、`databricks-claude-*`、`google.gemma-3-12b-it`、`eu.anthropic.claude-*`、SAP 的 `anthropic--claude-*` 都按真实品牌着色；原始 id 优先，因此 `deepseek-v4` 不会被包裹规则抢走，包着未知模型时仍然中性。另给 10 个已覆盖品牌补「无连字符」前缀（`llama3-70b`、`gemma3-12b`、`glm4-9b`、`gpt4o`），且只在后跟数字时命中。
+### 优化
+- 图标溯源路径修正：原先 11 条记录的 `packages/static-svg/svg/` 在该 revision 并不存在（实际是 `icons/`），并新增「upstream 路径必须指向 bundled 文件」的断言（`openai-color.svg` 是唯一记录在案的例外）。
+- 打包门禁改为从 manifest 推导图标清单，图标测试从目录推导文件清单 —— 以后加品牌不再需要手改任何清单。
+
+### Features
+- **43 model brands** — 32 new marks from the pinned lobe-icons revision (Mistral, NVIDIA, Cohere, Amazon Nova, Microsoft, Perplexity, Baidu, Tencent, StepFun, Baichuan, SenseNova, InternLM, LongCat, Xiaomi MiMo, AI21, IBM, Upstage, Liquid, Ai2, BAAI, Voyage, ByteDance Seed, Kling, Skywork, Aion, Nous, TII, Aleph Alpha, Yandex, Snowflake, iFlytek), nine of which had `currentColor` baked to a fixed neutral and are marked `modified`.
+- **Gateway and cloud envelopes resolve to the real brand** — `openai-gpt-5.5`, `databricks-claude-*`, `google.gemma-3-12b-it`, `eu.anthropic.claude-*` and SAP's `anthropic--claude-*`; the raw id is always tried first, so `deepseek-v4` cannot lose its brand to the rule and an envelope around an unknown model stays neutral. Ten covered brands also gained a bare prefix for ids that drop the hyphen (`llama3-70b`, `gemma3-12b`, `glm4-9b`, `gpt4o`), which only matches when a digit follows.
+### Improvements
+- Icon provenance corrected: the original eleven entries recorded `packages/static-svg/svg/`, which does not exist at that revision (it is `icons/`), and a test now asserts that an upstream path names the file it came from (`openai-color.svg` is the documented exception).
+- The packaging gate derives the icon list from the manifest and the icon tests derive it from the directory, so adding a brand no longer requires editing either list.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
 ## v1.1.18 (2026-10-07)
 ### 新功能
 - **「近 7 天」范围** —— 含今天的 7 个日历日，作用于摘要 / 趋势 / 模型表 / 日志 / 筛选 / CSV。
