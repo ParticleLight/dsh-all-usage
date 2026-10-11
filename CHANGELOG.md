@@ -1,397 +1,405 @@
 # Changelog
 
-All notable changes to `dsh-all-usage` are documented here.
-
-## [1.1.18] - 2026-10-07
-
-### Added
-
-- **A seven-day range.** The time-range presets gain 近 7 天 / Last 7 Days next to today, 30 days, 90 days and all time; it scopes the summary, trend, model tables, audit log, filters and CSV export like every other preset (seven calendar days, today included), and the choice persists in the browser like the others.
-- **A switchable heatmap span.** The activity heatmap no longer forces 53 columns: 30 天 / 90 天 / 12 个月 buttons redraw it with 5, 13 or 53 week columns. The grid follows the span (each column is a week and every cell keeps a 1:1 aspect ratio), so a shorter span also gets taller, readable cells instead of 10px squares. The span is stored with the other UI preferences and is independent of the time range above: changing the range never resizes the heatmap and vice versa.
-- **A version indicator in the header.** The dashboard title now carries the running plugin version: “已是最新 / Up to date” in small text when it matches the newest release on npm, “最新 vX.Y.Z / Latest vX.Y.Z” highlighted when it is behind, and clicking it opens the GitHub repository. The host performs the check (`GET /api/all-usage/version`, one read-only request to `registry.npmjs.org`, cached for 6 hours, never initiated by the page itself), so a desktop shell that cannot reach the network still shows its running version, and the refresh button forces a fresh check. An unreachable registry or an unparseable tag degrades to “unknown” (the chip shows the version alone) rather than claiming either verdict.
-
-## [1.1.17] - 2026-10-01
-
-### Fixed
-
-- **Writes work in the DSH desktop client again.** The write routes (price save, immediate sync, holiday fetch, alias) required an `Origin` header equal to the loopback host. The desktop shell serves the UI on its own scheme and forwards page requests through Electron, which strips `Origin` along with `Host`, `Cookie` and `Sec-Fetch-*`, so every desktop write was rejected with 403: saving prices reported "no permission", the models.dev catalog could never be synced, and the auto-sync checkbox rolled back. Writes are now authorized by the process capability alone — an unguessable secret that a cross-origin page can neither read (the read routes send no CORS headers) nor attach to a form POST — while a present `Origin` must still be loopback or the shell's own scheme, and `Host` must still be loopback so a rebound DNS name cannot reach the API.
-- **A missing `usageBacked` no longer reads as a verdict.** A host that predates the merged price table sends no `usageBacked`, and the panel rendered that as "no ledger usage" even for rows with recorded calls; it now degrades to "usage unknown" (distinct flag, row style and footer count), and says so when the payload carries no model list at all.
-- **A rotated write capability heals itself.** The status poll now carries a derived `capabilityId` (never the capability itself), the page treats a rotation as a full refresh, and a write rejected with 403 re-reads the capability from the full snapshot and retries once before reporting anything; the message now names a stale capability instead of claiming a permission problem.
-
-### Added
-
-- `GET /api/all-usage/status` reports the running plugin version and the derived capability id, so a page served by a newer package than the running host can say "host plugin vX / this page vY differ — restart DSH" instead of leaving that mismatch invisible.
-
-## [1.1.16] - 2026-09-29
-
-### Added
-
-- **DSH 0.2.0-rc.2 is a supported runtime.** The real Cordis smoke passes on it — every route, the session hooks, the ledger flush, the revision fast path and disposal — so `dsh.compatibility.runtime` gains `>=0.2.0-rc.2 <0.2.1-0`, `0.2.0-rc.2` joins the verified list (now six runtimes) and the CI smoke matrix (Node 22/24, twelve jobs). The line keeps the 0.1.7 Cordis pairing (cordis 4.0.4 / loader 1.0.5 / timer 1.1.6) and the abstract settings seam instead of the file-backed provider, which is exactly what the smoke runs against. README (both languages, including the badge and the verified matrix) follows the new declaration.
-## [1.1.15] - 2026-09-28
-
-### Added
-
-- **Chinese statutory holidays can price as a full off-peak day.** A peak plan now carries an explicit `holidays` date list (China Standard Time calendar days: validated, sorted, de-duplicated, at most 400 entries, and part of the policy hash so the existing audit/repricing rules apply unchanged). On those days no rule can claim an instant, and each cost snapshot records `pricingHoliday`, so the ledger distinguishes a holiday off-peak band from an ordinary one. The panel exposes it as a switch plus a date list that also accepts `start..end` ranges, and `POST /api/all-usage/pricing/holidays` fetches one year of the State Council arrangement (the holiday-cn dataset: jsDelivr first, GitHub raw as a fallback, 24-hour host-side cache) so the list can be filled with one click; the fetch writes nothing — only saving freezes the dates (plus a provenance note that stays out of the policy hash) into the plan. The built-in DeepSeek peak plan now ships the 2026 arrangement itself (33 off-days taken from the State Council notice, with the provenance stored next to the dates), because DeepSeek's own rule is "Monday to Friday excluding Chinese public holidays": first-party and mapped DeepSeek routes therefore price holidays as off-peak with no configuration at all, and snapshots priced under the previous plan are migrated once. The official wording keeps weekends off-peak in full, so swapped-in working weekends (调休) need no extra handling.
-
-### Changed
-
-- **Cost Settings is now one editable price table.** The separate "Model mappings" and "Explicit price overrides" sections are gone: every ledger model gets a row whose four price boxes write that model's manual price, whose official-model column sets or clears the identity mapping (and previews the target rates immediately), and whose two chips expand a context-rate-band editor and a UTC peak/off-peak editor. Rows that exist only in the saved configuration (an override or mapping with no ledger usage yet) are returned with `usageBacked: false` so they stay visible, editable and removable.
-- **Peak/off-peak plans are editable per model.** `GET /api/all-usage/pricing` now carries `temporalSchedules` (deduplicated like `tierSchedules`) plus `temporalExplicit`, `temporalBuiltin` and `temporalConfigInvalid` on every row, so the panel can show whether a row uses the built-in DeepSeek table or a custom plan, copy the built-in table for customisation, restore it, or drop the plan. Changing a plan reconciles that model's history against the new policy (the documented audit semantics); price edits still never rewrite existing positive costs, and the panel says so.
-
-### Fixed
-
-- The pricing configuration round-trips `providerId` and `temporalPricing` on overrides. Dropping `providerId` from the snapshot turned a provider-scoped manual price into a provider-agnostic one on the next save and stopped it from being found as a mapping target, so a saved mapping could silently fall back to the catalog price.
-- `GET /api/all-usage/pricing/models` returns `rates`, `providerName`, `tiered`/`tierCount` and `builtinTemporal` per match, so the mapping column can preview a price before saving.
-
-### Internal
-
-- The compact `/api/all-usage` snapshot keeps its shape: temporal detail, schedule ids and configuration-only rows are only emitted for the detailed pricing payload, and `test/pricing-editor.test.js` guards that boundary.
-## [1.1.14] - 2026-09-27
-
-### Fixed
-
-- **`deepseek-flash` gets the DeepSeek peak/off-peak plan.** models.dev lists it (DeepSeek V4.1 Flash) in the same `deepseek-flash` family and at the same standard rates as `deepseek-v4-flash`, but the built-in table only carried the v4 ids, so every record for that model was priced flat and the cost panel reported `temporalExemptReason: "no-temporal-profile"` — a peak-hour request was under-reported by roughly 57%. The table now declares the model; the off-peak rates still come from the live catalog entry, and the plan still applies to first-party routes only. Records already stored with that exempt verdict are migrated once against their own usage instant by `reconcileTemporalPricing()` and written back to the ledger, so existing history is corrected on the first start after upgrading. Reported by @baileyh8 in #2.
-
-## [1.1.13] - 2026-09-25
-
-### Added
-
-- **DSH 0.1.7-rc.2 is a supported runtime.** The real Cordis smoke passes on it — every route, the session hooks, the ledger flush, the revision fast path and disposal — so `dsh.compatibility.runtime` gains `>=0.1.7-rc.2 <0.1.8-0`, and `0.1.7-rc.2` joins the verified list and the CI smoke matrix. The DSH desktop client runs this runtime line, so the caption-strip work from v1.1.11/v1.1.12 is covered by the same declaration.
-
-### Changed
-
-- The runtime smoke is version-aware about settings. 0.1.7 replaced the file-backed `@deepseek-ai/dsh-settings-file` provider with an abstract settings seam that no runtime package instantiates; the smoke runs without a settings service on that line and asserts that the plugin stays healthy without one, which is the behaviour the plugin already implements (`ctx.settings` is optional).
-- `0.1.5-rc.2` is covered by the CI smoke matrix instead of being verified locally only, so the verification matrix has no exception left.
-- `scripts/check-package.mjs` now fails when a runtime is called verified without appearing in both the CI matrix and the smoke profile table, so a declaration can no longer outrun its coverage.
-
-## [1.1.12] - 2026-09-25
-
-### Fixed
-
-- **The runtime smoke test no longer counts routes by hand.** It asserted that dispose removed exactly 9 exact routes, so v1.1.11 — which adds `/api/all-usage/client-env` — failed every Cordis smoke job and, with it, its own npm publication, while the published package itself was correct. The expected count is now derived from the route list the test already checks, so adding a route can no longer leave a stale number behind.
-
-### Note
-
-- v1.1.11 was published to GitHub Releases but never reached npm: the publish workflow checks out the release tag and verifies it, and a published tag is never moved. The desktop caption-strip fix reaches npm users with this release; the shipped runtime code is identical to v1.1.11.
-
-## [1.1.11] - 2026-09-25
-
-### Fixed
-
-- **The desktop client's own close button is no longer covered.** The usage sheet is a full-window overlay, so its backdrop and grabber bar were painted straight across the 40px caption strip the DSH desktop client keeps for its window buttons (minimise / maximise / close), dimming the client's close button behind the panel. When the host marks the document with `data-windows-titlebar`, the sheet now starts below `--dsh-windows-titlebar-height` (40px on Windows), so the strip stays clear. Browsers are unaffected: without the marker nothing changes.
-- **The strip reservation never actually applied.** `Number(localStorage.getItem('dsh-all-usage:topInset'))` reads an unset key as `0`, which passed the `>= 0` check and returned early — the host marker, the Window Controls Overlay geometry and the user-agent fallback were dead code, so the panel reserved nothing on any desktop host even though the logic was in place. An unset key is now distinguished from an explicit `0`.
-
-### Changed
-
-- The reserved strip is taken from the host's own declaration first (`data-windows-titlebar` plus `--dsh-windows-titlebar-height`), then the Window Controls Overlay rectangle, then the user agent. `localStorage['dsh-all-usage:topInset']` still overrides everything, so the strip can be tuned without a rebuild.
-- The client reports its environment through the new `GET /api/all-usage/client-env` route, surfaced as `clientEnv` in `/api/all-usage/status`: user agent, overlay height, the reserved strip **and where that number came from**, viewport, and the panel's own rectangles. It reports at load and again whenever the sheet opens — this is what exposed the reservation bug from outside the desktop app.
-
-## [1.1.10] - 2026-09-14
-
-### Fixed
-
-- **The ledger fast path is back.** DSH 0.1.5 renamed `sessionPersistence.listSnapshots()` to `list()`, so the plugin never obtained a per-session revision: `sessionsSkippedByRevision` stayed at 0 and every baseline re-read every session log (431 reads / ~13 minutes for 479 sessions on the maintainer's host). Both spellings are now accepted; against a real 0.1.5 service the plugin reports `persistenceSnapshotsAvailable: true` and skips unchanged sessions again.
-- **A registry change during a baseline is no longer dropped.** `synchronizeWorkspaceRegistry()` returned early while `scan.done` was false, so a workspace added during the (previously very long) scan stayed invisible until the next restart. Such a change is now remembered and replayed as soon as the scan settles.
-
-### Changed
-
-- The workspace registry is additionally polled every 30 seconds, so a missed `domain/changed` event can no longer leave the workspace list stale until a restart.
-- `/api/all-usage/status` exposes `workspaceProbeEvents`, `workspaceSyncRuns`, `workspaceSyncAdded`, `workspaceSyncRemoved` and `workspaceSyncDeferred` (cumulative, not reset by a baseline) so the probe can be verified on a live host.
-
-### Note
-
-- The first start after upgrading still reads every log once: ledger records written before this release carry no `lastRevision`, so the revision comparison has nothing to match against. From the next start on, unchanged sessions are applied from the ledger without re-reading their logs.
-
-## [1.1.9] - 2026-09-12
-
-### Fixed
-
-- Deleting a workspace no longer erases its recorded usage. The registry probe used to call `removeSession()` for every session of a deregistered workspace and drop their ledger rows, and recovery skipped any row whose `sourceCwd` no longer mapped to a registered workspace; together they destroyed history the durable ledger had already recorded. (v1.1.6 fixed a different path — the DSH 0.1.5 `session.events` removal that wrote empty ledger records.)
-
-### Changed
-
-- Usage from every removed workspace is now summed into a single **Deleted** row instead of vanishing, and one row per dead workspace is no longer created. Retiring a workspace re-keys the live aggregate in place through the new `aggregation.retargetSession()`, so usage folded from the live feed that had not reached the ledger yet survives too.
-- Persisted ledger rows keep their original workspace id and cwd: retargeting happens on the in-memory copy only, the bucket is re-derived from the ledger after every restart, and a row with no usage never advertises the bucket.
-- The strict registration boundary is unchanged — sessions in unregistered or deleted directories are still excluded from new statistics — and legacy `unregistered:` rows are still never resurrected. Re-registering a workspace keeps its old history in the Deleted row while new sessions count under the live workspace.
-
-## [1.1.8] - 2026-09-11
-
-### Fixed
-
-- README.md still quoted the pre-0.1.5 compatibility declaration (`>=0.1.1-rc.1 <0.1.2`) and a verification matrix that stopped at 0.1.1, contradicting the shipped `package.json` after v1.1.6 and v1.1.7. Both language sections now record the corrected per-tuple range and list `0.1.5-rc.1` in the verified matrix.
-
-### Changed
-
-- The CI runtime smoke matrix now covers `0.1.5-rc.1` alongside `0.1.1-rc.2` and `0.1.1-rc.1`, and selects the Cordis/loader/timer line per runtime version (0.1.5-rc.1 ships cordis 4.0.2 / loader 1.0.3 / timer 1.1.4) instead of pinning a single hard-coded set.
-
-## [1.1.7] - 2026-09-11
-
-### Fixed
-
-- The declared DSH runtime compatibility range now carries an explicit prerelease branch per tuple (`>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0`). node-semver only lets a prerelease version satisfy a range when a comparator shares its `major.minor.patch` tuple and itself carries a prerelease tag, so the previous broad-looking `>=0.1.1-rc.1 <0.1.6` silently reported `0.1.5-rc.1` — the runtime this release targets — as unsupported.
-
-## [1.1.6] - 2026-09-11
-
-### Fixed
-
-- DSH 0.1.5 compatibility: that runtime replaced the Session `events` getter with `snapshotEvents()`, so the live flush path read an empty event log and folded every flushed session into an empty ledger record (`lastSeq: -1`, no turns, no usage). The dashboard stayed correct because live totals come from the `session/event` hook, but the durable "usage survives session deletion" guarantee silently degraded and restart lost the zero-rescan fast path. Event access now prefers `session.events` and falls back to `session.snapshotEvents()`, leaving 0.1.1 behaviour unchanged.
-- The runtime smoke test now asserts the persisted ledger keeps the flushed session's sequence and usage, and covers 0.1.5-rc.1 alongside the 0.1.1 line, so this regression cannot return unnoticed.
-
-### Changed
-
-- Declared DSH runtime compatibility widened to `>=0.1.1-rc.1 <0.1.6`, with `0.1.5-rc.1` added to the verified list; the runtime smoke test pins the Cordis/loader/timer lines per runtime version.
-
-## [1.1.5] - 2026-09-07
-
-### Added
-
-- Workspace registries are now kept fresh by an automatic **probe**: all-usage listens to DSH's `domain/changed` event for the workspace domain and, on any durable registry write (create/delete/rename/reorder/archive/attach/detach), rereads `workspaceRegistry.list()`. The sync is incremental — only added workspaces are scanned (the sessions that belong to them) and removed workspaces have their sessions subtracted via inverse folding, while unchanged workspaces reuse their computed aggregates and ledger with zero rescan. The manual Refresh workspaces control, its `POST /api/all-usage/workspaces/refresh` route, and the refresh-workspaces client button were removed. Usage remains intentionally restricted to registered workspaces; unregistered cwds are ignored.
-
-### Fixed
-
-- Usage is strictly limited to DSH-registered workspaces: sessions whose cwd does not map to `workspaceRegistry.list()` (including existing directories absent from the registry) are ignored, and legacy `unregistered:` ledger rows are never resurrected as history.
-- Ledger rows whose persisted `sourceCwd` no longer maps to a registered workspace (for example the session directory was removed) are skipped during recovery instead of being restored as stale data; the workspace source path is now persisted with every ledger record so restart recovery can validate ownership.
-
-
-## [1.1.4] - 2026-09-03
-
-### Added
-
-- DeepSeek peak/off-peak billing as a first-class, versioned **temporal pricing plan**: the cost schema is v2, and each cost snapshot records the billing instant, its time source (request-context / usage-event), the UTC band (peak / off-peak), the policy id, and a policy hash. Request logs show the band and UTC billing time, and the cost settings panel marks which usage models follow the DeepSeek band plan.
-- Built-in first-party DeepSeek profiles (deepseek-v4-flash, deepseek-v4-flash-vision-exp, deepseek-v4-pro) with explicit per-band rates for the UTC windows 01:00-04:00 and 06:00-10:00 on weekdays; the peak rates are stored as data, never derived as an automatic discount rule.
-- UTC band boundaries are half-open: 00:59:59 off-peak, 01:00:00 peak, 03:59:59 peak, 04:00:00 off-peak, 06:00:00 peak, 10:00:00 off-peak; weekends are off-peak. Band selection uses UTC fields only, so viewer timezones, DST, and fractional-hour zones cannot change a result.
-- Deterministic reuse: a later usage sample for the same turn/step reuses the previous cost snapshot only when identity, token buckets, band, policy id/hash, and applicability all match, so a message crossing a peak boundary never inherits the chunk price.
-- Requests preferred as the billing instant when the request/context time matches the usage turn/step; otherwise the usage event time is the auditable fallback. Both are persisted in the snapshot.
-- Controlled DeepSeek temporal reconciliation: first-party DeepSeek snapshots are re-priced against the usage instant on baseline/backfill/sync, v1 snapshots are migrated to the v2 shape in memory and in the persisted ledger, and a plan whose effective window does not cover the instant fails closed as unsupported (temporal-price-history-unavailable) instead of guessing.
-- Route safety boundary: the band plan applies only to first-party deepseek routes or routes explicitly mapped to the DeepSeek official entry; reseller routes (OpenRouter and other gateways) keep the static official price and are labelled route-not-official.
-
-- Respect the official effective instant: the built-in DeepSeek band plan starts exactly at 2026-08-16T16:00:00Z (V4-Flash-Vision-Exp at 2026-08-21), and usage before it fails closed as unsupported instead of inheriting today's V4 rates.
-- Persist the request-context archive inside ledger records and seed incremental folds from it after a restart, so an open request whose context arrived in a previous batch keeps its peak/off-peak billing instant.
-- Clear stale request-context instants and route identity on full folds (baseline rebuilds and live resyncs), so a history rewrite that removes a request no longer leaves its band attached to later usage.
-- Keep priced v2 snapshots auditable across catalog refreshes: the policy hash no longer includes live entry rates and reconciliation never rewrites priced history; an explicit repriceTemporal=true request re-estimates every snapshot.
-- Support an ordered policy archive (policies: [...]) with non-overlapping effective windows, reject overlapping rules across rules (JSON array order can never decide a price), keep an invalid temporal config visible and fail closed instead of silently falling back to the built-in profile, and compare temporal plans in the duplicate-candidate check so conflicting band plans resolve ambiguous.
-- Include pricingAt, pricingTimeSource, band, policy id and policy hash in the reconciliation equivalence check and in the CSV audit export.
-
-- Persist the invalid temporal-config sentinel through the serialize/normalize cycle: a rejected temporalPricing edit stays fail-closed across restarts instead of re-enabling the built-in DeepSeek profile.
-- Rebuild a session atomically on authoritative live resyncs: usage samples, turn records, date indexes and cost aggregates are removed before the snapshot is folded, so usage deleted by a rewritten history disappears from the aggregate (lagging snapshots keep upsert semantics until the follow-up resync aligns).
-- Base the live resync cursor on the snapshot tail (merged with an absorbed fallback event) instead of the previous cursor, so truncated or rewritten history cannot skip over missing events that arrive later.
-- Accept deepseek-official as a first-party catalog provider in the official provider rules, so its entries price and follow the band plan like deepseek.
-- Validate that a priced snapshot's instant is still covered and band-consistent when deciding whether a policy still matches: snapshots that slipped into a gap (same id/hash, window moved) fail closed instead of staying priced.
-- Include pricingAt and pricingTimeSource in the live/incremental reuse check, so audit metadata refreshes when the request instant or its source changes even within one band.
-- Use real LRU eviction (delete + set) for the bounded request-context archive, applying the same 512-entry cap to the live fold, the persisted ledger, and deserialization.
-
-- An authoritative live resync (full snapshot or a snapshot that provably contains the triggering event with a monotonic sequence) rebuilds the session's ledger record from the snapshot, replaces it in state and persists it, so a restart after a live history rewrite cannot resurrect deleted usage; persist failures keep explicit dirty/recovery state and surface as resync-ledger-persist-failed.
-- Live resync authority is now proof-based: snapshots that only have a higher tail, or events without a usable sequence, are treated as lagging (upsert the event, stay pending, align on the follow-up resync) instead of being destructively replaced.
-
-- Show real vendor brand icons instead of neutral dots for models in the request log, the selected-call details, the model summary table, and the cost-settings match table. The 11 brand SVGs live in assets/model-icons/ with a manifest (provider aliases, model prefixes, exact overrides, source and licence) and are validated and embedded as data: URIs by scripts/build-client.mjs, so the runtime never reads local paths or the network. Model namespaces win over the DSH provider name so reseller and gateway routes are attributed by the model they actually served; unknown or mixed-brand rows keep the neutral fallback, and workspace colour dots plus chart legend dots are unchanged.
-
-- Harden the model brand icons: the load-failure flag is scoped to one icon identity (a shared component that later shows another brand retries instead of staying neutral), an unrecognised actualModel no longer inherits the requested model's brand, model prefixes match on token boundaries only (o10-preview and o3x stay neutral), the resolution cache is bounded, and labelled icons expose the brand through the image's accessible name instead of a title on an aria-hidden host.
-- Build-time SVG validation now decodes XML entities before checking, rejects unquoted URI attributes, external CSS url()/image-set() and @import targets (including escaped/commented/CDO-CDC/namespaced <svg:style> forms), DOCTYPE/CDATA/processing instructions and every external-resource element; the CSS checks run only on style attributes and <style> bodies so icon text and comments stay inert. It lives in scripts/svg-guard.mjs so the tests exercise the exact same guard with adversarial fixtures.
-- Bundle the icon provenance required for release: the manifest pins the upstream commit, records per-file upstream paths and modification flags, and assets/model-icons/LICENSE.upstream-lobe-icons.txt ships the MIT notice, copyright, trademark disclaimer and the local modifications. The build fails if the pinned revision, licence file or per-file attribution is missing.
-
-### Fixed
-
-- Hardened the model-icon build guard after an independent audit: the CSS checks now reject CDO/CDC-adjacent `@import`, external `@import` inside namespaced `<svg:style>` elements, CSS-escaped `url(` identifiers and external `image-set()` targets, all matching Blink's own tokenizer. Style-attribute `url(...)` references are checked on both the raw and entity-decoded document so `&quot;` quoting cannot split a payload while encoded `@import` is still caught after decoding.
-- CSS `url()`/`image-set()` checks now run only on style attributes and `<style>` bodies, so provenance comments, `<text>` content and CSS comments stay inert (no false positives); the adversarial fixtures assert the rejection reason instead of accepting any error.
-- The model filter dropdown now renders the vendor brand icon for each model option (actual model first, neutral fallback for unknown/private models) instead of the generic line icon, and the three usage-dashboard screenshots were refreshed to the current UI.
-
-## [1.1.3] - 2026-09-01
-
-### Added
-
-- Make Cost Statistics tier-aware: show expandable official rate schedules and support validated context bands in explicit price overrides.
-- Added deterministic usage invariants and a redacted fixture replay command covering failed requests, orphan usage chunks, cache buckets, replacement semantics, and exact expected totals.
-- Added a Node 22/24 CI matrix with package-content checks and required real DSH runtime smoke coverage for DSH 0.1.1-rc.1 and 0.1.1-rc.2.
-- Added community issue templates for data inconsistencies, plugin startup failures, and cost calculation issues.
-
-### Performance Optimizations
-
-This release reduces historical scan work, storage write amplification, and Dashboard render churn while preserving durable-ledger recovery guarantees.
-
-- Avoid rebuilding and writing a clean session's derived ledger at `session/flush`; queue and coalesce dirty records, then drain pending writes during disposal.
-- Store derived ledger records in 32 stable-hash JSON units so a session update rewrites only its shard; retain the legacy single-unit migration path.
-- Build scoped query and fixed 53-week heatmap results from ingest-time date/workspace/model cubes; use exact BigInt decimal accumulators and a minimal heatmap projection instead of rescanning usage rows or parsing cost strings on cold reads.
-- Isolate heatmap pointer tracking from the dashboard render path: memoize the 53-week calendar, cells, lookup maps, charts, records, and pricing dialog, while tooltip coordinates are coalesced through refs and requestAnimationFrame, with a throttled fallback for background tabs.
-- Generate the shipped browser entry from readable `src/client.js` with pinned Terser during prepack, reducing the current raw client artifact from about 276 KB to about 177 KB; transport gzip/Brotli remains a DSH host concern.
-
-### Correctness
-
-- Keep the usage ledger debounce timer referenced while write waiters are pending: an unreferenced timer let the event loop settle before `persistLedgerRecord` could run, cancelling Node 22 test runs and short-lived processes.
-- Derive the latest session sequence from the tail event instead of scanning the full session log on live flush and again while building the ledger record.
-- Use the previous ledger cursor for safe append-only tail folding and fall back to a full rebuild when sequence continuity or turn replacement is uncertain.
-- Wait for the persisted pricing configuration (and the ledger it backfills) before serving pricing reads and writes, so an early API call can neither report an empty config nor be silently overwritten by the load.
-- Force a full historical rebuild when the workspace behind a session path was recreated with a different id; the previous record can no longer be reused under the wrong workspace, and ledger rows whose top-level workspace differs from their historical items are marked unusable and rebuilt once.
-- Keep the pricing refresh classification order intact: a pricing revision change always wins over a concurrent data change so summary costs and the open settings panel cannot consume a partially-consumed baseline.
-- Refresh the open cost-settings panel when the pricing revision changes, merging fresh catalog data while preserving unsaved local mappings and overrides.
-- Invalidate every in-flight official-model search when a mapping row is deleted (row generation bump), so a stale response can never populate a shifted row even when per-index sequence numbers collide.
-- Skip the pricing revision bump when a catalog sync succeeds with an unchanged catalog hash and no newly priced usage.
-- Round hourly bucket indices against the requested range so fractional-hour zone offsets (Lord Howe) never drop or merge events, and emit real bucket boundaries as trend labels so spring-forward hours carry the true 03:00 label instead of drifting 30 minutes off.
-- Mark mixed-workspace ledger records as unfoldable so both the scan tail path and session flush rebuild them instead of persisting historical items under the wrong workspace.
-- Exclude the per-fetch fetchedAt stamp from the catalog content hash, so syncing identical models.dev contents keeps pricingRevision (and query caches) stable.
-- Wait for the persisted pricing and ledger state before serving the full snapshot, so the first payload cannot embed a default empty pricing summary.
-- Bump the official-model search row generation when the settings panel closes, so in-flight responses cannot populate a reopened panel.
-- Require safe-integer event sequences everywhere sequences gate folding or fast-forward comparisons, so contract-external values such as Infinity cannot freeze later flushes or poison the live-event cursor.
-- Keep the mixed-workspace upgrade flag through pricing backfills too: repairing costs must never re-enable tail folding of a record whose historical items still belong to another workspace.
-- Invalidate in-flight official-model searches whenever the catalog is replaced (manual sync, open-panel refresh, close/reopen), not only when a mapping row is deleted.
-- Normalize live-fallback sequences to non-negative safe integers and give positional keys to invalid events, so contract-external sequences cannot overwrite ledger turns or poison the live cursor; ledger rows with non-safe sequences are marked for rebuild.
-- Sort the catalog by its stable key before truncating, so models.dev catalogs above the entry cap keep the same models and content hash regardless of upstream object order.
-- Enforce the ledger sequence contract (-1 sentinel or non-negative safe integer) when loading persisted records, flag old Infinity/NaN/negative keys and sequences for rebuild, and never clear the rebuild flag during cost repacking or ledger recovery.
-- Resolve normalized duplicate catalog entries deterministically (stable sort with conflict groups comparing full content, provider id case-normalized) so enumeration order can no longer change which price survives.
-- Extend the ledger sequence contract to every write and read path: oversized numeric keys (past Number.MAX_SAFE_INTEGER) and unsafe numbers in usage/turn data are normalized at the entry points and flagged for rebuild; the rebuild reason is persisted so a source-read failure followed by a restart can never silently reuse a polluted record.
-- Persist the rebuild reason for legacy-version and invalid-updated-at records too, not only sequence/workspace damage, so a source-read failure followed by restart cannot fast-path a record that was upgraded in memory.
-- Recognise any non-canonical numeric text (floats, exponents, negatives) in old event keys as pollution, and forbid both memory and ledger tail-folding when an incremental log contains invalid sequences anywhere before the fold start.
-- Refuse to tail-fold a flush whose log tail does not advance and whose history contains invalid sequences: the whole usage index is rebuilt from source so the in-memory aggregate and the persisted ledger cannot disagree.
-- Detect invalid sequences on every dirty flush (not only when the tail did not advance), so a history rewrite followed by a normal appended tail also rebuilds instead of folding stale in-memory rows.
-- Persist an invalid-flush-sequence rebuild flag on the stale ledger record before triggering the full rebuild, so a lagging persistence revision cannot fast-path the baseline back to the old data.
-- Match Infinity/NaN pollution only as bare whole values, keeping composite keys such as Infinity-session:step:1:1 on the revision fast path.
-- Keep the server-persisted pricing auto-sync flag as the single truth: the client stops seeding the draft from its own local UI state, so saving unrelated settings cannot revert the server value.
-- Move in-flight official-model search state (timers, sequence guards, results) when mappings are deleted, so a stale response can no longer populate a shifted row.
-- Restrict pricing revision bumps to cost-affecting changes: sync attempts and failed attempts no longer invalidate scoped query caches or records cursors, while the client treats pricing changes as a full snapshot refresh so summary costs stay fresh.
-- Bucket hourly rows by the local hour boundary at the event's own offset, keeping both repeated hours of a DST fall-back day distinct.
-- Add a CI guard that rejects a missing or untracked generated client bundle (`git ls-files --error-unmatch`) before the determinism diff.
-- Initialized the durable ledger revision clock and reject persisted ledger records whose `updatedAt` is not finite.
-- Require HTTP socket peers to be loopback before accepting a request, including IPv4-mapped loopback addresses.
-- Preserve route-specific pricing mappings through the `identityKey` field, while accepting legacy `usageIdentityKey` data.
-- Add validated context-tiered model pricing using the request input context; malformed schedules remain unsupported instead of producing a guessed estimate.
-- Require `webServer` before Host activation so the dashboard routes cannot silently disappear when the service mounts late.
-- Migrate legacy tiered flat cost snapshots to `unsupported`, reject timestamps outside JavaScript's TimeClip range, and exercise the real SessionStore append/flush firehose in runtime smoke tests.
-- Require manual npm recovery dispatches to provide and verify the target release tag and full commit SHA.
-
+## v1.1.18 (2026-10-07)
+### 新功能
+- **「近 7 天」范围** —— 含今天的 7 个日历日，作用于摘要 / 趋势 / 模型表 / 日志 / 筛选 / CSV。
+- **热力图跨度可切换** —— 30 天 / 90 天 / 12 个月 = 5 / 13 / 53 列，格子随之变大（实测 34px vs 18px）；默认仍 12 个月，与时间范围互不影响。
+- **标题旁版本指示** —— 显示运行版本；一致时小字「已是最新」，落后时高亮「最新 vX.Y.Z」，点击开 GitHub 仓库。
+
+### Features
+- **A seven-day range** — seven calendar days including today; scopes the summary, trend, model tables, request log, filters and CSV.
+- **A switchable heatmap span** — 30 days / 90 days / 12 months draw 5 / 13 / 53 columns, so shorter spans get larger cells (34px vs 18px measured); twelve months stays the default and the span is independent of the time range.
+- **A version indicator in the header** — the running version, plus “Up to date” in small text or a highlighted “Latest vX.Y.Z”; clicking it opens the GitHub repository.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.17 (2026-10-01)
+### 修复
+- **桌面端又能保存了** —— 写接口原要求 `Origin` 与 loopback 同源，而 Electron 转发时会删掉它；改为以进程令牌授权，`Origin` 存在时仍校验，`Host` 仍限 loopback。
+- **缺 `usageBacked` 不再误判** —— 旧宿主不发该字段，面板不再渲染成「账本无用量」，改为「用量未知」三态。
+- **令牌轮换自愈** —— 状态轮询带派生 `capabilityId`；写入遇 403 自动重取令牌并重试一次，文案改为「进程令牌已失效」。
+### 新功能
+- `/api/all-usage/status` 增加 `pluginVersion` 与 `capabilityId`，宿主与页面版本不一致时面板会提示重启。
+
+### Fixes
+- **The desktop client can save again** — writes required an `Origin` matching the loopback host, which Electron strips when forwarding; they are now authorized by the process capability, a present `Origin` is still validated and `Host` stays loopback-only.
+- **A missing `usageBacked` is no longer a verdict** — an older host omits the field and the panel rendered it as “no ledger usage”; it now degrades to a distinct “usage unknown” state.
+- **A rotated capability heals itself** — the status poll carries a derived `capabilityId`; a write rejected with 403 re-reads the capability and retries once, and the message names a stale capability.
+### Features
+- `/api/all-usage/status` reports `pluginVersion` and `capabilityId`, so a host/page version mismatch can say “restart DSH” instead of staying invisible.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.16 (2026-09-29)
+### 新功能
+- **支持 DSH 0.2.0-rc.2** —— 真机 Cordis smoke 全过；区间加 `>=0.2.0-rc.2 <0.2.1-0`，已验证增至 6 个运行时，CI 12 个作业。
+
+### Features
+- **DSH 0.2.0-rc.2 is supported** — the real Cordis smoke passes; the declared range gains `>=0.2.0-rc.2 <0.2.1-0`, the verified list grows to six runtimes and CI to twelve jobs.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.15 (2026-09-28)
+### 新功能
+- **中国法定节假日全天谷价** —— 峰谷计划可带显式节假日日期（支持区间写法与一键抓取当年安排）；内置 DeepSeek 表自带 2026 年 33 天官方安排，官方直连与已映射行零配置生效，快照记录 `pricingHoliday`。
+### 优化
+- **成本设置合并成一张可编辑价格表** —— 映射列 + 四个价格框 + 上下文档位 / UTC 峰谷编辑器；仅存在于配置的行仍可见、可改、可删。
+- **峰谷计划可按模型编辑** —— 接口返回去重的 `temporalSchedules` 与每行来源标记；改计划按文档口径对账历史，改价格永不改写历史。
+
+### Features
+- **Chinese statutory holidays price as a full off-peak day** — a peak plan can carry explicit holiday dates (ranges and a one-click fetch of the year's arrangement); the built-in DeepSeek plan ships the 2026 33-day arrangement, so first-party and mapped rows need no configuration, and snapshots record `pricingHoliday`.
+### Improvements
+- **Cost Settings is one editable price table** — a mapping column, four price boxes and context-band / UTC peak editors; rows that exist only in the configuration stay visible, editable and removable.
+- **Peak plans are editable per model** — the payload carries deduplicated `temporalSchedules` plus per-row provenance; changing a plan reconciles that model's history, while price edits never rewrite history.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.14 (2026-09-27)
+### 修复
+- **`deepseek-flash` 补进内置峰谷表** —— 峰值时段成本此前被少算约 57%；已带豁免结论落盘的记录一次性迁移。报告者 @baileyh8（#2）。
+
+### Fixes
+- **`deepseek-flash` joins the built-in peak table** — peak-hour cost had been under-reported by roughly 57%; records stored with the exempt verdict are migrated once. Reported by @baileyh8 (#2).
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.13 (2026-09-25)
+### 新功能
+- **支持 DSH 0.1.7-rc.2** —— 真机 smoke 全过，进入声明区间与 CI 矩阵（桌面客户端即该运行时线）。
+### 优化
+- smoke 对 0.1.7 的抽象 settings seam 版本感知；`0.1.5-rc.2` 纳入 CI；`check-package` 会拦下「声明已验证却不在 CI 矩阵 / 档位表」的情况。
+
+### Features
+- **DSH 0.1.7-rc.2 is supported** — the real smoke passes, and the line joins the declared range and the CI matrix (the desktop client runs on it).
+### Improvements
+- The smoke is aware of 0.1.7's abstract settings seam; `0.1.5-rc.2` joins CI; and `check-package` now fails when a runtime is called verified without appearing in the CI matrix and the profile table.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.12 (2026-09-25)
+### 修复
+- **runtime smoke 不再手数路由** —— 此前断言 dispose 恰好移除 9 条，v1.1.11 加路由后所有 smoke 作业失败并连带发布失败；期望值改由路由清单推导。
+### 说明
+- v1.1.11 只发了 GitHub Release，**未进 npm**（发布工作流校验 tag，已发布的 tag 不移动），其修复随本版到达 npm。
+
+### Fixes
+- **The runtime smoke no longer counts routes by hand** — it asserted that dispose removed exactly nine, so v1.1.11's new route failed every smoke job and its own publication; the expectation is now derived from the route list.
+### Notes
+- v1.1.11 reached GitHub Releases but **never npm** (the publish workflow verifies the tag and a published tag is never moved); its fix reaches npm users with this release.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.11 (2026-09-25)
+### 修复
+- **桌面端关闭按钮不再被盖** —— 面板改为从 `--dsh-windows-titlebar-height`（40px）之下开始。
+- **预留标题条其实从未生效** —— 未设置的 localStorage 键被读成 `0` 并通过了 `>= 0` 判断，宿主标记 / Overlay / UA 兜底全是死代码。
+### 优化
+- 预留高度来源顺序改为宿主声明 → Overlay 矩形 → UA，localStorage 仍可覆盖。
+- 新增 `GET /api/all-usage/client-env`（并以 `clientEnv` 出现在 status），正是它从桌面应用之外暴露了上面的 bug。
+
+### Fixes
+- **The desktop client's close button is no longer covered** — the sheet now starts below `--dsh-windows-titlebar-height` (40px on Windows).
+- **The reserved strip never actually applied** — an unset localStorage key read as `0`, passed the `>= 0` check and returned early, leaving the host marker, the overlay geometry and the user-agent fallback as dead code.
+### Improvements
+- The reserved height now comes from the host declaration, then the overlay rectangle, then the user agent, with localStorage still overriding everything.
+- A new `GET /api/all-usage/client-env` route (surfaced as `clientEnv`) is what exposed that bug from outside the desktop app.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.10 (2026-09-14)
+### 修复
+- **账本快路径回归** —— 0.1.5 把 `listSnapshots()` 改名 `list()`，修订号拿不到导致每次基线重读全部日志（479 会话 / 431 次读取 / 约 13 分钟）；两种拼写都接受后恢复跳过。
+- **基线期间的工作区变更不再丢** —— 扫描结束后立刻重放。
+### 优化
+- 工作区注册表每 30 秒额外轮询一次；status 暴露探针计数（累计，不被基线重置）。
+### 说明
+- 升级后首次启动仍会读一遍全部日志（旧账本没有 `lastRevision`），从下一次启动起才免读。
+
+### Fixes
+- **The ledger fast path is back** — DSH 0.1.5 renamed `listSnapshots()` to `list()`, so no revision was available and every baseline re-read every log (479 sessions, 431 reads, about 13 minutes); both spellings are accepted again and unchanged sessions are skipped.
+- **A registry change during a baseline is no longer dropped** — it is remembered and replayed as soon as the scan settles.
+### Improvements
+- The workspace registry is polled every 30 seconds as well, and status exposes the probe counters (cumulative, never reset by a baseline).
+### Notes
+- The first start after upgrading still reads every log once (older records carry no `lastRevision`); re-read avoidance starts from the next start.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.9 (2026-09-12)
+### 修复
+- **删除工作区不再抹掉历史** —— 探针丢弃其账本行、恢复又跳过 `sourceCwd` 失效的行，两者叠加销毁了已记录的历史。
+### 优化
+- 被移除工作区的用量汇总成一行「已删除」；`retargetSession()` 就地改键，未落账的实时用量也保留。
+- 账本行保留原 workspace id 与 cwd（改键只在内存副本）；严格注册边界不变，旧 `unregistered:` 行不复活。
+
+### Fixes
+- **Deleting a workspace no longer erases its history** — the probe dropped its ledger rows while recovery skipped rows whose `sourceCwd` no longer mapped, and together they destroyed recorded history.
+### Improvements
+- Usage from removed workspaces is summed into a single **Deleted** row, and `retargetSession()` re-keys live aggregates in place so usage that had not reached the ledger survives too.
+- Ledger rows keep their original workspace id and cwd (re-keying happens on the in-memory copy only), the strict registration boundary is unchanged and legacy `unregistered:` rows are never resurrected.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.8 (2026-09-11)
+### 修复
+- README 仍引用 0.1.5 之前的兼容声明与停在 0.1.1 的验证矩阵，与 v1.1.6 / v1.1.7 之后的 `package.json` 矛盾；中英已改齐。
+### 优化
+- CI smoke 覆盖 `0.1.5-rc.1`，并按运行时版本选择 cordis / loader / timer 线。
+
+### Fixes
+- The README still quoted the pre-0.1.5 compatibility declaration and a matrix that stopped at 0.1.1, contradicting `package.json` after v1.1.6/v1.1.7; both languages now agree.
+### Improvements
+- CI smoke covers `0.1.5-rc.1` and selects the cordis/loader/timer line per runtime version.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.7 (2026-09-11)
+### 修复
+- 兼容区间改为按元组带预发布分支 —— node-semver 只放行「同 `major.minor.patch` 且自带预发布标签」的比较符，旧的宽区间把目标运行时 `0.1.5-rc.1` 静默判为不支持。
+
+### Fixes
+- The compatibility range now carries an explicit prerelease branch per tuple: node-semver only admits a prerelease when a comparator shares its `major.minor.patch` and carries a prerelease tag, so the previous broad range silently rejected the target runtime `0.1.5-rc.1`.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.6 (2026-09-11)
+### 修复
+- **DSH 0.1.5 兼容** —— 该版本用 `snapshotEvents()` 取代 `events`，实时 flush 会写空账本记录（`lastSeq: -1`）；现在优先 `events`、否则退回 `snapshotEvents()`。
+- smoke 断言账本保留被 flush 会话的序号与用量，并覆盖 0.1.5-rc.1。
+### 优化
+- 兼容区间放宽到 `>=0.1.1-rc.1 <0.1.6`，`0.1.5-rc.1` 进入已验证列表。
+
+### Fixes
+- **DSH 0.1.5 compatibility** — it replaces `events` with `snapshotEvents()`, so live flushes wrote empty ledger records (`lastSeq: -1`); event access now prefers `events` and falls back to `snapshotEvents()`.
+- The smoke asserts the persisted ledger keeps a flushed session's sequence and usage, and covers 0.1.5-rc.1.
+### Improvements
+- The declared range widens to `>=0.1.1-rc.1 <0.1.6` and `0.1.5-rc.1` joins the verified list.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.5 (2026-09-07)
+### 新功能
+- **工作区注册表自动探针** —— 监听 `domain/changed`，增量同步（只扫新增、逆折叠移除、未变化零重扫）；手动刷新控件 / 路由 / 按钮一并移除。
+### 修复
+- 用量严格限定于已注册工作区；`sourceCwd` 失效的账本行恢复时跳过，并按源路径校验归属。
+
+### Features
+- **An automatic workspace-registry probe** — it follows `domain/changed` and syncs incrementally (only new workspaces are scanned, removals are subtracted by inverse folding, unchanged ones are reused); the manual refresh control, route and button are gone.
+### Fixes
+- Usage is strictly limited to registered workspaces; ledger rows whose `sourceCwd` no longer maps are skipped during recovery, and the source path is persisted so ownership can be validated.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.4 (2026-09-03)
+### 新功能
+- **DeepSeek 峰谷计费成为一等、带版本的「分时价格计划」** —— cost schema v2，快照记录计费时刻、时间来源、UTC 档位与策略 id / 哈希。
+- **内置一线档位表** —— v4-flash / v4-flash-vision-exp / v4-pro，按 UTC 工作日 01:00-04:00 与 06:00-10:00；峰值费率是数据，不是自动折扣。
+- **半开边界且只看 UTC** —— 周末全天谷时，观众时区与夏令时都影响不了结果。
+- **确定性复用** —— 同一 turn/step 的后续样本仅在 identity / 桶 / 档位 / 策略全等时复用，跨峰值边界不继承价格。
+- **受控对账** —— 一线快照按用量时刻重定价，v1 快照迁移到 v2，窗口不覆盖则 fail closed 为 `unsupported`。
+- **路由安全边界** —— 只对一线 deepseek 或显式映射到官方条目的路由生效；中转路由保持静态价并标 `route-not-official`。
+- **尊重官方生效时刻** —— 从 2026-08-16T16:00:00Z 起算（vision-exp 为 08-21），更早的用量 fail closed。
+- **真实厂商品牌图标** —— 请求日志 / 调用详情 / 模型表 / 成本设置表改用 11 个品牌 SVG（构建期内嵌 data URI，运行时不联网）。
+- **图标来源随包发布** —— manifest 钉住上游 commit 与逐文件归属，缺许可或归属即构建失败。
+### 优化
+- 请求上下文归档持久化并参与增量播种；真 LRU + 512 条上限；整折时清理陈旧上下文。
+- 已定价的 v2 快照跨目录刷新仍可审计：policy hash 不含实时费率，只有显式 `repriceTemporal` 才重估。
+- 策略归档支持有序窗口并拒绝跨规则重叠；非法时段配置保持可见并 fail closed。
+- 实时重同步原子化（权威快照重建并持久化账本，失败保留 dirty 状态）；权威性改为基于证明，滞后快照只 upsert。
+- 构建期 SVG 守卫（`scripts/svg-guard.mjs`）拒绝外部 `url()` / `image-set()` / `@import`、DOCTYPE / CDATA / 处理指令与外部资源元素。
+### 修复
+- 审计后加固：CDO/CDC 相邻 `@import`、命名空间 `<svg:style>` 内的 `@import`、CSS 转义 `url(`、外部 `image-set()` 全部拒绝；style 属性在原始与实体解码两份文档上检查。
+- CSS 检查只在 style 属性与 `<style>` 体内运行（注释与文本不误报）；对抗样本断言的是拒绝原因。
+- 模型筛选下拉也显示品牌图标，三张看板截图刷新。
+
+### Features
+- **DeepSeek peak/off-peak billing became a first-class, versioned temporal plan** — cost schema v2 records the billing instant, its time source, the UTC band and the policy id/hash in every snapshot.
+- **A built-in first-party rate table** — v4-flash / v4-flash-vision-exp / v4-pro for the UTC weekday windows 01:00-04:00 and 06:00-10:00; peak rates are data, never an automatic discount.
+- **Half-open boundaries, UTC only** — weekends are off-peak all day and neither the viewer's timezone nor DST can change a result.
+- **Deterministic reuse** — a later sample for the same turn/step reuses a snapshot only when identity, buckets, band and policy all match, so a message crossing a peak boundary never inherits the price.
+- **Controlled reconciliation** — first-party snapshots are re-priced against their usage instant, v1 snapshots migrate to v2, and an uncovered instant fails closed as `unsupported`.
+- **Route safety boundary** — the plan applies only to first-party deepseek routes or routes explicitly mapped to the official entry; reseller routes keep the static price and are labelled `route-not-official`.
+- **The official effective instant is respected** — the plan starts at 2026-08-16T16:00:00Z (08-21 for vision-exp) and earlier usage fails closed.
+- **Real vendor brand icons** — the request log, call details, model table and cost-settings table use eleven brand SVGs (embedded as data URIs at build time; the runtime never touches the network).
+- **Icon provenance ships with the package** — the manifest pins the upstream commit and per-file attribution, and the build fails without the licence or attribution.
+### Improvements
+- The request-context archive is persisted and seeds incremental folds; a real LRU with a 512-entry cap; full folds clear stale contexts.
+- Priced v2 snapshots stay auditable across catalog refreshes: the policy hash excludes live rates and only an explicit `repriceTemporal` re-estimates them.
+- Policy archives support ordered, non-overlapping windows and reject cross-rule overlap; an invalid temporal config stays visible and fails closed.
+- Live resyncs are atomic (an authoritative snapshot rebuilds and persists the ledger record, failures stay dirty) and authority is proof-based: lagging snapshots only upsert.
+- A build-time SVG guard (`scripts/svg-guard.mjs`) rejects external `url()` / `image-set()` / `@import`, DOCTYPE / CDATA / processing instructions and every external-resource element.
+### Fixes
+- Hardened after an independent audit: CDO/CDC-adjacent `@import`, `@import` inside a namespaced `<svg:style>`, CSS-escaped `url(` and external `image-set()` targets are all rejected, and style attributes are checked on both the raw and entity-decoded document.
+- CSS checks run only on style attributes and `<style>` bodies (comments and text cannot false-positive), and the adversarial fixtures assert the rejection reason.
+- The model filter dropdown shows brand icons too, and the three dashboard screenshots were refreshed.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
+
+## v1.1.3 (2026-09-01)
+### 新功能
+- 成本统计支持上下文档位，可展开官方费率表。
+- 确定性用量不变量 + 脱敏 fixture 回放命令。
+- Node 22/24 CI 矩阵（含包内容检查与 0.1.1-rc.1 / rc.2 真机 smoke）。
+- 三份社区 issue 模板（数据不一致 / 启动失败 / 成本计算）。
+### 优化
+- flush 不再重建干净会话的账本（脏记录合并，退出时 drain）。
+- 派生账本分 32 个稳定哈希分片，只重写受影响的分片。
+- scope query 与 53 周热力图改用 ingest 期 cube + BigInt 精确累加。
+- 热力图指针跟踪与渲染路径隔离（memo + rAF 合并，后台标签节流兜底）。
+- 客户端产物 276 KB → 177 KB（固定版本 Terser）。
+### 修复
+- **账本序号契约贯穿所有读写路径** —— 只接受 `-1` 哨兵或非负安全整数；污染键与非规范数字一律标记重建并持久化原因。
+- **折叠存疑时全量重建** —— 序号不连续、折叠起点之前有非法序号、尾部未前进，都不再尾部折叠。
+- **定价与刷新时序** —— 读写前等待持久化配置；定价 revision 变化优先；只在影响成本时提升 revision；目录哈希排除 `fetchedAt`。
+- **在飞的官方模型搜索彻底失效化** —— 删行、关面板、目录替换都会提升行代际。
+- **服务端 auto-sync 标志是唯一真相** —— 客户端不再用本地状态播种草稿。
+- **时区与时间桶** —— 半小时偏移不丢事件；趋势标签用真实桶边界；DST 回拨的重复小时分别成桶。
+- **工作区身份** —— 以不同 id 重建时强制全量重建；顶层与历史条目不一致的行标为不可用。
+- **HTTP 与激活边界** —— peer 必须是 loopback（含 IPv4-mapped）；激活前必须有 `webServer`。
+- **发布与构建守卫** —— 拒绝缺失或未跟踪的生成 bundle；手动 npm 恢复必须校验 tag 与完整 SHA。
+### 文档
+- 记录兼容矩阵、本地可复算与供应商账单的区别、缓存 / Token 示例与 fixture 工作流。
+
+### Features
+- Cost statistics became tier-aware with expandable official rate schedules.
+- Deterministic usage invariants plus a redacted fixture replay command.
+- A Node 22/24 CI matrix with package-content checks and required real DSH smoke coverage for 0.1.1-rc.1 and rc.2.
+- Three community issue templates (data inconsistency, startup failure, cost calculation).
+### Improvements
+- A clean session's ledger is no longer rebuilt at flush: dirty records are coalesced and drained on disposal.
+- The ledger is stored in 32 stable-hash shards, so an update rewrites only its own shard.
+- Scoped queries and the heatmap build from ingest-time cubes with exact BigInt accumulators.
+- Heatmap pointer tracking is isolated from the render path (memoized parts, rAF-coalesced coordinates, a throttled fallback for background tabs).
+- The shipped client artifact dropped from about 276 KB to about 177 KB with pinned Terser.
+### Fixes
+- **The ledger sequence contract covers every read and write path** — only the `-1` sentinel or a non-negative safe integer is accepted; polluted keys and non-canonical numbers are flagged for rebuild with the reason persisted.
+- **Any doubt about folding triggers a full rebuild** — broken sequence continuity, an invalid sequence before the fold start, or a tail that did not advance no longer tail-folds.
+- **Pricing and refresh ordering** — reads and writes wait for the persisted configuration, a pricing revision change wins over concurrent data, revisions only bump for cost-affecting changes, and the catalog hash excludes `fetchedAt`.
+- **In-flight official-model searches are invalidated for good** — deleting a row, closing the panel and replacing the catalog all bump the row generation.
+- **The server-persisted auto-sync flag is the single truth** — the client no longer seeds the draft from local state.
+- **Timezones and buckets** — fractional-hour offsets no longer drop events, trend labels use real bucket boundaries, and both repeated hours of a DST fall-back day stay distinct.
+- **Workspace identity** — a workspace recreated with a different id forces a full rebuild, and rows whose top-level workspace disagrees with their items are marked unusable.
+- **HTTP and activation boundaries** — the socket peer must be loopback (IPv4-mapped included) and `webServer` must exist before the Host activates.
+- **Release and build guards** — a missing or untracked generated bundle is rejected, and manual npm recovery must verify the tag and full commit SHA.
 ### Documentation
+- Documented the compatibility matrix, the difference between local replayable statistics and provider billing, cache/token examples and the fixture workflow.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
-- Documented the DSH compatibility matrix, the difference between local replayable statistics and provider billing, cache/token examples, and the fixture workflow.
+## v1.1.2 (2026-08-30)
+### 新功能
+- models.dev 价格目录同步（持久缓存、可选 6 小时自动同步、模型映射与手工覆盖）。
+- cc-switch 兼容的四桶成本快照（倍率只作用于总额）。
+- 账本 v3 成本快照、未计价计数、导出成本列与成本设置面板。
+- 可搜索的当前模型选择器与自动官方模型查找。
+- 环形图的 Token / 成本明细；按日期索引的查询与 revision 作用域缓存。
+### 修复
+- 不再把推理 Token 收两次费；已定价历史在目录更新后保持稳定。
+- 已保存映射不再显示空模型字段；会话引导或读取失败不丢首批实时事件；拒绝超大请求体与非法时间戳。
 
-## [1.1.2] - 2026-08-30
+### Features
+- models.dev catalog sync with a persisted last-good cache, optional 6-hour auto sync, mappings and manual overrides.
+- cc-switch-compatible four-bucket cost snapshots, with multipliers applied to the total only.
+- Ledger v3 cost snapshots, unpriced counters, cost columns in exports and the cost-settings panel.
+- Searchable current-model selectors and automatic official-model lookup.
+- Token/cost details in the donut legends, date-indexed queries and revision-scoped caches.
+### Fixes
+- Reasoning tokens are no longer charged twice, and priced history stays stable across catalog updates.
+- Saved mappings no longer reopen with an empty model field, first live events survive bootstrap or read failures, and oversized bodies and invalid timestamps are rejected.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
-### Added
+## v1.1.1 (2026-08-29)
+### 修复
+- 为兼容注册表，以新的修订号重发 v1.1 包。
 
-- Added models.dev price catalog synchronization with a persisted last-good cache, optional 6-hour automatic sync, model-only official-vendor matching, explicit model mappings, and manual overrides for authoritative special pricing.
-- Added cc-switch-compatible four-bucket cost snapshots: input, output, cache read, and cache write; cost multipliers apply only to the final total.
-- Added ledger v3 cost snapshots, zero-cost/unpriced coverage counters, cost fields in scoped query and privacy-safe records responses, cost columns in exports, and a dashboard pricing settings panel.
-- Added searchable current-model selectors for mappings and overrides, automatic official model lookup, compact price-field labels, and persisted mapping display recovery.
-- Added Token and cost details to model and workspace donut legends and hover menus, including aggregated values for the other bucket.
-- Added date-indexed usage and turn queries, revision-scoped snapshot and records caching, debounced official model search, and complete write-chain draining during disposal.
+### Fixes
+- The v1.1 package was reissued under a new patch version for registry compatibility.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
-### Fixed
+## v1.1.0 (2026-08-29)
+### 新功能
+- 结构化 Provider / requested / actual / display 身份字段（保留旧 `model`）。
+- 向后兼容的账本 v2 适配器。
+- 共享 scope 查询与隐私安全分页接口（`/query`、`/records`），单日 scope 增加小时行。
+- 三个筛选维度互相独立可组合，选项只列当前范围内实际用过的值。
+- 统一筛选贯穿聚合、热力图、趋势与导出。
+- 可选 Token 趋势图（平滑曲线、可切序列、单日用小时桶）。
+- Token 占比环形图（排名图例与悬停明细）。
+- 常驻请求日志标签页（分页表、选中明细、CSV 导出）。
+### 优化
+- records 分页改 revision 排序 + 预计算；聚合加 memo 并只渲染活动标签页。
+### 修复
+- 修复显示标签含 ` / ` 的身份碰撞；检测被截断或替换的日志；三类计数分开定义；趋势与 tooltip 的一系列渲染修复。
 
-- Preserved DSH's already-normalized fresh input semantics and avoided charging reasoning tokens twice when provider output counts already include completion/thoughts.
-- Kept positive historical cost snapshots stable across pricing catalog updates; only unpriced usage is eligible for explicit backfill.
-- Fixed saved model mappings reopening with an empty current-model field by deriving the display from the persisted model identity.
-- Prevented first live events from being lost during session bootstrap or read failures, and added generation-scoped recovery for baseline/live races.
-- Rejected oversized state bodies and malformed alias parameters, reported failed session reads accurately, ignored invalid event timestamps, and kept daily session counts correct after replacements.
+### Features
+- Structured Provider / requested / actual / display identity fields, keeping the legacy `model`.
+- A backward-compatible ledger v2 adapter.
+- Shared scoped query and privacy-safe paged APIs (`/query`, `/records`), with hourly rows for single-day scopes.
+- Workspace, provider and model filters are independent and combinable, and options list only values used in the selected range.
+- Unified filtering spans aggregates, the heatmap, trends and exports.
+- A selectable Token trend chart (smooth curves, switchable series, hourly buckets for single days).
+- Token-share donut charts with ranked legends and hover details.
+- A persistent Request Logs tab (paged table, selected-row detail, CSV export).
+### Improvements
+- Records pagination uses revision ordering and precomputed values; aggregates are memoized and only the active tab renders.
+### Fixes
+- Fixed identity collisions from display labels containing ` / `, detected truncated or replaced logs, kept the three counters separately defined, and fixed a series of trend/tooltip rendering issues.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
-## [1.1.1] - 2026-08-29
+## v1.0.9 (2026-08-26)
+### 新功能
+- 轻量 `/api/all-usage/status` 契约（实例 ID、单调 revision、扫描进度、同步健康）。
+- 同步健康可见性（跳过 / 读取 / 账本恢复 / 失败 / 快照可用性）。
+- revision 驱动的客户端刷新（只在实例或 revision 变化时取全量）。
+### 修复
+- 失败时保留上一次视图，提供重试与有界退避。
 
-### Fixed
+### Features
+- A lightweight `/api/all-usage/status` contract (instance id, monotonic revision, scan progress, sync health).
+- Sync-health visibility (skipped, read, ledger-recovered, failed, snapshot availability).
+- Revision-driven client refresh: the full snapshot is fetched only when the instance or revision changes.
+### Fixes
+- The last successful view survives failures, with a retry action and bounded backoff.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
-- Reissued the v1.1 dashboard package under a new patch version for registry compatibility.
+## v1.0.8 (2026-08-24)
+### 新功能
+- **重启免读游标** —— 用持久化日志修订号作为变更信号，未变更会话直接从账本应用。
+### 修复
+- 重启不再重读每个会话的历史。
 
-## [1.1.0] - 2026-08-28
+### Features
+- **A restart read-avoidance cursor** — the persisted log revision is the change signal, so unchanged sessions are applied straight from the ledger.
+### Fixes
+- Restarts no longer re-read every session's history.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
-### Added
+## v1.0.7 (2026-08-23)
+### 新功能
+- 增量账本游标（未变会话从账本播种，变化会话只折叠新尾部）。
+- 全零用量守卫；`tokenSemantics` 语义声明。
+### 修复
+- 降低长历史的启动扫描成本；防止实时重试重复计数。
 
-- Added structured Provider, requested-model, actual-model, and display-model identity fields while preserving the legacy `model` field.
-- Added a backward-compatible ledger v2 adapter; v1 rows are read once, canonicalized, and upgraded before revision skipping resumes.
-- Added shared scoped usage and privacy-safe paginated records APIs: `/api/all-usage/query` and `/api/all-usage/records`; query responses now add hourly trend rows for single-day scopes while preserving the existing daily rows.
-- Kept workspace, provider, and model filters independent so users can combine all three dimensions in one scope.
-- Limited workspace, provider, and model filter options to values used in the selected date range and clear selections that become unavailable after a range change.
-- Added unified Workspace, Provider, model, date, and timezone filtering for dashboard aggregates, the fixed 53-week heatmap, trend data, and exports.
-- Added a responsive Token trend chart with smooth monotone cubic curves, staged draw animation, selectable input, cache-read, cache-write, output, reasoning, and total series; single-day scopes use hourly buckets while cross-day scopes use daily buckets.
-- Added Token-share donut charts with ranked legends to the model and workspace detail panels, including high-contrast remainder segments, animated arc reveals, and cursor-following hover details.
-- Added a persistent Request Logs tab with a compact paginated table, selected-row Token detail, opaque row IDs, materialization-source labels, and scoped detail CSV export.
-- Optimized Host records pagination with revision-scoped ordering and precomputed identity/date values; optimized Client derived aggregates with memoization and active-tab rendering.
+### Features
+- An incremental ledger cursor: unchanged sessions seed from the ledger and changed ones fold only the new tail.
+- An all-zero usage guard and a machine-readable `tokenSemantics` declaration.
+### Fixes
+- Startup scan cost on long histories is reduced, and live retries no longer double-count.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
-### Fixed
+## v1.0.6 (2026-08-23)
+### 新功能
+- 持久化逐会话用量账本（在 `session/flush` 边界写入）；日志删除后用量仍在；缺失时自动重建。
+### 修复
+- 防陈旧基线覆盖新账本；重复键规范化与退出期写入守卫；非法存储单元名；Cordis 定时器上下文不再致命。
 
-- Prevented model identity collisions caused by parsing display labels containing ` / `.
-- Detects truncated or replaced session logs instead of overlaying a newer full rebuild with a stale ledger row.
-- Keeps turn counts, call counts, and distinct session counts separately defined in scoped results.
-- Keeps complete trend paths visible while per-series reveal animation restarts during live refreshes, preventing the final chart segment from disappearing.
-- Reserves the trend chart height during query loading and replaces floating loading text/legend controls with a centered spinner.
-- Keeps hover intersection markers static so they do not jump from the SVG origin into position on every hover.
-- Reuses one anchored trend tooltip with short position and opacity transitions, avoiding abrupt remounts while switching dates.
-- Isolates dashboard render failures behind the sidebar entry so a bad range response cannot remove the usage entry itself.
+### Features
+- A durable per-session usage ledger written at the `session/flush` boundary; flushed usage survives log deletion and is rebuilt automatically when logs are missing.
+### Fixes
+- Stale baselines no longer overwrite newer ledger records; duplicate keys are normalized and writes are guarded during disposal; invalid storage unit names are fixed; inactive Cordis timer contexts are no longer fatal.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
-## [1.0.9] - 2026-08-26
+## v1.0.5 (2026-08-21)
+### 新功能
+- 自定义起止日期范围；热力图仍固定最近 53 周；有界范围给出独立会话计数。
+### 修复
+- 基线重试带退避；退出或刷新竞争后停止在飞扫描与陈旧轮询。
 
-### Added
+### Features
+- Custom start/end ranges, a heatmap that stays a fixed latest-53-week view, and distinct session counts for bounded ranges.
+### Fixes
+- Baseline retries back off, and in-flight scans and stale polling stop after disposal or refresh races.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
-- Added a lightweight, guarded `/api/all-usage/status` contract with a per-Host instance ID, monotonic stats revision, scan progress, and non-sensitive sync-health counters.
-- Added sync-health visibility for revision-skipped sessions, actual log reads, ledger-only recoveries, failures, persistence snapshot availability, and last completed baseline time.
-- Added revision-driven Client refresh: after the initial scan, the dashboard polls only lightweight status and fetches the full historical snapshot only when the Host instance or stats revision changes.
+## v1.0.4 (2026-08-18)
+### 修复
+- 加固 loopback / 同源 / 方法 / 令牌检查；允许省略 `Origin` 的同源余额 GET；英文模式统一 UTC。
 
-### Fixed
-
-- Preserved the last successful usage view after status or full-snapshot failures, exposed a retry action, and added bounded retry backoff instead of silently discarding refresh errors.
-
-## [1.0.8] - 2026-08-23
-
-### Added
-
-- Added a restart read-avoidance cursor: on startup the plugin uses the persisted log revision (via `sessionPersistence.listSnapshots()`, a header-line + stat read) as a per-session change signal. Sessions whose log is unchanged since the last ledger write are applied straight from the durable ledger without reading their full event log; only changed or new sessions are read (incrementally).
-- Stored the log revision in each durable ledger record (`lastRevision`); existing rows without it are re-read once and backfilled, so behavior is backward compatible.
-
-### Fixed
-
-- Eliminated the per-session full-event read at restart for unchanged persisted sessions, so DSH restarts no longer re-read every session's history from scratch.
-
-## [1.0.7] - 2026-08-23
-
-### Added
-
-- Added an incremental ledger cursor: baseline rescans reuse the durable ledger as a per-session cursor, so unchanged sessions seed from the ledger instead of re-folding every historical event, and changed sessions fold only the new tail.
-- Added an all-zero usage guard: zero-token usage replays no longer overwrite already-recorded turn/step usage, while pure cache-read requests (billable cache hits with no input/output) are still counted.
-- Added a structured, machine-readable token semantics declaration (`tokenSemantics.semantics`) to the `/api/all-usage` snapshot: input is fresh (excludes cache), cache and reasoning are separate buckets.
-
-### Fixed
-
-- Reduced startup scan cost on long usage history: sessions whose events are unchanged since the last ledger write are no longer re-folded or rewritten.
-- Prevented a live retry of an already-recorded step from double-counting after a fresh-instance seed.
-
-## [1.0.6] - 2026-08-23
-
-### Added
-
-- Added a durable per-session usage ledger written at the awaited `session/flush` boundary.
-- Preserved successfully flushed turns and token usage after conversation logs are deleted.
-- Added automatic rebuilds from ledger records after session disposal or reconciliation detects missing logs.
-
-### Fixed
-
-- Prevented stale baseline snapshots from overwriting newer flushed ledger records.
-- Normalized duplicate ledger keys during hydration and guarded ledger writes during plugin disposal.
-- Prevented inactive Cordis timer contexts from escalating into fatal DSH load failures.
-- Replaced invalid hyphenated storage unit names with valid underscore names.
-
-## [1.0.5] - 2026-08-20
-
-### Added
-
-- Added custom start/end date ranges across all available historical daily data.
-- Kept the heatmap as a fixed latest-53-week view while allowing older range aggregation and CSV export.
-- Added distinct session counts for bounded ranges.
-
-### Fixed
-
-- Added baseline retry with backoff after transient session registry failures.
-- Stopped in-flight scans and stale polling responses after plugin disposal or refresh races.
-
-## [1.0.4] - 2026-08-19
-
-### Fixed
-
-- Hardened loopback, same-origin, method, and process-token checks for dashboard API routes.
-- Allowed same-origin browser balance GET requests that omit `Origin` while retaining token protection.
-- Standardized English date buckets, range filters, streaks, heatmap dates, and export timestamps on UTC.
-
-[1.1.5]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.5
-[1.1.4]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.4
-[1.1.3]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.3
-[1.1.2]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.2
-[1.1.0]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.1.0
-[1.0.9]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.9
-[1.0.8]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.8
-[1.0.7]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.7
-[1.0.6]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.6
-[1.0.5]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.5
-[1.0.4]: https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.0.4
+### Fixes
+- Hardened loopback, same-origin, method and token checks; allowed same-origin balance GETs without `Origin`; and standardised English mode on UTC.
+> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
