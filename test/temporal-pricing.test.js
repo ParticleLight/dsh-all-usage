@@ -484,6 +484,37 @@ test('ledger v1 snapshots are re-priced on recovery and persisted with the band'
   assert.ok(stored.pricingPolicyHash)
 })
 
+test('a stale session-level context stamp is not billed as the request window', async () => {
+  // DSH can emit request/context once per session: the stamp below is 8.5 hours
+  // older than the call it priced, which put an off-peak request in the peak
+  // window. The reconciliation pass must distrust it and use the call's own time.
+  const identity = { identityKey: 'deepseek / deepseek-v4-flash', provider: 'deepseek', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }
+  const staleCost = calculateCost({ input: 1000000, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, resolvePricing(identity, { catalogEntries: [V4_FLASH] }), MONDAY_PEAK, 'request-context')
+  assert.equal(staleCost.pricingBand, 'peak')
+  const record = {
+    version: 3, sessionId: 's-stale', workspaceId: 'ws-s', lastSeq: 2, lastRevision: 'r1', updatedAt: 1000,
+    turns: [{ key: 's-stale:turn:1', seq: 1, time: MONDAY_OFF, workspaceId: 'ws-s', turn: 1, identity }],
+    usage: [{ key: 's-stale:step:1:1', seq: 2, time: MONDAY_OFF, workspaceId: 'ws-s', identity, modelId: 'deepseek-v4-flash', turn: 1, step: 1, values: { input: 1000000, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: staleCost }],
+    contextTimes: [{ key: 'context:__latest__', time: MONDAY_PEAK }],
+    lastIdentity: identity,
+  }
+  const app = await createApp({
+    withStorage: true,
+    ledgerSeed: { 's-stale': record },
+    workspaces: [{ id: 'ws-s', path: 'C:\\s', title: 'S' }],
+    sessions: [{ header: { id: 's-stale', cwd: 'C:\\s' } }],
+    readSession: async () => { throw new Error('read failed') },
+  })
+  await waitForScan(app)
+  const snap = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  await postPricing(app, snap.requestToken, { pricing: { catalogEntries: [V4_FLASH] }, backfill: true })
+  await waitForScan(app, (body) => body.totals.cost.pricedCalls === 1)
+  const stored = app.storageUnit.records.sessions['s-stale'].usage[0].cost
+  assert.equal(stored.pricingBand, 'off-peak')
+  assert.equal(stored.pricingTimeSource, 'usage-event')
+  assert.equal(stored.pricingAt, MONDAY_OFF)
+})
+
 test('catalog refreshes keep priced history auditable; repriceTemporal re-estimates', async () => {
   const app = await createApp({
     withStorage: true,
