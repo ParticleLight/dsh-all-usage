@@ -3623,13 +3623,6 @@ window.__ModuleLoader__.load({
         return { providerOptions, modelOptions, rangeWorkspaceOptions, rangeWorkspaceIds: new Set(rangeWorkspaceOptions.map((workspace) => workspace.id)) }
       }, [rangeOnlyAgg.perModel, rangeOnlyAgg.perWs, workspaces, language])
       const { providerOptions, modelOptions, rangeWorkspaceOptions, rangeWorkspaceIds } = filterOptions
-      // The three filter menus are memoised, so their option lists have to keep a
-      // stable identity: rebuilding them per render was the reason opening a menu
-      // cost ~157ms even with only a couple of dozen entries.
-      const workspaceFilterOptions = React.useMemo(() => [{ value: '', label: language === 'en' ? 'All workspaces' : '全部工作区' }].concat(rangeWorkspaceOptions.map((w) => ({ value: w.id, label: wsTitle(w.id) }))), [rangeWorkspaceOptions, wsTitle, language])
-      const providerFilterOptions = React.useMemo(() => [{ value: '', label: language === 'en' ? 'All providers' : '全部供应商' }].concat(providerOptions.map((value) => ({ value, label: value }))), [providerOptions, language])
-      // Icons resolve at list build time instead of inside the render.
-      const modelFilterOptions = React.useMemo(() => [{ value: '', label: language === 'en' ? 'All models' : '全部模型' }].concat(modelOptions.map((option) => ({ value: option.value, label: option.label, iconKey: (() => { const icon = resolveModelIcon({ actualModel: option.value, requestedModel: option.value }); return icon === null ? null : icon.key })() }))), [modelOptions, language])
       const workspaceLookup = React.useMemo(() => {
         const byId = new Map()
         const indexes = new Map()
@@ -3638,6 +3631,7 @@ window.__ModuleLoader__.load({
       }, [workspaces])
       const wsById = workspaceLookup.byId
       const wsIndex = workspaceLookup.indexes
+
       const wsTitle = React.useCallback((id) => {
         const alias = aliases[id]
         const meta = wsById.get(id)
@@ -3645,6 +3639,14 @@ window.__ModuleLoader__.load({
         const base = typeof alias === 'string' && alias !== '' ? alias : (meta && meta.title ? meta.title : (language === 'en' ? 'Unknown workspace' : '未知工作区'))
         return meta !== undefined && meta.deleted === true ? base + (language === 'en' ? ' (deleted)' : '（已删除）') : base
       }, [aliases, wsById, language])
+
+      // The three filter menus are memoised, so their option lists have to keep a
+      // stable identity: rebuilding them per render was the reason opening a menu
+      // cost ~157ms even with only a couple of dozen entries.
+      const workspaceFilterOptions = React.useMemo(() => [{ value: '', label: language === 'en' ? 'All workspaces' : '全部工作区' }].concat(rangeWorkspaceOptions.map((w) => ({ value: w.id, label: wsTitle(w.id) }))), [rangeWorkspaceOptions, wsTitle, language])
+      const providerFilterOptions = React.useMemo(() => [{ value: '', label: language === 'en' ? 'All providers' : '全部供应商' }].concat(providerOptions.map((value) => ({ value, label: value }))), [providerOptions, language])
+      // Icons resolve at list build time instead of inside the render.
+      const modelFilterOptions = React.useMemo(() => [{ value: '', label: language === 'en' ? 'All models' : '全部模型' }].concat(modelOptions.map((option) => ({ value: option.value, label: option.label, iconKey: (() => { const icon = resolveModelIcon({ actualModel: option.value, requestedModel: option.value }); return icon === null ? null : icon.key })() }))), [modelOptions, language])
       const fullHistoryDayMap = React.useMemo(() => {
         const result = new Map()
         for (const day of activeDayRows) result.set(day.date, day)
