@@ -10,8 +10,8 @@ assert.notEqual(start, -1, 'client date helpers must exist')
 assert.notEqual(end, -1, 'client range helper boundary must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel }', context)
-const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel } = context.__rangeHelpers
+vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft }', context)
+const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft } = context.__rangeHelpers
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
   return {
@@ -485,4 +485,46 @@ test('carries cost through zero-filled trend rows', () => {
   assert.equal(rows[0].cost.total, '3')
   assert.equal(rows[1].cost.total, '0')
   assert.equal(rows[1].cost.pricedCalls, 0)
+})
+
+// Values from the VM realm carry that realm's prototypes, so compare plain copies.
+const plain = (value) => JSON.parse(JSON.stringify(value))
+
+test('shifts peak windows into the reader zone and back', () => {
+  // DeepSeek's published peak table is 09:00-12:00 and 14:00-18:00 Beijing time on
+  // Monday to Friday; the plan stores that as two UTC windows.
+  const plan = {
+    policies: [{
+      policyId: 'deepseek-peak',
+      timezone: 'UTC',
+      effectiveFrom: 0,
+      effectiveUntil: null,
+      defaultPlan: null,
+      holidays: [],
+      holidaysSource: '',
+      rules: [{ id: 'peak', weekdays: [1, 2, 3, 4, 5], windows: [{ startMinute: 60, endMinute: 240 }, { startMinute: 360, endMinute: 600 }], rates: { input: '1.32', output: '3.96', cacheRead: '0.044', cacheWrite: '0' } }],
+    }],
+  }
+  const shift = pricingTemporalShift('zh')
+  assert.equal(shift, 480)
+  assert.equal(pricingTemporalShift('en'), 0)
+  const draft = plain(pricingTemporalDraftOfPlan(plan, shift))
+  assert.deepEqual(draft.rules[0].windows, [{ start: '09:00', end: '12:00' }, { start: '14:00', end: '18:00' }])
+  assert.deepEqual(draft.rules[0].weekdays, [1, 2, 3, 4, 5])
+  // Saving without edits must store exactly the plan it came from.
+  assert.deepEqual(plain(pricingTemporalPlanFromDraft(draft, shift)), plain(plan))
+  const utcDraft = plain(pricingTemporalDraftOfPlan(plan, pricingTemporalShift('en')))
+  assert.deepEqual(utcDraft.rules[0].windows, [{ start: '01:00', end: '04:00' }, { start: '06:00', end: '10:00' }])
+  assert.deepEqual(plain(pricingTemporalPlanFromDraft(utcDraft, 0)), plain(plan))
+})
+
+test('a peak window that crosses midnight moves to the next weekday', () => {
+  const rules = [{ id: 'offpeak', weekdays: [1], windows: [{ startMinute: 990, endMinute: 1440 }], rates: {} }]
+  // 16:30-24:00 UTC on Monday is 00:30-08:00 on Tuesday in Beijing time.
+  assert.deepEqual(plain(pricingTemporalShiftRules(rules, 480)), [{ id: 'offpeak', weekdays: [2], windows: [{ startMinute: 30, endMinute: 480 }], rates: {} }])
+  assert.deepEqual(plain(pricingTemporalShiftRules(pricingTemporalShiftRules(rules, 480), -480)), plain(rules))
+  // A window that starts late and runs past midnight lands on the next day too.
+  const late = [{ id: 'x', weekdays: [0], windows: [{ startMinute: 1380, endMinute: 1440 }], rates: {} }]
+  assert.deepEqual(plain(pricingTemporalShiftRules(late, 480)), [{ id: 'x', weekdays: [1], windows: [{ startMinute: 420, endMinute: 480 }], rates: {} }])
+  assert.deepEqual(plain(pricingTemporalShiftRules(pricingTemporalShiftRules(late, 480), -480)), plain(late))
 })

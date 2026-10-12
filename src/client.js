@@ -898,6 +898,45 @@ window.__ModuleLoader__.load({
       if (!Number.isFinite(value) || value < 0 || value > 1440) return ''
       return String(Math.floor(value / 60)).padStart(2, '0') + ':' + String(value % 60).padStart(2, '0')
     }
+    // The host stores peak plans in UTC and rejects any other zone, while the plan
+    // itself is Chinese (DeepSeek charges peak 09:00-12:00 and 14:00-18:00 Beijing
+    // time). The editor therefore shifts the windows into the reader's zone and
+    // shifts them back on save; a window that crosses midnight lands on the next
+    // weekday, so the translation splits it and re-buckets by weekday.
+    const PRICING_TEMPORAL_ZONE_SHIFT = 480
+    function pricingTemporalShift(language) {
+      return language === 'en' ? 0 : PRICING_TEMPORAL_ZONE_SHIFT
+    }
+    function pricingTemporalShiftRules(rules, shiftMinutes) {
+      const shift = Number.isFinite(shiftMinutes) ? Math.trunc(shiftMinutes) : 0
+      if (shift === 0 || !Array.isArray(rules)) return rules
+      const result = []
+      for (const rule of rules) {
+        const buckets = new Map()
+        for (const window of rule.windows) {
+          const end = window.endMinute + shift
+          let cursor = window.startMinute + shift
+          while (cursor < end) {
+            const dayOffset = Math.floor(cursor / 1440)
+            const start = cursor - dayOffset * 1440
+            const stop = Math.min(end - dayOffset * 1440, 1440)
+            const weekdays = rule.weekdays.map((day) => (((day + dayOffset) % 7) + 7) % 7).sort((left, right) => left - right)
+            const key = weekdays.join(',')
+            let bucket = buckets.get(key)
+            if (bucket === undefined) { bucket = { weekdays, windows: [] }; buckets.set(key, bucket) }
+            bucket.windows.push({ startMinute: start, endMinute: stop })
+            cursor += stop - start
+          }
+        }
+        let index = 0
+        for (const bucket of buckets.values()) {
+          bucket.windows.sort((left, right) => left.startMinute - right.startMinute)
+          result.push({ id: buckets.size === 1 ? rule.id : rule.id + '-' + (index + 1), weekdays: bucket.weekdays, windows: bucket.windows, rates: rule.rates })
+          index += 1
+        }
+      }
+      return result
+    }
     function pricingDateTextToUtc(value) {
       const text = String(value === undefined || value === null ? '' : value).trim()
       if (text === '') return 0
@@ -959,11 +998,11 @@ window.__ModuleLoader__.load({
       list.sort()
       return list.length === 0 ? '' : list.join('\n')
     }
-    function pricingTemporalDraftOfPlan(plan) {
+    function pricingTemporalDraftOfPlan(plan, shiftMinutes = 0) {
       const policies = plan !== null && plan !== undefined && Array.isArray(plan.policies) ? plan.policies : []
       const policy = policies.length > 0 && policies[0] !== null && typeof policies[0] === 'object' ? policies[0] : null
       if (policy === null) return null
-      const rules = Array.isArray(policy.rules) ? policy.rules : []
+      const rules = pricingTemporalShiftRules(Array.isArray(policy.rules) ? policy.rules : [], shiftMinutes)
       if (rules.length === 0) return null
       return {
         policyId: typeof policy.policyId === 'string' && policy.policyId !== '' ? policy.policyId : 'custom-peak',
@@ -984,8 +1023,11 @@ window.__ModuleLoader__.load({
         })),
       }
     }
-    function pricingTemporalDraftDefault(rates) {
+    // The seed window is the same instant in every language (UTC 01:00-04:00, i.e.
+    // DeepSeek's 09:00-12:00 peak in Beijing time), only written in the editor's zone.
+    function pricingTemporalDraftDefault(rates, shiftMinutes = 0) {
       const base = rates !== null && typeof rates === 'object' ? rates : {}
+      const shift = Number.isFinite(shiftMinutes) ? Math.trunc(shiftMinutes) : 0
       return {
         policyId: 'custom-peak',
         effectiveFromText: '',
@@ -995,7 +1037,7 @@ window.__ModuleLoader__.load({
         rules: [{
           id: 'peak-1',
           weekdays: [1, 2, 3, 4, 5],
-          windows: [{ start: '01:00', end: '04:00' }],
+          windows: [{ start: pricingMinuteToTimeText(60 + shift), end: pricingMinuteToTimeText(240 + shift) }],
           rates: {
             input: pricingRateText(base.input),
             output: pricingRateText(base.output),
@@ -1064,9 +1106,9 @@ window.__ModuleLoader__.load({
     function pricingTemporalDraftRates(draft, index, rates) {
       return pricingTemporalDraftRulePatch(draft, index, { rates })
     }
-    function pricingTemporalPlanFromDraft(draft) {
+    function pricingTemporalPlanFromDraft(draft, shiftMinutes = 0) {
       const effectiveFrom = pricingDateTextToUtc(draft !== null && typeof draft === 'object' ? draft.effectiveFromText : '')
-      const rules = (draft !== null && typeof draft === 'object' && Array.isArray(draft.rules) ? draft.rules : []).map((rule, index) => ({
+      const rules = pricingTemporalShiftRules((draft !== null && typeof draft === 'object' && Array.isArray(draft.rules) ? draft.rules : []).map((rule, index) => ({
         id: typeof rule.id === 'string' && rule.id !== '' ? rule.id : 'peak-' + (index + 1),
         weekdays: (Array.isArray(rule.weekdays) ? rule.weekdays : []).slice().sort((left, right) => left - right),
         windows: (Array.isArray(rule.windows) ? rule.windows : []).map((window) => ({ startMinute: pricingTimeTextToMinute(window.start), endMinute: pricingTimeTextToMinute(window.end) })),
@@ -1076,7 +1118,7 @@ window.__ModuleLoader__.load({
           cacheRead: pricingRateText(rule.rates !== null && rule.rates !== undefined ? rule.rates.cacheRead : ''),
           cacheWrite: pricingRateText(rule.rates !== null && rule.rates !== undefined ? rule.rates.cacheWrite : ''),
         },
-      }))
+      })), -shiftMinutes)
       return {
         policies: [{
           policyId: String(draft !== null && typeof draft === 'object' && draft.policyId !== undefined ? draft.policyId : '').trim(),
@@ -3134,6 +3176,9 @@ window.__ModuleLoader__.load({
       const [pricingPickedTargets, setPricingPickedTargets] = React.useState({})
       const [pricingOpenEditor, setPricingOpenEditor] = React.useState(null)
       const [pricingTemporalDrafts, setPricingTemporalDrafts] = React.useState({})
+      // The temporal editor writes its windows in the reader's zone, so a language
+      // switch has to drop the open drafts and rebuild them from the plan.
+      React.useEffect(() => { setPricingTemporalDrafts({}) }, [language])
       const [pricingHolidayYear, setPricingHolidayYear] = React.useState(() => new Date().getFullYear())
       const [pricingHolidayLoading, setPricingHolidayLoading] = React.useState(false)
       const [pricingHolidayStatus, setPricingHolidayStatus] = React.useState('')
@@ -3935,12 +3980,12 @@ window.__ModuleLoader__.load({
         // time or rate stays local until it parses, and the save validation
         // still sees the loose draft and refuses to drop the edit silently.
         if (pricingTemporalDraftValidationError(next) === '') {
-          setPricingDraft((prev) => prev === null ? prev : pricingDraftUpsertOverride(prev, view, { temporalPricing: pricingTemporalPlanFromDraft(next), temporalPricingInvalid: undefined }))
+          setPricingDraft((prev) => prev === null ? prev : pricingDraftUpsertOverride(prev, view, { temporalPricing: pricingTemporalPlanFromDraft(next, pricingTemporalShift(language)), temporalPricingInvalid: undefined }))
         }
         setPricingError('')
       }
       const startTemporalRules = (view) => {
-        const draft = pricingTemporalDraftOfPlan(view.temporalPlan) || pricingTemporalDraftDefault(view.rates)
+        const draft = pricingTemporalDraftOfPlan(view.temporalPlan, pricingTemporalShift(language)) || pricingTemporalDraftDefault(view.rates, pricingTemporalShift(language))
         applyTemporalDraft(view, draft)
       }
       const resetTemporalPlan = (view) => {
@@ -3974,7 +4019,7 @@ window.__ModuleLoader__.load({
           }
           const draft = pricingTemporalDrafts[view.key] !== undefined
             ? pricingTemporalDrafts[view.key]
-            : (pricingTemporalDraftOfPlan(view.temporalPlan) || pricingTemporalDraftDefault(view.rates))
+            : (pricingTemporalDraftOfPlan(view.temporalPlan, pricingTemporalShift(language)) || pricingTemporalDraftDefault(view.rates, pricingTemporalShift(language)))
           const merged = pricingHolidayTextMerge(draft.holidaysText, data.dates)
           const fetchedAt = Number(data.fetchedAt)
           const origin = typeof data.paperUrl === 'string' && data.paperUrl !== '' ? data.paperUrl : String(data.sourceUrl || '')
@@ -4000,7 +4045,7 @@ window.__ModuleLoader__.load({
         if (section === 'temporal') {
           setPricingTemporalDrafts((prev) => {
             if (prev[view.key] !== undefined) return prev
-            const draft = pricingTemporalDraftOfPlan(view.temporalPlan)
+            const draft = pricingTemporalDraftOfPlan(view.temporalPlan, pricingTemporalShift(language))
             return draft === null ? prev : Object.assign({}, prev, { [view.key]: draft })
           })
         }
@@ -4341,11 +4386,11 @@ window.__ModuleLoader__.load({
         )
       }
       const renderTemporalEditor = (view) => {
-        const draft = pricingTemporalDrafts[view.key] !== undefined ? pricingTemporalDrafts[view.key] : pricingTemporalDraftOfPlan(view.temporalPlan)
+        const draft = pricingTemporalDrafts[view.key] !== undefined ? pricingTemporalDrafts[view.key] : pricingTemporalDraftOfPlan(view.temporalPlan, pricingTemporalShift(language))
         const issue = draft === null || draft === undefined ? '' : pricingTemporalDraftValidationError(draft)
         const header = React.createElement('div', { className: 'uh-pricing-tier-editor-head' },
           React.createElement('div', { className: 'uh-pricing-tier-editor-title' },
-            React.createElement('strong', {}, tr('分时段计费（UTC）', 'Time-of-day pricing (UTC)')),
+            React.createElement('strong', {}, tr('分时段计费（北京时间 UTC+8）', 'Time-of-day pricing (UTC)')),
             React.createElement('span', {}, view.temporalExplicit === true ? tr('自定义规则', 'Custom rules') : view.temporalRulesUnavailable === true ? tr('峰谷计划 ', 'Peak plan ') + view.temporalPolicyId : view.temporalBuiltin === true ? tr('当前使用内置 DeepSeek 峰谷表', 'Using the built-in DeepSeek peak table') : tr('未启用时段规则', 'No time-of-day rules')),
           ),
           React.createElement('div', { className: 'uh-actions' },

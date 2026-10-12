@@ -422,7 +422,11 @@ test('renders cost totals, pricing status, and the merged price table controls',
   assert.equal((source.match(/name: 'plus'/g) || []).length, 3)
   assert.ok(source.includes('输入官方模型 ID 检索'))
   assert.ok(source.includes('上下文费率档位'))
-  assert.ok(source.includes('分时段计费（UTC）'))
+  // The peak windows are stored in UTC but edited in the reader's zone (Beijing
+  // time for Chinese), so the label names the zone and both directions shift.
+  assert.ok(source.includes('分时段计费（北京时间 UTC+8）'))
+  assert.ok(source.includes('pricingTemporalShiftRules'))
+  assert.ok((source.match(/pricingTemporalShift\(language\)/g) || []).length >= 5, 'every temporal draft path must shift into the reader zone')
   assert.ok(source.includes('输入 / 1M'))
   assert.ok(source.includes('缓存读 / 1M'))
   assert.ok(source.includes('缓存写 / 1M'))
