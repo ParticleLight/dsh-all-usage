@@ -5,6 +5,7 @@
 - **模型图标扩到 43 个品牌** —— 从 lobe-icons 固定 revision 取 32 个新商标；9 个 `currentColor` 烘成固定中性色。
 - **网关 / 云的包裹 id 还原真实品牌** —— 覆盖 `openai-gpt-5.5`、`databricks-claude-*`、`eu.anthropic.claude-*` 等写法，原始 id 仍优先。
 ### 优化
+- **旧存储文件不再长期占盘** —— 账本改用「一条记录一个文件」后，原来的整单位文件（本机 32 个分片 + 一个遗留大文件，合计约 178 MB）已被逐条播种成新结构；账本现在会在**确认新结构已有记录**后删除这些旧文件并留下一次性的标记，失败则下次启动重试。
 - **账本体积按路由去重** —— 同一条路由（供应商 / 模型）以前在每条用量里都重复一份身份对象；改为每条记录共享一张身份表、用量只存索引。实测本机 1059 条记录 **91.3 → 74.7 MB（−18.2%）**。
 - **渲染不再被无关状态带着重画** —— 趋势 / 热力图（376 格）入参改为稳定引用，图标几何提到模块级；真机实测整页 DOM **6266 → 1719 节点**，bundle 235.2 KB。
 - **账本改写方案已就位（待真机重启验证）** —— 会话记录改一条一文件存储，替代「每次更新重写整个分片」：实测单次更新 **273 ms → 中位 4.6 ms**（最大的会话 74 ms），整个分片目录 **13.27 → 11.88 MB**。
@@ -25,6 +26,7 @@
 - **43 model brands** — 32 new marks from the pinned lobe-icons revision; nine had currentColor baked to a fixed neutral.
 - **Gateway and cloud ids resolve to the real brand** — covers openai-gpt-5.5, databricks-claude-*, eu.anthropic.claude-*; the raw id still wins.
 ### Improvements
+- **The old storage files no longer stay on disk** — after the ledger moved to one document per record, each legacy whole-unit file (32 shards plus a leftover monolith, about 178 MB here) has been seeded into the new tree; the ledger now removes those files once the tree provably holds records, leaves a one-time marker, and retries on the next start if anything fails.
 - **Ledger rows share one identity table per session** — a route (provider / model) used to repeat its identity object on every usage item; rows now carry an index into one shared list. Measured: 1059 records drop from **91.3 to 74.7 MB (−18.2%)**.
 - **Unrelated state no longer redraws the charts** — the trend chart and the 376-cell heatmap take stable props now and icon geometry lives at module level; measured: the page DOM drops from **6266 to 1719 nodes**, bundle 235.2 KB.
 - **The ledger write-amplification fix is ready (needs a host restart to verify)** — one file per session record replaces rewriting a whole shard on every update: measured **273 ms to a 4.6 ms median** (74 ms for the largest session), and the shard directory drops from **13.27 to 11.88 MB**.
