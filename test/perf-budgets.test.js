@@ -10,6 +10,7 @@ const client = await readFile(new URL('../src/client.js', import.meta.url), 'utf
 const aggregation = await readFile(new URL('../lib/aggregation.js', import.meta.url), 'utf8')
 const ledger = await readFile(new URL('../lib/ledger.js', import.meta.url), 'utf8')
 const pricingRuntime = await readFile(new URL('../lib/pricing-runtime.js', import.meta.url), 'utf8')
+const plugin = await readFile(new URL('../lib/plugin.js', import.meta.url), 'utf8')
 const usageCore = await readFile(new URL('../lib/usage-core.js', import.meta.url), 'utf8')
 
 const budgets = [
@@ -21,6 +22,7 @@ const budgets = [
   ['context archive per session', usageCore, 'const MAX_CONTEXT_TIMES = 512'],
   ['pricing rows per snapshot', pricingRuntime, 'const MAX_PRICING_ROWS = 500'],
   ['ledger shards', ledger, 'const LEDGER_SHARD_COUNT = 32'],
+  ['superseded scope results are dropped', plugin, 'if (recordsChanged) state.queryCache.clear()'],
 ]
 
 test('documents every performance budget and keeps it in place', () => {
