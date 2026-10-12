@@ -3804,8 +3804,6 @@ window.__ModuleLoader__.load({
           ? trustedHourlyRows(queryResult.hourly, stats, queryScope.start)
           : []
         const hourlyRows = hourlySource.length > 0 ? buildTrendHourlyRows(hourlySource, useUtc) : []
-          ? trustedHourlyRows(queryResult.hourly, stats, queryScope.start)
-          : []
         return hourlyRows.length > 0 ? hourlyRows : buildTrendRows(queryUsable && queryResult && Array.isArray(queryResult.daily) ? queryResult.daily : activeDayRows, bounds, useUtc)
       }, [queryScope, queryUsable, queryResult, activeDayRows, stats, range, useUtc, activeCustomRangeKey])
       const trendAnimationKey = queryUsable && queryResult ? queryKey + ':' + (queryVersion(queryResult) || 'query') : queryKey

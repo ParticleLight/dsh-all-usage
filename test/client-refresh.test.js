@@ -209,6 +209,11 @@ test('selects hourly query data for single-day trend scopes', () => {
   // The hourly series is filtered through the day row before it is drawn, so the
   // assertion covers both the gate and the builder it feeds.
   assert.match(source, /trustedHourlyRows\(queryResult\.hourly, stats, queryScope\.start\)/)
+  // One declaration and one call: a half-finished edit once left a second, unguarded
+  // ternary behind that read .hourly off a null query result and took the panel into
+  // its error boundary. Syntax checks and the pattern above both stayed green.
+  assert.equal((source.match(/trustedHourlyRows\(/g) || []).length, 2, 'the gate is declared once and called once')
+  assert.equal((source.match(/const hourlyRows =/g) || []).length, 1, 'the trend block builds its rows once')
   assert.match(source, /buildTrendHourlyRows\(hourlySource, useUtc\)/)
   assert.match(source, /Hourly Token usage trend/)
   assert.match(source, /pointLabel\(row, true\)/)
