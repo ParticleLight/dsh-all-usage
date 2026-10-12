@@ -1268,6 +1268,29 @@ window.__ModuleLoader__.load({
       return parts[0] + '年' + Number(parts[1]) + '月' + Number(parts[2]) + '日 ' + week
     }
     /** The accessible name of one heatmap cell: the same fact the tooltip shows. */
+    /** Total processed tokens of an aggregate row: the same sum the summary shows. */
+    function processedTokensOf(metric) {
+      if (metric === null || metric === undefined) return null
+      const total = Number(metric.input || 0) + Number(metric.output || 0) + Number(metric.cacheRead || 0) + Number(metric.cacheWrite || 0) + Number(metric.reasoning || 0)
+      return Number.isFinite(total) ? total : null
+    }
+    /**
+     * Whether a per-scope query aggregate may be shown for this range. With no filter
+     * applied the host answers the same question twice - once from the per-scope cube,
+     * once from the day rows the snapshot carries - and both have to agree. A filtered
+     * scope has no day-row equivalent here, so it is left alone.
+     */
+    function scopeAgreesWithDayRows(query, fallback, filtersActive) {
+      if (filtersActive === true) return true
+      if (query === null || query === undefined || fallback === null || fallback === undefined) return true
+      const scoped = processedTokensOf(query.totals)
+      const dayRows = processedTokensOf(fallback.totals)
+      if (scoped === null || dayRows === null) return true
+      // Live rows land in both within a poll, so a healthy pair differs by a fraction
+      // of a percent; the slack only has to cover that and the counters' rounding.
+      if (dayRows === 0) return scoped === 0
+      return Math.abs(scoped - dayRows) <= Math.max(dayRows * 0.05, 200000)
+    }
     function heatCellLabel(date, count, language) {
       const text = humanDate(date, language)
       const uses = Number.isFinite(count) && count > 0 ? count : 0
@@ -3664,11 +3687,17 @@ window.__ModuleLoader__.load({
       const queryHasResult = queryResult !== null && queryResultKey === queryKey
       const queryReady = queryHasResult && liveQueryVersion !== null && queryVersion(queryResult) === liveQueryVersion
       // Keep the last successful query visible while a newer revision loads.
-      const queryUsable = queryHasResult && (queryReady || queryError === '')
-      const displayedDays = queryUsable && Array.isArray(queryResult.daily) ? queryResult.daily : activeDayRows
-      const displayedHeatmap = queryUsable && Array.isArray(queryResult.heatmap) ? queryResult.heatmap : activeDayRows
+      const queryReadable = queryHasResult && (queryReady || queryError === '')
       const activeCustomRangeKey = activeCustomRange === null ? '' : activeCustomRange.start + ':' + activeCustomRange.end
       const rangeOnlyAgg = React.useMemo(() => rangeAgg(stats, range, useUtc, activeCustomRange), [stats, range, useUtc, activeCustomRangeKey])
+      // A per-scope query aggregate is only shown while it agrees with the day rows the
+      // snapshot already carries. The host's per-scope cube once drifted several times
+      // away from them for the current day, and the page has to draw numbers the ledger
+      // can back: when they disagree it falls back to the day rows instead.
+      const scopeAgreesHere = React.useMemo(() => scopeAgreesWithDayRows(queryReady ? queryResult : null, rangeOnlyAgg, wsFilter !== null || providerFilter !== null || modelFilter !== null), [queryReady, queryResult, rangeOnlyAgg, wsFilter, providerFilter, modelFilter])
+      const queryUsable = queryReadable && scopeAgreesHere
+      const displayedDays = queryUsable && Array.isArray(queryResult.daily) ? queryResult.daily : activeDayRows
+      const displayedHeatmap = queryUsable && Array.isArray(queryResult.heatmap) ? queryResult.heatmap : activeDayRows
       const agg = React.useMemo(() => queryUsable
         ? { totals: queryResult.totals, perWs: queryResult.perWorkspace || [], perModel: queryResult.perModel || [] }
         : rangeOnlyAgg, [queryUsable, queryResult, rangeOnlyAgg])
