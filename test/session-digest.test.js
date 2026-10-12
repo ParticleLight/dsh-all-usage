@@ -175,6 +175,21 @@ test('a scoped cube that drifted is rebuilt from the digest', () => {
   assert.equal(scopedInput(), day.tokens.input, 'the scoped cube is back in step with the day cube')
 })
 
+test('a replayed row is stored without being counted twice', () => {
+  const host = makeHost()
+  const sample = row('s1:step:1:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1)
+  host.aggregation.foldUsageRow(sample)
+  const totals = { input: host.state.totals.input, pricedCalls: host.state.totals.cost.pricedCalls, turns: host.state.totals.turns }
+  assert.equal(totals.input, 10)
+  // Hand the row back to the ledger the way eviction does, then replay the event: a
+  // restart used to replay a whole day like this and count every row again.
+  host.aggregation.evictColdRows({ rows: 0 })
+  assert.equal(host.state.usageByStep.size, 0)
+  host.aggregation.upsertUsageSample(host.state.usageByStep, sample)
+  assert.equal(host.state.usageByStep.size, 1, 'the row is back for the log')
+  assert.deepEqual({ input: host.state.totals.input, pricedCalls: host.state.totals.cost.pricedCalls, turns: host.state.totals.turns }, totals, 'and nothing was counted twice')
+})
+
 test('retargeting a session moves its digest with its rows', () => {
   const host = makeHost()
   host.aggregation.upsertUsageSample(host.state.usageByStep, row('s1:step:1:1', 's1', 'ws-old', '2026-08-17', 'deepseek-v4-flash', '0.1', 1))
