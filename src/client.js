@@ -271,6 +271,20 @@ window.__ModuleLoader__.load({
       if (slash >= 0) text = text.slice(slash + 1)
       return text.split(':')[0].replace(/@/g, '-').trim()
     }
+    // Gateway routes report a vendor-namespaced id (`deepseek-ai/DeepSeek-V4-Flash`,
+    // `Qwen/Qwen3-32B`). The provider already has its own filter and the icon shows
+    // the brand, so the model filter prints the model alone - while the option's
+    // *value* stays the raw id, because that is what the host query matches and two
+    // routes must never collapse into one filter.
+    function modelDisplayLabel(value) {
+      const text = String(value === undefined || value === null ? '' : value).trim()
+      const slash = text.lastIndexOf('/')
+      if (slash <= 0 || slash >= text.length - 1) return text
+      const prefix = text.slice(0, slash)
+      if (!/^[a-z0-9][a-z0-9._-]*$/i.test(prefix)) return text
+      const rest = text.slice(slash + 1).trim()
+      return rest === '' ? text : rest
+    }
     function iconForProvider(provider) {
       const normalized = typeof provider === 'string' ? provider.trim().toLowerCase() : ''
       if (normalized === '') return null
@@ -3389,7 +3403,10 @@ window.__ModuleLoader__.load({
           const legacyProvider = separator > 0 ? display.slice(0, separator) : ''
           return separator > 0 && providerOptions.includes(legacyProvider) ? display.slice(separator + 3) : display
         }
-        const modelOptions = Array.from(new Set(rangeModelOptions.map(modelFilterValue))).sort((left, right) => left.localeCompare(right))
+        const modelOptions = Array.from(new Set(rangeModelOptions.map(modelFilterValue)))
+          .filter((value) => value !== '')
+          .sort((left, right) => left.localeCompare(right))
+          .map((value) => ({ value, label: modelDisplayLabel(value) }))
         const rangeWorkspaceTotals = new Map((Array.isArray(rangeOnlyAgg.perWs) ? rangeOnlyAgg.perWs : []).map((row) => [row.workspaceId, row]))
         const workspaceHasUsage = (row) => row !== undefined && (Number(row.turns) > 0 || Number(row.calls) > 0 || Number(row.input) > 0 || Number(row.output) > 0 || Number(row.cacheRead) > 0 || Number(row.cacheWrite) > 0 || Number(row.reasoning) > 0)
         const rangeWorkspaceOptions = workspaces.filter((workspace) => workspaceHasUsage(rangeWorkspaceTotals.get(workspace.id)))
@@ -3440,7 +3457,7 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         if (wsFilter !== null && !rangeWorkspaceIds.has(wsFilter)) setWsFilter(null)
         if (providerFilter !== null && !providerOptions.includes(providerFilter)) setProviderFilter(null)
-        if (modelFilter !== null && !modelOptions.includes(modelFilter)) setModelFilter(null)
+        if (modelFilter !== null && !modelOptions.some((option) => option.value === modelFilter)) setModelFilter(null)
       }, [wsFilter, providerFilter, modelFilter, rangeWorkspaceIds, providerOptions, modelOptions])
 
       if (stats === null) {
@@ -3945,7 +3962,7 @@ window.__ModuleLoader__.load({
           line([tr('时区', 'Timezone'), useUtc ? 'UTC' : tr('本地', 'Local')]),
           line([tr('工作区筛选', 'Workspace Filter'), wsFilter || tr('全部', 'All')]),
           line([tr('供应商筛选', 'Provider Filter'), providerFilter || tr('全部', 'All')]),
-          line([tr('模型筛选', 'Model Filter'), modelFilter || tr('全部', 'All')]),
+          line([tr('模型筛选', 'Model Filter'), modelFilter === null ? tr('全部', 'All') : modelDisplayLabel(modelFilter)]),
           line([tr('统计 revision', 'Stats Revision'), stats.revision || '']),
           line([tr('模型查看模式', 'Model View Mode'), modelViewLabel]),
           '',
@@ -4622,7 +4639,7 @@ window.__ModuleLoader__.load({
             className: 'uh-filter-model',
             icon: 'cache',
             value: modelFilter || '',
-            options: [{ value: '', label: tr('全部模型', 'All models') }].concat(modelOptions.map((value) => { const icon = resolveModelIcon({ actualModel: value, requestedModel: value }); return { value, label: value, iconKey: icon === null ? null : icon.key } })),
+            options: [{ value: '', label: tr('全部模型', 'All models') }].concat(modelOptions.map((option) => { const icon = resolveModelIcon({ actualModel: option.value, requestedModel: option.value }); return { value: option.value, label: option.label, iconKey: icon === null ? null : icon.key } })),
             onChange: (value) => chooseModel(value),
           }),
           (wsFilter !== null || providerFilter !== null || modelFilter !== null) ? React.createElement('button', { type: 'button', className: 'uh-filter-clear', onClick: clearFilters }, tr('清除筛选', 'Clear filters')) : null,

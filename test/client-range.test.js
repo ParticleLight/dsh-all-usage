@@ -10,8 +10,8 @@ assert.notEqual(start, -1, 'client date helpers must exist')
 assert.notEqual(end, -1, 'client range helper boundary must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf }', context)
-const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf } = context.__rangeHelpers
+vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel }', context)
+const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel } = context.__rangeHelpers
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
   return {
@@ -174,6 +174,23 @@ test('builds a shorter heatmap calendar for a shorter span', () => {
   assert.match(source, /gridTemplateColumns: 'repeat\(\' \+ weeks \+ ', minmax\(10px, 1fr\)\)'/)
   assert.match(source, /HEATMAP_SPANS = \{ '30d': 5, '90d': 13, '12m': 53 \}/)
   assert.match(source, /className: 'uh-range uh-heatmap-spans'/)
+})
+
+test('shows the model without its vendor namespace but keeps the raw value', () => {
+  assert.equal(modelDisplayLabel('deepseek-ai/DeepSeek-V4-Flash'), 'DeepSeek-V4-Flash')
+  assert.equal(modelDisplayLabel('deepseek/deepseek-v4.1-flash'), 'deepseek-v4.1-flash')
+  assert.equal(modelDisplayLabel('Qwen/Qwen3-32B'), 'Qwen3-32B')
+  assert.equal(modelDisplayLabel('meta-llama/Llama-3.3-70B-Instruct'), 'Llama-3.3-70B-Instruct')
+  // Bare ids stay exactly as the host reports them.
+  assert.equal(modelDisplayLabel('deepseek-v4-flash'), 'deepseek-v4-flash')
+  assert.equal(modelDisplayLabel('deepseek-v4-flash-free'), 'deepseek-v4-flash-free')
+  assert.equal(modelDisplayLabel('o3-mini'), 'o3-mini')
+  // Anything that is not a plain namespace slug is left alone.
+  assert.equal(modelDisplayLabel('a b/c'), 'a b/c')
+  assert.equal(modelDisplayLabel('vendor/'), 'vendor/')
+  assert.equal(modelDisplayLabel('/leading'), '/leading')
+  assert.equal(modelDisplayLabel(''), '')
+  assert.equal(modelDisplayLabel(null), '')
 })
 
 test('summarizes the version chip without inventing a verdict', () => {
