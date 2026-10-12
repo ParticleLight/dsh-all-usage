@@ -70,7 +70,6 @@
 - **Routes of one model share a single filter entry** — grouped by model name (case ignored, vendor namespace dropped), matched the same way on the host.
 - **The model filter no longer shows the vendor namespace** — the model name only, while the value stays the raw id (0 of 25 entries still contain a slash).
 - **The provider and model menus no longer run past the window** — capped at min(60vh, 420px) with their own scroll.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.18 (2026-10-07)
 ### 新功能
@@ -82,7 +81,6 @@
 - **A seven-day range** — seven calendar days including today; scopes the summary, trend, model tables, request log, filters and CSV.
 - **A switchable heatmap span** — 30 days / 90 days / 12 months draw 5 / 13 / 53 columns, so shorter spans get larger cells (34px vs 18px measured); twelve months stays the default and the span is independent of the time range.
 - **A version indicator in the header** — the running version, plus “Up to date” in small text or a highlighted “Latest vX.Y.Z”; clicking it opens the GitHub repository.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.17 (2026-10-01)
 ### 修复
@@ -98,7 +96,6 @@
 - **A rotated capability heals itself** — the status poll carries a derived `capabilityId`; a write rejected with 403 re-reads the capability and retries once, and the message names a stale capability.
 ### Features
 - `/api/all-usage/status` reports `pluginVersion` and `capabilityId`, so a host/page version mismatch can say “restart DSH” instead of staying invisible.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.16 (2026-09-29)
 ### 新功能
@@ -106,7 +103,6 @@
 
 ### Features
 - **DSH 0.2.0-rc.2 is supported** — the real Cordis smoke passes; the declared range gains `>=0.2.0-rc.2 <0.2.1-0`, the verified list grows to six runtimes and CI to twelve jobs.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.15 (2026-09-28)
 ### 新功能
@@ -120,7 +116,6 @@
 ### Improvements
 - **Cost Settings is one editable price table** — a mapping column, four price boxes and context-band / UTC peak editors; rows that exist only in the configuration stay visible, editable and removable.
 - **Peak plans are editable per model** — the payload carries deduplicated `temporalSchedules` plus per-row provenance; changing a plan reconciles that model's history, while price edits never rewrite history.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.14 (2026-09-27)
 ### 修复
@@ -128,7 +123,6 @@
 
 ### Fixes
 - **`deepseek-flash` joins the built-in peak table** — peak-hour cost had been under-reported by roughly 57%; records stored with the exempt verdict are migrated once. Reported by @baileyh8 (#2).
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.13 (2026-09-25)
 ### 新功能
@@ -140,7 +134,6 @@
 - **DSH 0.1.7-rc.2 is supported** — the real smoke passes, and the line joins the declared range and the CI matrix (the desktop client runs on it).
 ### Improvements
 - The smoke is aware of 0.1.7's abstract settings seam; `0.1.5-rc.2` joins CI; and `check-package` now fails when a runtime is called verified without appearing in the CI matrix and the profile table.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.12 (2026-09-25)
 ### 修复
@@ -152,7 +145,6 @@
 - **The runtime smoke no longer counts routes by hand** — it asserted that dispose removed exactly nine, so v1.1.11's new route failed every smoke job and its own publication; the expectation is now derived from the route list.
 ### Notes
 - v1.1.11 reached GitHub Releases but **never npm** (the publish workflow verifies the tag and a published tag is never moved); its fix reaches npm users with this release.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.11 (2026-09-25)
 ### 修复
@@ -168,7 +160,6 @@
 ### Improvements
 - The reserved height now comes from the host declaration, then the overlay rectangle, then the user agent, with localStorage still overriding everything.
 - A new `GET /api/all-usage/client-env` route (surfaced as `clientEnv`) is what exposed that bug from outside the desktop app.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.10 (2026-09-14)
 ### 修复
@@ -186,7 +177,6 @@
 - The workspace registry is polled every 30 seconds as well, and status exposes the probe counters (cumulative, never reset by a baseline).
 ### Notes
 - The first start after upgrading still reads every log once (older records carry no `lastRevision`); re-read avoidance starts from the next start.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.9 (2026-09-12)
 ### 修复
@@ -200,7 +190,6 @@
 ### Improvements
 - Usage from removed workspaces is summed into a single **Deleted** row, and `retargetSession()` re-keys live aggregates in place so usage that had not reached the ledger survives too.
 - Ledger rows keep their original workspace id and cwd (re-keying happens on the in-memory copy only), the strict registration boundary is unchanged and legacy `unregistered:` rows are never resurrected.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.8 (2026-09-11)
 ### 修复
@@ -212,7 +201,6 @@
 - The README still quoted the pre-0.1.5 compatibility declaration and a matrix that stopped at 0.1.1, contradicting `package.json` after v1.1.6/v1.1.7; both languages now agree.
 ### Improvements
 - CI smoke covers `0.1.5-rc.1` and selects the cordis/loader/timer line per runtime version.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.7 (2026-09-11)
 ### 修复
@@ -220,7 +208,6 @@
 
 ### Fixes
 - The compatibility range now carries an explicit prerelease branch per tuple: node-semver only admits a prerelease when a comparator shares its `major.minor.patch` and carries a prerelease tag, so the previous broad range silently rejected the target runtime `0.1.5-rc.1`.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.6 (2026-09-11)
 ### 修复
@@ -234,7 +221,6 @@
 - The smoke asserts the persisted ledger keeps a flushed session's sequence and usage, and covers 0.1.5-rc.1.
 ### Improvements
 - The declared range widens to `>=0.1.1-rc.1 <0.1.6` and `0.1.5-rc.1` joins the verified list.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.5 (2026-09-07)
 ### 新功能
@@ -246,7 +232,6 @@
 - **An automatic workspace-registry probe** — it follows `domain/changed` and syncs incrementally (only new workspaces are scanned, removals are subtracted by inverse folding, unchanged ones are reused); the manual refresh control, route and button are gone.
 ### Fixes
 - Usage is strictly limited to registered workspaces; ledger rows whose `sourceCwd` no longer maps are skipped during recovery, and the source path is persisted so ownership can be validated.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.4 (2026-09-03)
 ### 新功能
@@ -290,7 +275,6 @@
 - Hardened after an independent audit: CDO/CDC-adjacent `@import`, `@import` inside a namespaced `<svg:style>`, CSS-escaped `url(` and external `image-set()` targets are all rejected, and style attributes are checked on both the raw and entity-decoded document.
 - CSS checks run only on style attributes and `<style>` bodies (comments and text cannot false-positive), and the adversarial fixtures assert the rejection reason.
 - The model filter dropdown shows brand icons too, and the three dashboard screenshots were refreshed.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.3 (2026-09-01)
 ### 新功能
@@ -340,7 +324,6 @@
 - **Release and build guards** — a missing or untracked generated bundle is rejected, and manual npm recovery must verify the tag and full commit SHA.
 ### Documentation
 - Documented the compatibility matrix, the difference between local replayable statistics and provider billing, cache/token examples and the fixture workflow.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.2 (2026-08-30)
 ### 新功能
@@ -362,7 +345,6 @@
 ### Fixes
 - Reasoning tokens are no longer charged twice, and priced history stays stable across catalog updates.
 - Saved mappings no longer reopen with an empty model field, first live events survive bootstrap or read failures, and oversized bodies and invalid timestamps are rejected.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.1 (2026-08-29)
 ### 修复
@@ -370,7 +352,6 @@
 
 ### Fixes
 - The v1.1 package was reissued under a new patch version for registry compatibility.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.0 (2026-08-29)
 ### 新功能
@@ -400,7 +381,6 @@
 - Records pagination uses revision ordering and precomputed values; aggregates are memoized and only the active tab renders.
 ### Fixes
 - Fixed identity collisions from display labels containing ` / `, detected truncated or replaced logs, kept the three counters separately defined, and fixed a series of trend/tooltip rendering issues.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.0.9 (2026-08-26)
 ### 新功能
@@ -416,7 +396,6 @@
 - Revision-driven client refresh: the full snapshot is fetched only when the instance or revision changes.
 ### Fixes
 - The last successful view survives failures, with a retry action and bounded backoff.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.0.8 (2026-08-24)
 ### 新功能
@@ -428,7 +407,6 @@
 - **A restart read-avoidance cursor** — the persisted log revision is the change signal, so unchanged sessions are applied straight from the ledger.
 ### Fixes
 - Restarts no longer re-read every session's history.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.0.7 (2026-08-23)
 ### 新功能
@@ -442,7 +420,6 @@
 - An all-zero usage guard and a machine-readable `tokenSemantics` declaration.
 ### Fixes
 - Startup scan cost on long histories is reduced, and live retries no longer double-count.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.0.6 (2026-08-23)
 ### 新功能
@@ -454,7 +431,6 @@
 - A durable per-session usage ledger written at the `session/flush` boundary; flushed usage survives log deletion and is rebuilt automatically when logs are missing.
 ### Fixes
 - Stale baselines no longer overwrite newer ledger records; duplicate keys are normalized and writes are guarded during disposal; invalid storage unit names are fixed; inactive Cordis timer contexts are no longer fatal.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.0.5 (2026-08-21)
 ### 新功能
@@ -466,7 +442,6 @@
 - Custom start/end ranges, a heatmap that stays a fixed latest-53-week view, and distinct session counts for bounded ranges.
 ### Fixes
 - Baseline retries back off, and in-flight scans and stale polling stop after disposal or refresh races.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.0.4 (2026-08-18)
 ### 修复
@@ -474,4 +449,3 @@
 
 ### Fixes
 - Hardened loopback, same-origin, method and token checks; allowed same-origin balance GETs without `Origin`; and standardised English mode on UTC.
-> 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
