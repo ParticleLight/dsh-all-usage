@@ -284,13 +284,19 @@ test('summarises a long trend range into calendar buckets with a bounded point c
   assert.equal(daily[0].bucket.days, 1)
   assert.equal(daily[0].bucket.granularity, 'day')
 
+  // Just past the daily budget the stride is three days, so the chart does not
+  // fall off a cliff from one point per day to one per week or month.
+  const halfYear = buildTrendRows(trendSeries('2026-04-01', '2026-10-11'), { start: '2026-04-01', end: '2026-10-11' }, true)
+  assert.equal(halfYear.length, 65)
+  assert.equal(halfYear[0].bucket.start, '2026-04-01')
+  assert.equal(halfYear[0].bucket.end, '2026-04-03')
+  assert.equal(halfYear[1].bucket.end, '2026-04-06')
+  assert.equal(halfYear.at(-1).bucket.days, 2)
+  assert.equal(halfYear.reduce((sum, row) => sum + row.turns, 0), 194)
+
   const oneYear = buildTrendRows(trendSeries('2025-10-12', '2026-10-11'), { start: '2025-10-12', end: '2026-10-11' }, true)
-  // 365 days is 53 points: weeks end on Sunday and only the first bucket may be short.
-  assert.equal(oneYear.length, 53)
-  assert.equal(oneYear[0].bucket.granularity, 'week')
-  assert.equal(oneYear[0].bucket.start, '2025-10-12')
-  assert.equal(oneYear[0].bucket.end, '2025-10-12')
-  assert.equal(oneYear[1].bucket.end, '2025-10-19')
+  assert.equal(oneYear.length, 122)
+  assert.equal(oneYear[0].bucket.days, 3)
   assert.equal(oneYear.at(-1).bucket.end, '2026-10-11')
   assert.equal(oneYear.reduce((sum, row) => sum + row.turns, 0), 365)
 
@@ -298,7 +304,9 @@ test('summarises a long trend range into calendar buckets with a bounded point c
   assert.equal(threeYears.length, 157)
   assert.ok(threeYears.length <= 180)
   assert.equal(threeYears.reduce((sum, row) => sum + row.turns, 0), 1095)
+  // A week bucket is still Monday-aligned and exactly seven days of data.
   const fullWeek = threeYears.find((row) => row.bucket.days === 7)
+  assert.equal(fullWeek.bucket.granularity, 'week')
   assert.equal(fullWeek.tokens.input, 70)
   assert.equal(fullWeek.total, 7 * (10 + 20 + 30 + 40 + 50))
 
@@ -306,14 +314,19 @@ test('summarises a long trend range into calendar buckets with a bounded point c
   assert.ok(fiveYears.length <= 180)
   assert.equal(fiveYears.reduce((sum, row) => sum + row.turns, 0), 1825)
 
-  const twentyYears = buildTrendRows(trendSeries('2006-10-13', '2026-10-11'), { start: '2006-10-13', end: '2026-10-11' }, true)
-  assert.ok(twentyYears.length <= 180)
-  assert.equal(twentyYears[0].bucket.start, '2006-10-13')
-  assert.equal(twentyYears.at(-1).bucket.end, '2026-10-11')
-  assert.equal(twentyYears.reduce((sum, row) => sum + row.turns, 0), 7304)
+  // The last rung is the only one without a point budget: a very long history
+  // costs about what a year of three-day points costs.
+  const fortyYears = buildTrendRows(trendSeries('1986-10-13', '2026-10-11'), { start: '1986-10-13', end: '2026-10-11' }, true)
+  assert.ok(fortyYears.length <= 200)
+  assert.equal(fortyYears[0].bucket.start, '1986-10-13')
+  assert.equal(fortyYears.at(-1).bucket.end, '2026-10-11')
+  assert.equal(fortyYears.reduce((sum, row) => sum + row.turns, 0), 14609)
 })
 
 test('labels a summarised point with its stride and never pretends it is one day', () => {
+  const threeDays = buildTrendRows(trendSeries('2025-10-12', '2026-10-11'), { start: '2025-10-12', end: '2026-10-11' }, true)
+  assert.equal(trendStrideLabel(threeDays, 'zh'), '每 3 天汇总')
+  assert.equal(trendStrideLabel(threeDays, 'en'), 'Every 3 days')
   const rows = buildTrendRows(trendSeries('2023-10-13', '2026-10-11'), { start: '2023-10-13', end: '2026-10-11' }, true)
   assert.equal(trendStrideLabel(rows, 'zh'), '按周汇总')
   assert.equal(trendStrideLabel(rows, 'en'), 'Weekly')

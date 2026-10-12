@@ -1392,29 +1392,32 @@ window.__ModuleLoader__.load({
     // A daily series is capped at this many points; a longer span is summarised
     // so the chart can never grow with the years of history behind it.
     const TREND_MAX_POINTS = 180
-    // Calendar-aligned strides, each roughly double the previous one, so any span
-    // first visits the fine ones (1, 2, 3, 4, 8, 12, 24 weeks, then months) and
-    // takes the first that fits the point budget.
+    // Ordered by span, so the finest stride that fits the point budget wins: a
+    // span just past the daily budget gets 3 days, then 4, then a week, and the
+    // step roughly doubles except at the start, where 3 and 4 days exist solely
+    // to keep the jump off the daily view small.
     const TREND_BUCKET_STEPS = [
+      { days: 3, unit: 'static' },
+      { days: 4, unit: 'static' },
       { days: 7, unit: 'week', stride: 1 },
+      { days: 10, unit: 'static' },
       { days: 14, unit: 'week', stride: 2 },
       { days: 21, unit: 'week', stride: 3 },
-      { days: 28, unit: 'week', stride: 4 },
-      { days: 56, unit: 'week', stride: 8 },
-      { days: 84, unit: 'week', stride: 12 },
-      { days: 168, unit: 'week', stride: 24 },
-      { days: 30, unit: 'month', stride: 1 },
-      { days: 61, unit: 'month', stride: 2 },
-      { days: 91, unit: 'month', stride: 3 },
-      { days: 182, unit: 'month', stride: 6 },
-      { days: 365, unit: 'month', stride: 12 }
+      { days: 30, unit: 'static' },
+      { days: 61, unit: 'static' },
+      { days: 91, unit: 'static' },
+      { days: 182, unit: 'static' },
+      { days: 365, unit: 'static' }
     ]
     function trendBucketStepFor(days, maxPoints) {
       if (!Number.isFinite(days) || days <= maxPoints) return null
+      // The last stride is a fallback: it is the only rung without a point budget,
+      // so even 40 years of history costs roughly a year's worth of points.
+      const last = TREND_BUCKET_STEPS[TREND_BUCKET_STEPS.length - 1]
       for (let index = 0; index < TREND_BUCKET_STEPS.length - 1; index += 1) {
-        if (days <= TREND_BUCKET_STEPS[index].days * maxPoints) return TREND_BUCKET_STEPS[index]
+        if (Math.ceil(days / TREND_BUCKET_STEPS[index].days) <= maxPoints) return TREND_BUCKET_STEPS[index]
       }
-      return TREND_BUCKET_STEPS[TREND_BUCKET_STEPS.length - 1]
+      return last
     }
     function buildTrendRows(rows, bounds, utc, options) {
       if (bounds === null || typeof bounds !== 'object') return []
@@ -1443,9 +1446,9 @@ window.__ModuleLoader__.load({
       const result = []
       let bucketStart = startDate
       while (bucketStart <= endDate) {
-        const startParts = bucketStart.split('-').map(Number)
         let nextText
         if (step.unit === 'week') {
+          const startParts = bucketStart.split('-').map(Number)
           // Weeks stay tied to Monday so a bucket cannot drift by the day the
           // range happens to start on.
           const weekday = utc ? new Date(Date.UTC(startParts[0], startParts[1] - 1, startParts[2])).getUTCDay() : new Date(startParts[0], startParts[1] - 1, startParts[2]).getDay()
@@ -1454,10 +1457,9 @@ window.__ModuleLoader__.load({
           // first one can be short when the range itself starts mid-week.
           nextText = shiftCalendarDateText(bucketStart, step.stride * 7 - (weekday === 1 ? 0 : (weekday + 6) % 7), utc)
         } else {
-          const cursor = utc ? new Date(Date.UTC(startParts[0], startParts[1] - 1, startParts[2])) : new Date(startParts[0], startParts[1] - 1, startParts[2])
-          if (utc) cursor.setUTCMonth(cursor.getUTCMonth() + step.stride)
-          else cursor.setMonth(cursor.getMonth() + step.stride)
-          nextText = fmtDate(cursor, utc)
+          // Fixed-length strides anchor on the range start, so every bucket is
+          // exactly N days and only the last one can be short.
+          nextText = shiftCalendarDateText(bucketStart, step.days, utc)
         }
         // A day-by-day walk needs no month-length arithmetic and keeps both
         // calendar modes on the same code path.
@@ -1487,7 +1489,7 @@ window.__ModuleLoader__.load({
           days += 1
           day = shiftCalendarDateText(day, 1, utc)
         }
-        result.push({ date: bucketStart, turns, calls, sessions, tokens, cost, total, bucket: { start: bucketStart, end: last, days, granularity: step.unit, stride: step.stride } })
+        result.push({ date: bucketStart, turns, calls, sessions, tokens, cost, total, bucket: { start: bucketStart, end: last, days, granularity: step.unit === 'week' ? 'week' : 'static' } })
         if (last >= endDate) break
         bucketStart = shiftCalendarDateText(last, 1, utc)
       }
@@ -1540,7 +1542,7 @@ window.__ModuleLoader__.load({
       }
       return best
     }
-    /** Names the stride on screen: "Weekly", "Every 2 weeks", "Quarterly", "Yearly". */
+    /** Names the stride on screen: "Every 3 days", "Weekly", "Quarterly", "Yearly". */
     function trendStrideLabel(rows, language) {
       const first = rows && rows[0] && rows[0].bucket ? rows[0].bucket : null
       if (first === null) return ''
@@ -1550,10 +1552,9 @@ window.__ModuleLoader__.load({
         if (weeks <= 1) return language === 'en' ? 'Weekly' : '按周汇总'
         return language === 'en' ? 'Every ' + weeks + ' weeks' : '每 ' + weeks + ' 周汇总'
       }
-      const months = Number.isFinite(first.stride) ? first.stride : 1
-      if (months <= 1) return language === 'en' ? 'Monthly' : '按月汇总'
-      if (months === 3) return language === 'en' ? 'Quarterly' : '按季度汇总'
-      if (months === 6) return language === 'en' ? 'Half-yearly' : '按半年汇总'
+      if (days <= 1) return language === 'en' ? 'Daily' : '按天汇总'
+      if (days < 28) return (language === 'en' ? 'Every ' : '每 ') + days + (language === 'en' ? ' days' : ' 天汇总')
+      if (days < 300) return language === 'en' ? 'Monthly' : '按月汇总'
       return language === 'en' ? 'Yearly' : '按年汇总'
     }
     /** A range point is always named as a span; a single-day point keeps its day label. */
