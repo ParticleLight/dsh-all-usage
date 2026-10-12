@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { apply } from '../lib/index.js'
 
 function makeResponse() {
@@ -606,6 +607,36 @@ test('stops folding events after disposal', async () => {
   assert.equal(after.json().totals.turns, 2)
 })
 
+
+test('serves brand marks on demand and stays loopback-only', async () => {
+  const app = await createApp()
+  const withKey = (key) => {
+    const request = makeRequest('GET', { host: '127.0.0.1:3080' })
+    request.url = '/api/all-usage/icon' + (key === null ? '' : '?key=' + encodeURIComponent(key))
+    return request
+  }
+  const ok = await call(app, '/api/all-usage/icon', withKey('deepseek'))
+  assert.equal(ok.status, 200)
+  assert.match(String(ok.headers['content-type']), /^image\/svg\+xml/)
+  assert.match(String(ok.headers['cache-control']), /max-age=31536000/)
+  assert.match(String(ok.headers.etag), /^"[A-Za-z0-9_-]+"$/)
+  assert.match(ok.body, /^<svg[\s>]/)
+  assert.match(ok.body.trim(), /<\/svg>$/)
+  // The body is the bundled file, byte for byte (whitespace compacted).
+  const file = await readFile(new URL('../assets/model-icons/deepseek-color.svg', import.meta.url), 'utf8')
+  assert.equal(ok.body, file.replace(/>\s+</g, '><').trim())
+  // Resolution is by manifest key only, so a crafted value can never name a path.
+  assert.equal((await call(app, '/api/all-usage/icon', withKey('../../package.json'))).status, 404)
+  assert.equal((await call(app, '/api/all-usage/icon', withKey('nope'))).status, 404)
+  assert.equal((await call(app, '/api/all-usage/icon', withKey(null))).status, 404)
+  const remote = makeRequest('GET', { host: '192.0.2.10:3080' })
+  remote.url = '/api/all-usage/icon?key=deepseek'
+  assert.equal((await call(app, '/api/all-usage/icon', remote)).status, 403)
+  const crossSite = makeRequest('GET', { host: '127.0.0.1:3080', 'sec-fetch-site': 'cross-site' })
+  crossSite.url = '/api/all-usage/icon?key=deepseek'
+  assert.equal((await call(app, '/api/all-usage/icon', crossSite)).status, 403)
+  assert.equal((await call(app, '/api/all-usage/icon', makeRequest('POST', { host: '127.0.0.1:3080' }, '{}'))).status, 405)
+})
 
 test('reads the registry version through the host, caches it and stays loopback-only', async () => {
   const originalFetch = globalThis.fetch

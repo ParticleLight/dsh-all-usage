@@ -59,6 +59,7 @@
     "lib/pricing.js",
     "lib/usage-core.js",
     "lib/version-check.js",
+    "lib/icons.js",
     "CHANGELOG.md",
     "cordis.patch.yml",
     "screenshots.json",

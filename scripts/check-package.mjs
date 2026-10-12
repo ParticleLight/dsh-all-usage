@@ -62,6 +62,7 @@ const expected = [
   'lib/client.js',
   'lib/http.js',
   'lib/index.js',
+  'lib/icons.js',
   'lib/ledger.js',
   'lib/plugin.js',
   'lib/pricing-runtime.js',

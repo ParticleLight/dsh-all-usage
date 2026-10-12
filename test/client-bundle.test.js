@@ -5,8 +5,8 @@ import vm from 'node:vm'
 
 const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
 const bundle = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
-// The bundle also embeds the brand icons that the source only references
-// through a placeholder; exclude that payload from the minification ratio.
+// Brand artwork is served by the host on demand, so the bundle only carries the
+// resolution metadata (one URL per brand). Nothing to exclude from the ratio.
 const embeddedIconBytes = (bundle.match(/data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+/g) || []).reduce((sum, value) => sum + Buffer.byteLength(value), 0)
 
 test('ships a minified client bundle with the expected module contract', () => {
@@ -25,6 +25,7 @@ test('ships a minified client bundle with the expected module contract', () => {
   })
   assert.deepEqual(Array.from(client.inject), ['timer', 'slots'])
   assert.equal(typeof client.apply, 'function')
-  assert.ok(embeddedIconBytes > 0, 'the bundle must embed the brand icons')
+  assert.equal(embeddedIconBytes, 0, 'artwork must be served by the host, not embedded')
+  assert.ok((bundle.match(/\/api\/all-usage\/icon\?key=/g) || []).length > 0, 'the bundle must reference the host icon route')
   assert.ok(Buffer.byteLength(bundle) - embeddedIconBytes < Buffer.byteLength(source) * 0.7)
 })

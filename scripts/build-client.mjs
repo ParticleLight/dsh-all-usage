@@ -12,8 +12,12 @@ const ICON_PLACEHOLDER = '/* __MODEL_ICON_DATA__ */ null'
 // host has to be able to say so.
 const VERSION_PLACEHOLDER = '/* __PLUGIN_VERSION__ */ "0.0.0"'
 
-/** Build the icon table that the client bundle embeds (data: URIs only). */
-async function buildIconTable() {
+/**
+ * Build the icon table the client bundle carries: resolution metadata and a host
+ * URL per brand, never the artwork itself. Every file is still validated here, so
+ * an unsafe or oversized SVG fails the build rather than reaching the runtime.
+ */
+async function buildIconTable(pluginVersion) {
   let manifestRaw
   try {
     manifestRaw = await readFile(new URL('manifest.json', iconsUrl), 'utf8')
@@ -53,7 +57,8 @@ async function buildIconTable() {
       providers: Array.isArray(entry.providers) ? entry.providers.map((value) => String(value).toLowerCase()) : [],
       prefixes: Array.isArray(entry.prefixes) ? entry.prefixes.map((value) => String(value).toLowerCase()) : [],
       exact: Array.isArray(entry.exact) ? entry.exact.map((value) => String(value).toLowerCase()) : [],
-      href: 'data:image/svg+xml;base64,' + Buffer.from(compact, 'utf8').toString('base64'),
+      // Served by the host on demand (lib/icons.js); ?v busts the browser cache on upgrade.
+      href: '/api/all-usage/icon?key=' + encodeURIComponent(entry.key) + '&v=' + encodeURIComponent(pluginVersion),
     })
   }
   if (present.size > 0) throw new Error('model icon files are not referenced by the manifest: ' + Array.from(present).sort().join(', '))
@@ -65,7 +70,7 @@ if (!rawSource.includes(ICON_PLACEHOLDER)) throw new Error('src/client.js must c
 if (!rawSource.includes(VERSION_PLACEHOLDER)) throw new Error('src/client.js must contain the plugin version placeholder: ' + VERSION_PLACEHOLDER)
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 if (typeof packageJson.version !== 'string' || packageJson.version === '') throw new Error('package.json must declare a version')
-const iconTable = await buildIconTable()
+const iconTable = await buildIconTable(packageJson.version)
 const source = rawSource.replace(ICON_PLACEHOLDER, JSON.stringify(iconTable)).replace(VERSION_PLACEHOLDER, JSON.stringify(packageJson.version))
 const result = await minify(source, {
   ecma: 2022,
@@ -77,4 +82,4 @@ if (typeof result.code !== 'string' || result.code === '') throw new Error('Ters
 await writeFile(outputUrl, result.code + '\n', 'utf8')
 const sourceBytes = Buffer.byteLength(rawSource)
 const outputBytes = Buffer.byteLength(result.code + '\n')
-console.error('client ' + sourceBytes + ' B -> ' + outputBytes + ' B (' + Math.round(outputBytes / sourceBytes * 1000) / 10 + '%), ' + iconTable.length + ' model icons embedded')
+console.error('client ' + sourceBytes + ' B -> ' + outputBytes + ' B (' + Math.round(outputBytes / sourceBytes * 1000) / 10 + '%), ' + iconTable.length + ' model icons served on demand')

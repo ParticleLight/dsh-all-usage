@@ -368,16 +368,16 @@ test('longer model prefixes win over shorter ones', () => {
   assert.equal(iconForProvider(''), null)
 })
 
-test('the built bundle embeds every icon as an inline data URI', async () => {
+test('the built bundle points at the host icon route instead of embedding artwork', async () => {
   const bundle = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
-  const matches = bundle.match(/data:image\/svg\+xml;base64,/g) || []
-  assert.equal(matches.length, manifest.icons.length)
+  assert.doesNotMatch(bundle, /data:image\/svg\+xml;base64,/)
+  const urls = bundle.match(/\/api\/all-usage\/icon\?key=/g) || []
+  assert.equal(urls.length, manifest.icons.length)
   assert.doesNotMatch(bundle, /__MODEL_ICON_DATA__/)
   assert.doesNotMatch(bundle, /AIICOsvg/)
   assert.doesNotMatch(bundle, /MyDocument/)
   for (const icon of manifest.icons) {
-    const svg = await readFile(new URL('../assets/model-icons/' + icon.file, import.meta.url), 'utf8')
-    const encoded = Buffer.from(svg.replace(/>\s+</g, '><').trim(), 'utf8').toString('base64')
-    assert.ok(bundle.includes(encoded), icon.file + ' must be embedded in the bundle')
+    assert.ok(bundle.includes('/api/all-usage/icon?key=' + icon.key), icon.key + ' must point at the host route')
   }
+  assert.ok(bundle.includes('DeepSeek'), 'labels must survive minification')
 })
