@@ -96,18 +96,21 @@ function readSessionEvents(session) {
 
 // The ledger write is debounced and asynchronous, so poll the shards until the
 // flushed session row lands instead of racing the writer.
+// The ledger keeps one document per session under its shard directory, so a
+// record is read from <storages>/all_usage_ledger_NN/sessions/<id>.json and the
+// document envelope carries it in `record`.
 async function waitForLedgerRecord(scratch, sessionId) {
   const dir = join(scratch, 'storages')
   for (let attempt = 0; attempt < 80; attempt += 1) {
-    let files = []
-    try { files = await readdir(dir) } catch (error) { files = [] }
-    for (const file of files) {
-      if (!file.startsWith('all_usage_ledger_')) continue
+    let units = []
+    try { units = await readdir(dir) } catch (error) { units = [] }
+    for (const unit of units) {
+      if (!/^all_usage_ledger_\d{2}$/.test(unit)) continue
       try {
-        const raw = JSON.parse(await readFile(join(dir, file), 'utf8'))
-        const row = raw && raw.tables && raw.tables.sessions && raw.tables.sessions[sessionId]
-        if (row !== undefined && row !== null) return row
-      } catch (error) { /* shard still being written */ }
+        const text = await readFile(join(dir, unit, 'sessions', sessionId + '.json'), 'utf8')
+        const document = JSON.parse(text)
+        if (document !== null && typeof document === "object" && document.record !== undefined) return document.record
+      } catch (error) { /* record not written yet */ }
     }
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
@@ -263,15 +266,22 @@ async function runRuntimeSmoke(runtime) {
     assert.equal(measured.body.totals.reasoning, 2)
     assert.equal(measured.body.perModel.length, 1)
     assert.equal(measured.body.perModel[0].actualModel, 'deepseek-chat')
-    const storageFiles = await readdir(join(scratch, 'storages'))
-    assert.equal(storageFiles.includes('all_usage_ledger.json'), false)
-    assert.ok(storageFiles.some((file) => /^all_usage_ledger_\d{2}\.json$/.test(file)))
+    const storageEntries = await readdir(join(scratch, 'storages'), { withFileTypes: true })
+    assert.equal(storageEntries.some((entry) => entry.name === 'all_usage_ledger.json'), false, 'the monolith must never be recreated')
+    assert.equal(storageEntries.some((entry) => /^all_usage_ledger_\d{2}\.json$/.test(entry.name)), false, 'shards are directories now, not whole-unit files')
+    const shards = storageEntries.filter((entry) => entry.isDirectory() && /^all_usage_ledger_\d{2}$/.test(entry.name))
+    assert.ok(shards.length > 0, 'the ledger must open its shard directories')
     // A runtime that stops exposing the live event log must not persist an
     // empty record: the flushed session has to keep its sequence and usage.
     const ledgerRow = await waitForLedgerRecord(scratch, 'runtime-smoke-session')
     assert.ok(ledgerRow, 'the persisted ledger must contain the flushed session')
     assert.equal(ledgerRow.lastSeq, 3)
     assert.ok(Array.isArray(ledgerRow.usage) && ledgerRow.usage.length > 0, 'the persisted ledger must keep the flushed usage')
+    // The on-disk shape pools the route identity once per record and points each
+    // usage item at it, which is what keeps a record from repeating it per row.
+    assert.ok(Array.isArray(ledgerRow.usageIdentities) && ledgerRow.usageIdentities.length > 0, 'the row must carry a shared identity list')
+    assert.equal(typeof ledgerRow.usage[0].identityRef, 'number', 'each usage item must reference the shared identity')
+    assert.equal(ledgerRow.usage[0].identity, undefined, 'the inline identity must not be written twice')
 
     const exactBeforeDispose = webServer.exact.size
     assert.ok(exactBeforeDispose >= pluginPaths.length)
