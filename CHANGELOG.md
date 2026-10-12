@@ -5,6 +5,7 @@
 - **模型图标扩到 43 个品牌** —— 从 lobe-icons 固定 revision 取 32 个新商标；9 个 `currentColor` 烘成固定中性色。
 - **网关 / 云的包裹 id 还原真实品牌** —— 覆盖 `openai-gpt-5.5`、`databricks-claude-*`、`eu.anthropic.claude-*` 等写法，原始 id 仍优先。
 ### 优化
+- **清掉一处死代码与五组失效样式** —— 一个没有任何调用者的 host 辅助函数，以及「在用模型选择器」等 5 个再也不会出现的 class 样式规则（脚本按「CSS 之外零引用、且其前缀也无法动态拼出」判定，删前逐条核对）；bundle **235.5 → 234.6 KB**。
 - **按范围的旧查询结果不再滞留** —— 结果键里带 revision，旧条目永远读不到却仍占内存；现在数据或定价一变就清掉（每条约 30–115 KB × 最多 20 条）。
 - **热力图入场动画不再拖长尾、也不再无视「减少动态效果」** —— 376 格的错峰延迟从「每格 1.2ms、最长 444ms」改为按 25 格循环（最长 **144ms**）：实测挂载 700ms 后仍在跑的动画 **393 → 11**（页面静置后只剩 4 个，其中含「今日」光晕）；「今日」呼吸光晕在 `prefers-reduced-motion: reduce` 下不再启动（它写在行内样式里，媒体查询原本覆盖不到）。
 - **定价快照不再每次重算路由清单** —— 价格表要遍历全部用量行（本机 6.5 万条）才能列出用过的模型；该结果改为按「数据 / 定价 revision」缓存，只在两者变化时重算（模型化实测：每次 3.4 ms → 命中约 0 ms）。
@@ -32,6 +33,7 @@
 - **43 model brands** — 32 new marks from the pinned lobe-icons revision; nine had currentColor baked to a fixed neutral.
 - **Gateway and cloud ids resolve to the real brand** — covers openai-gpt-5.5, databricks-claude-*, eu.anthropic.claude-*; the raw id still wins.
 ### Improvements
+- **A dead helper and five orphaned style rules are gone** — a host helper with no caller and five class rules (the removed in-use model picker among them) that no code can render; each was checked for zero references outside the stylesheet and for a prefix that could not build it dynamically. Bundle **235.5 to 234.6 KB**.
 - **Superseded scope results no longer linger** — the cache key carries the revision, so an old entry could never be read again while still holding 30-115 KB apiece (up to 20); a data or pricing change clears them now.
 - **The heatmap entrance no longer trails and no longer ignores reduced motion** — the 376-cell stagger went from 1.2 ms per cell (a 444 ms tail) to a 25-cell wrap (144 ms); measured animations still running 700 ms after mount drop from **393 to 11** (four once the page settles, the today pulse among them), and that pulse is skipped under prefers-reduced-motion because an inline style had put it out of the media query's reach.
 - **The pricing snapshot stops rebuilding its route list every time** — listing the models in use walks every usage row (65k here); the result is cached per data/pricing revision now and only rebuilt when either changes (modelled: 3.4 ms per call to about 0 ms when cached).
