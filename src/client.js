@@ -1234,11 +1234,13 @@ window.__ModuleLoader__.load({
       if (count >= 1) return 1
       return 0
     }
-    const GH_GREEN = '#2ea043'
+    // One accent colour, four strengths: the mix keeps the ramp readable on the
+    // panel's own background in both themes, so only the hue is fixed here.
+    const HEAT_COLOR = '#0969da'
     const LEVEL_PCT = [20, 45, 70, 96]
     function cellBg(level) {
       if (level <= 0) return 'var(--dsw-alias-bg-layer-2)'
-      return 'color-mix(in srgb, ' + GH_GREEN + ' ' + LEVEL_PCT[level - 1] + '%, var(--dsw-alias-bg-layer-2))'
+      return 'color-mix(in srgb, ' + HEAT_COLOR + ' ' + LEVEL_PCT[level - 1] + '%, var(--dsw-alias-bg-layer-2))'
     }
     function wsColor(i) {
       return 'hsl(' + ((i * 137) % 360) + ', 70%, 55%)'
@@ -2916,7 +2918,7 @@ window.__ModuleLoader__.load({
 @media (max-width:640px) { .uh-tbl-scroll { max-height:300px; border-radius:10px; } }
 @media (max-width:640px) { .uh-hm-body { min-width:720px; } .uh-donut-legend-row { grid-template-columns:36px minmax(0,1fr) 48px; gap:8px; } .uh-donut-legend-copy { grid-column:2; grid-row:1; } .uh-donut-legend-metrics { grid-column:2 / -1; grid-row:2; grid-template-columns:minmax(0,1fr) minmax(0,auto); gap:8px; } .uh-donut-percent { grid-column:3; grid-row:1; } .uh-ios-summary-hero { grid-template-columns:1fr; min-height:0; gap:18px; padding:18px; } .uh-ios-summary-total { align-items:flex-start; } .uh-ios-summary-meta { grid-template-columns:repeat(2,minmax(0,1fr)); padding:16px 0 0; border-left:0; border-top:1px solid var(--dsw-alias-border-l1); } .uh-ios-summary-meta-stat { padding:0 12px; } .uh-ios-summary-meta-stat:first-child { padding-left:0; } .uh-ios-summary-meta-stat:last-child { padding-right:0; } .uh-ios-summary-value { font-size:31px; } .uh-ios-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .uh-ios-metric:last-child { grid-column:1 / -1; } .uh-ios-metric-value { font-size:24px; } .uh-donut-layout { grid-template-columns:1fr; gap:12px; } .uh-donut-visual { width:min(100%,250px); } }
 @keyframes uh-cell-in { from { opacity:0; transform:scale(.4); } to { opacity:1; transform:scale(1); } }
-@keyframes uh-glow { 0% { box-shadow:0 0 0 0 rgba(46,160,67,.5); } 70% { box-shadow:0 0 0 5px rgba(46,160,67,0); } 100% { box-shadow:0 0 0 0 rgba(46,160,67,0); } }
+@keyframes uh-glow { 0% { box-shadow:0 0 0 0 rgba(9,105,218,.5); } 70% { box-shadow:0 0 0 5px rgba(9,105,218,0); } 100% { box-shadow:0 0 0 0 rgba(9,105,218,0); } }
 @keyframes uh-card-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
 @keyframes uh-bar-grow { from { transform:scaleX(0); } to { transform:scaleX(1); } }
 @keyframes uh-panel-in { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
