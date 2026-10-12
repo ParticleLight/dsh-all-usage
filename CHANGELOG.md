@@ -5,6 +5,7 @@
 - **模型图标扩到 43 个品牌** —— 从 lobe-icons 固定 revision 取 32 个新商标；9 个 `currentColor` 烘成固定中性色。
 - **网关 / 云的包裹 id 还原真实品牌** —— 覆盖 `openai-gpt-5.5`、`databricks-claude-*`、`eu.anthropic.claude-*` 等写法，原始 id 仍优先。
 ### 优化
+- **账本记录只扫一遍就归一化** —— 原先每条用量行跑两遍校验 + 两次成本快照解析（每次解析 11 个小数域）；合并成单遍后，同一份 156.7 MB 真实账本的冷启动 **3.0 → 2.2 s**，首次（含迁移）**5.5 → 4.5 s** —— 对比审计记录的老布局 8–9 s，约 **4×**。
 - **再清掉 5 个无人调用的客户端函数** —— `metadataVersion`、两个 `statusRequires*` 薄包装（语义已由 `statusRefreshKind` 覆盖，测试改为直接断言它）、`donutArcPath`（应用只用线段版）、`modelOptionLabel`；bundle 从 235.5 KB 再降到 **234.6 KB**。（本轮多提交一条：`scripts/dead-code.mjs` —— 可重复运行的死代码体检。）
 - **清掉一处死代码与五组失效样式** —— 一个没有任何调用者的 host 辅助函数，以及「在用模型选择器」等 5 个再也不会出现的 class 样式规则（脚本按「CSS 之外零引用、且其前缀也无法动态拼出」判定，删前逐条核对）；bundle **235.5 → 234.6 KB**。
 - **按范围的旧查询结果不再滞留** —— 结果键里带 revision，旧条目永远读不到却仍占内存；现在数据或定价一变就清掉（每条约 30–115 KB × 最多 20 条）。
@@ -34,6 +35,7 @@
 - **43 model brands** — 32 new marks from the pinned lobe-icons revision; nine had currentColor baked to a fixed neutral.
 - **Gateway and cloud ids resolve to the real brand** — covers openai-gpt-5.5, databricks-claude-*, eu.anthropic.claude-*; the raw id still wins.
 ### Improvements
+- **A ledger record is normalized in one pass** — every usage row ran two validation passes plus two cost-snapshot parses (eleven decimal fields each); merging them took a cold start over the same 156.7 MB of real data from **3.0 s to 2.2 s** and the first start (which migrates) from **5.5 s to 4.5 s** — about **4x** the 8-9 s the audit measured for the old layout.
 - **Five more client helpers nobody calls are gone** — metadataVersion, the two statusRequires* wrappers (statusRefreshKind already carries their meaning, and the tests assert it directly now), donutArcPath (only the line variant is drawn) and modelOptionLabel; the bundle drops from 235.5 KB to **234.6 KB**. A repeatable report ships with them: `scripts/dead-code.mjs`.
 - **A dead helper and five orphaned style rules are gone** — a host helper with no caller and five class rules (the removed in-use model picker among them) that no code can render; each was checked for zero references outside the stylesheet and for a prefix that could not build it dynamically. Bundle **235.5 to 234.6 KB**.
 - **Superseded scope results no longer linger** — the cache key carries the revision, so an old entry could never be read again while still holding 30-115 KB apiece (up to 20); a data or pricing change clears them now.
