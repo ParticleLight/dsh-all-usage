@@ -99,7 +99,43 @@ test('coalesces pending ledger records and drains the latest value', async () =>
   await Promise.all([firstWait, latestWait])
   assert.equal(writes.length, 1)
   assert.equal(writes[0].key, 's')
-  assert.strictEqual(writes[0].value, latest)
+  // The medium receives a compact copy (a shared identity list was added); the
+  // record itself is unchanged, so its fields still match.
+  assert.equal(writes[0].value.sessionId, latest.sessionId)
+  assert.equal(writes[0].value.lastSeq, latest.lastSeq)
+  assert.equal(writes[0].value.source, latest.source)
+  assert.equal(writes[0].value.updatedAt, latest.updatedAt)
+  assert.deepEqual(writes[0].value.usage, latest.usage)
+})
+
+test('pools the identity of usage rows and expands them unchanged', () => {
+  const { ledger, identity } = makeLedger()
+  const other = { identityKey: 'other', provider: 'p2', requestedModel: 'm2', actualModel: 'm2', label: 'p2 / m2', legacy: false }
+  const time = Date.now()
+  const usage = [
+    { key: 's:step:1:1', seq: 1, time, workspaceId: 'w', identity, modelId: identity.label, turn: 1, step: 1, values: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: 0 } },
+    { key: 's:step:1:2', seq: 2, time, workspaceId: 'w', identity, modelId: identity.label, turn: 2, step: 1, values: { input: 2, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: 0 } },
+    { key: 's:step:1:3', seq: 3, time, workspaceId: 'w-other', identity: other, modelId: other.label, turn: 3, step: 1, values: { input: 3, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: 0 } },
+  ]
+  const record = { version: 3, sessionId: 's', workspaceId: 'w', lastSeq: 3, source: 'flush', updatedAt: 1, turns: [], usage, contextTimes: [] }
+  const compact = ledger.serializeLedgerRecordForTest(record)
+  // One shared row per distinct route, and the item keeps the only field that
+  // distinguishes a mixed-workspace row.
+  assert.equal(compact.usageIdentities.length, 2)
+  assert.equal(compact.usage[0].identity, undefined)
+  assert.equal(compact.usage[0].identityRef, compact.usage[1].identityRef)
+  assert.equal(compact.usage[2].workspaceId, 'w-other')
+  // The identity object appears once per distinct route and per item it is gone.
+  // (Across the real ledger this pooling is worth ~14.5 MB of 91 MB of records.)
+  const rows = compact.usage
+  for (const row of rows) assert.equal(row.identity, undefined)
+  assert.equal(Buffer.byteLength(JSON.stringify(compact.usageIdentities)), Buffer.byteLength(JSON.stringify([identity, other])))
+  // The row drops a whole identity object; its share of a row depends on how
+  // chatty the route id is, so only the direction is asserted here.
+  assert.ok(Buffer.byteLength(JSON.stringify(rows[0])) < Buffer.byteLength(JSON.stringify(usage[0])))
+  const expanded = ledger.expandLedgerRecordForTest(compact)
+  assert.deepEqual(expanded.usage, usage)
+  assert.equal(expanded.usageIdentities, undefined)
 })
 
 test('keeps the in-memory ledger when an async write fails', async () => {

@@ -5,6 +5,7 @@
 - **模型图标扩到 43 个品牌** —— 从 lobe-icons 固定 revision 取 32 个新商标；9 个 `currentColor` 烘成固定中性色。
 - **网关 / 云的包裹 id 还原真实品牌** —— 覆盖 `openai-gpt-5.5`、`databricks-claude-*`、`eu.anthropic.claude-*` 等写法，原始 id 仍优先。
 ### 优化
+- **账本体积按路由去重** —— 同一条路由（供应商 / 模型）以前在每条用量里都重复一份身份对象；改为每条记录共享一张身份表、用量只存索引。实测本机 1059 条记录 **91.3 → 74.7 MB（−18.2%）**。
 - **渲染不再被无关状态带着重画** —— 趋势 / 热力图（376 格）入参改为稳定引用，图标几何提到模块级；真机实测整页 DOM **6266 → 1719 节点**，bundle 235.2 KB。
 - **账本改写方案已就位（待真机重启验证）** —— 会话记录改一条一文件存储，替代「每次更新重写整个分片」：实测单次更新 **273 ms → 中位 4.6 ms**（最大的会话 74 ms），整个分片目录 **13.27 → 11.88 MB**。
 - **趋势图点数封顶 180** —— 半年以内按天，更长先降到 3 天一点再按需扩到周 / 月 / 季 / 年；桶不重叠不丢天，面板标注汇总粒度。实测 1 年 122 点、20 年 120 点。
@@ -24,6 +25,7 @@
 - **43 model brands** — 32 new marks from the pinned lobe-icons revision; nine had currentColor baked to a fixed neutral.
 - **Gateway and cloud ids resolve to the real brand** — covers openai-gpt-5.5, databricks-claude-*, eu.anthropic.claude-*; the raw id still wins.
 ### Improvements
+- **Ledger rows share one identity table per session** — a route (provider / model) used to repeat its identity object on every usage item; rows now carry an index into one shared list. Measured: 1059 records drop from **91.3 to 74.7 MB (−18.2%)**.
 - **Unrelated state no longer redraws the charts** — the trend chart and the 376-cell heatmap take stable props now and icon geometry lives at module level; measured: the page DOM drops from **6266 to 1719 nodes**, bundle 235.2 KB.
 - **The ledger write-amplification fix is ready (needs a host restart to verify)** — one file per session record replaces rewriting a whole shard on every update: measured **273 ms to a 4.6 ms median** (74 ms for the largest session), and the shard directory drops from **13.27 to 11.88 MB**.
 - **The trend chart is capped at 180 points** — a span up to half a year stays daily, a longer one drops to three days first and widens on demand; buckets never overlap or drop a day, and the panel names the stride.

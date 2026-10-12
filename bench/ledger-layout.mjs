@@ -4,9 +4,13 @@
 // update (the old single layout) against one document per record (per-record).
 //
 // Usage: node bench/ledger-layout.mjs [--json] [shardName...]
-import { cp, mkdir, readdir, rm, stat } from 'node:fs/promises'
+import { cp, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+// The ledger's row compaction is the piece this benchmark reports on, so it is
+// imported rather than re-implemented here.
+const { serializeLedgerRecord } = await import('../lib/ledger.js')
 
 const json = process.argv.includes('--json')
 const args = process.argv.slice(2).filter((value) => value.endsWith('.json'))
@@ -62,8 +66,16 @@ await perBackend.close()
 const files = (await readdir(join(workRoot, unitName, 'sessions')).catch(() => [])).length
 await rm(workRoot, { recursive: true, force: true })
 
+// Records are written with one shared identity list, so the same data costs less
+// than the sum of its rows.
+const records = []
+for (const [sessionId, value] of Object.entries(singleRows)) records.push({ sessionId, value })
+const untouched = records.reduce((sum, item) => sum + Buffer.byteLength(JSON.stringify(item.value)), 0)
+const compacted = records.reduce((sum, item) => sum + Buffer.byteLength(JSON.stringify(serializeLedgerRecord(item.value))), 0)
+
 const report = {
   shard,
+  pooling: { beforeMB: Number((untouched / 1048576).toFixed(2)), afterMB: Number((compacted / 1048576).toFixed(2)), savedPercent: Number(((untouched - compacted) / Math.max(1, untouched) * 100).toFixed(1)) },
   records: singleIds.length,
   legacyMB: Number((legacyBytes / 1048576).toFixed(2)),
   single: { keys: singleIds.length, writeMs: Number(singleWriteMs.toFixed(1)) },
@@ -76,4 +88,5 @@ else {
   console.log('  single layout   : one update = ' + report.single.writeMs + ' ms (rewrites the whole file)')
   console.log('  per-record      : migrate on open ' + report.perRecord.migrateMs + ' ms · ' + report.perRecord.files + ' files / ' + report.perRecord.dirMB + ' MB')
   console.log('  per-record write: median record ' + report.perRecord.medianRecordKB + ' KB -> ' + report.writes[1].writeMs + ' ms · biggest ' + report.perRecord.biggestRecordMB + ' MB -> ' + report.writes[0].writeMs + ' ms')
+  console.log('  identity pooling: ' + report.pooling.beforeMB + ' MB -> ' + report.pooling.afterMB + ' MB (' + report.pooling.savedPercent + '% smaller)')
 }
