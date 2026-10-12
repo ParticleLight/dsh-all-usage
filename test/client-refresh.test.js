@@ -414,7 +414,9 @@ test('renders cost totals, pricing status, and the merged price table controls',
   assert.match(source, /uh-pricing-model-table/)
   assert.match(source, /React\.createElement\('table'/)
   assert.match(source, /React\.createElement\('thead'/)
-  assert.ok(source.includes("plus: [React.createElement('path'"))
+  // Icon geometry is module data and the elements are built per render, so the
+  // plus icon is checked as geometry instead of as an element literal.
+  assert.ok(source.includes("plus: { path: 'M12 5v14M5 12h14' }"))
   assert.equal((source.match(/name: 'plus'/g) || []).length, 3)
   assert.ok(source.includes('输入官方模型 ID 检索'))
   assert.ok(source.includes('上下文费率档位'))

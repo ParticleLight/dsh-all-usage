@@ -233,27 +233,36 @@ window.__ModuleLoader__.load({
       if (denom <= 0) return 0
       return (cacheRead / denom) * 100
     }
+    // Icon geometry is built once, at module load, and the elements themselves
+    // are created per render: a fresh element per call was a fixed tax on a page
+    // that draws dozens of icons per frame, while a shared element would hide
+    // state updates React is expected to own.
+    const LINE_ICON_GEOMETRY = {
+      edit: { path: 'M12.2 3.4l2.4 2.4M4 16l2.8-.6L15 7.2a1.7 1.7 0 0 0-2.4-2.4L4.4 13z' },
+      export: { path: 'M12 3v11M8 7l4-4 4 4M5 13v5h14v-5' },
+      refresh: { path: 'M19 9a7 7 0 1 0 1.1 5.2M19 4v5h-5' },
+      close: { path: 'M6 6l12 12M18 6L6 18' },
+      chart: { path: 'M4 19V5M4 19h16M7 15l3-4 3 2 5-7' },
+      list: { path: 'M6 6h12M6 12h12M6 18h12', circle: { cx: 3.5, cy: 6, r: 1.2 } },
+      cache: { path: 'M12 4l7 4-7 4-7-4 7-4zM5 12l7 4 7-4M5 16l7 4 7-4' },
+      wallet: { path: 'M4 7.5A2.5 2.5 0 0 1 6.5 5H18v14H6.5A2.5 2.5 0 0 1 4 16.5zM4 8h14M14 13h.01' },
+      clock: { path: 'M12 6v6l4 2M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0z' },
+      folder: { path: 'M3.5 7.5h6l2 2h9v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z' },
+      language: { path: 'M4 12h16M12 4c2.1 2.2 3.2 4.9 3.2 8S14.1 17.8 12 20M12 4C9.9 6.2 8.8 8.9 8.8 12s1.1 5.8 3.2 8', circle: { cx: 12, cy: 12, r: 8 } },
+      chevron: { path: 'M7 10l5 5 5-5' },
+      check: { path: 'M5 12.5l4.2 4.1L19 7.3' },
+      plus: { path: 'M12 5v14M5 12h14' },
+      calendar: { path: 'M6 4v3M18 4v3M4 9h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z' },
+    }
     function LineIcon(props) {
       const size = props.size || 16
       const base = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }
-      const paths = {
-        edit: [React.createElement('path', { key: 'a', d: 'M12.2 3.4l2.4 2.4M4 16l2.8-.6L15 7.2a1.7 1.7 0 0 0-2.4-2.4L4.4 13z', ...base })],
-        export: [React.createElement('path', { key: 'a', d: 'M12 3v11M8 7l4-4 4 4M5 13v5h14v-5', ...base })],
-        refresh: [React.createElement('path', { key: 'a', d: 'M19 9a7 7 0 1 0 1.1 5.2M19 4v5h-5', ...base })],
-        close: [React.createElement('path', { key: 'a', d: 'M6 6l12 12M18 6L6 18', ...base })],
-        chart: [React.createElement('path', { key: 'a', d: 'M4 19V5M4 19h16M7 15l3-4 3 2 5-7', ...base })],
-        list: [React.createElement('path', { key: 'a', d: 'M6 6h12M6 12h12M6 18h12', ...base }), React.createElement('circle', { key: 'b', cx: 3.5, cy: 6, r: .7, fill: 'currentColor' }), React.createElement('circle', { key: 'c', cx: 3.5, cy: 12, r: .7, fill: 'currentColor' }), React.createElement('circle', { key: 'd', cx: 3.5, cy: 18, r: .7, fill: 'currentColor' })],
-        cache: [React.createElement('path', { key: 'a', d: 'M12 4l7 4-7 4-7-4 7-4zM5 12l7 4 7-4M5 16l7 4 7-4', ...base })],
-        wallet: [React.createElement('path', { key: 'a', d: 'M4 7.5A2.5 2.5 0 0 1 6.5 5H18v14H6.5A2.5 2.5 0 0 1 4 16.5zM4 8h14M14 13h.01', ...base })],
-        clock: [React.createElement('path', { key: 'a', d: 'M12 6v6l4 2M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0z', ...base })],
-        folder: [React.createElement('path', { key: 'a', d: 'M3.5 7.5h6l2 2h9v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z', ...base })],
-        language: [React.createElement('circle', { key: 'a', cx: 12, cy: 12, r: 8, ...base }), React.createElement('path', { key: 'b', d: 'M4 12h16M12 4c2.1 2.2 3.2 4.9 3.2 8S14.1 17.8 12 20M12 4C9.9 6.2 8.8 8.9 8.8 12s1.1 5.8 3.2 8', ...base })],
-        chevron: [React.createElement('path', { key: 'a', d: 'M7 10l5 5 5-5', ...base })],
-        check: [React.createElement('path', { key: 'a', d: 'M5 12.5l4.2 4.1L19 7.3', ...base })],
-        plus: [React.createElement('path', { key: 'a', d: 'M12 5v14M5 12h14', ...base })],
-        calendar: [React.createElement('path', { key: 'a', d: 'M6 4v3M18 4v3M4 9h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z', ...base })],
-      }
-      return React.createElement('svg', { className: 'uh-line-icon ' + (props.className || ''), width: size, height: size, viewBox: '0 0 24 24', 'aria-hidden': true }, paths[props.name] || paths.chart)
+      const key = props.name === undefined ? 'chart' : props.name
+      const shape = LINE_ICON_GEOMETRY[key] === undefined ? LINE_ICON_GEOMETRY.chart : LINE_ICON_GEOMETRY[key]
+      const shapes = []
+      if (shape.path !== undefined) shapes.push(React.createElement('path', { key: 'p', d: shape.path, ...base }))
+      if (shape.circle !== undefined) shapes.push(React.createElement('circle', { key: 'c', cx: shape.circle.cx, cy: shape.circle.cy, r: shape.circle.r, ...base }))
+      return React.createElement('svg', { className: 'uh-line-icon ' + (props.className || ''), width: size, height: size, viewBox: '0 0 24 24', 'aria-hidden': true }, shapes)
     }
     // Model brand icons are embedded by scripts/build-client.mjs at build time
     // (data: URIs only, no runtime file or network access). The placeholder is
@@ -3403,10 +3412,16 @@ window.__ModuleLoader__.load({
         setAuditSelectedId(null)
         setAuditError('')
       }, [queryKey])
+      // The scope is read through a ref so this callback keeps one identity for the
+      // lifetime of the page: the trend chart and heatmap are memoised, and a new
+      // click handler would redraw them for a detail-view change.
+      const queryScopeRef = React.useRef(null)
+      queryScopeRef.current = queryScope
       const openAuditForDate = React.useCallback((date) => {
-        if (queryScope === null || typeof date !== 'string') return
-        openAuditForScope({ ...queryScope, start: date, end: date })
-      }, [queryScope, openAuditForScope])
+        const scope = queryScopeRef.current
+        if (scope === null || typeof date !== 'string') return
+        openAuditForScope({ ...scope, start: date, end: date })
+      }, [openAuditForScope])
       const recordsVisible = detailView === 'logs' && selectedDetailScope !== null && detailKey !== ''
       React.useEffect(() => {
         if (!recordsVisible) {
@@ -3514,7 +3529,10 @@ window.__ModuleLoader__.load({
       const chooseModel = React.useCallback((value) => {
         setModelFilter(value || null)
       }, [])
-      const activeDayRows = useUtc && Array.isArray(stats && stats.byDayUtc) ? stats.byDayUtc : (Array.isArray(stats && stats.byDay) ? stats.byDay : [])
+      // A fresh array here would invalidate the full-history map (and the streak
+      // scan behind it) on every render, so the same view is derived once per
+      // stats/timezone pair.
+      const activeDayRows = React.useMemo(() => (useUtc && Array.isArray(stats && stats.byDayUtc) ? stats.byDayUtc : (Array.isArray(stats && stats.byDay) ? stats.byDay : [])), [stats, useUtc])
       const availableDateRange = availableDateBounds(activeDayRows, latestCalendarDate)
       const earliestAvailableDate = availableDateRange.min
       const activeCustomRange = normalizeCustomRange(customRange, useUtc)
@@ -3533,7 +3551,7 @@ window.__ModuleLoader__.load({
         setRange('custom')
         setCustomRangeOpen(false)
       }
-      const chooseHeatmapSpan = (next) => { setHeatmapSpan(normalizeHeatmapSpan(next)) }
+      const chooseHeatmapSpan = React.useCallback((next) => { setHeatmapSpan(normalizeHeatmapSpan(next)) }, [])
       const chooseRange = (next) => {
         setRange(next)
         setCustomRangeOpen(false)
