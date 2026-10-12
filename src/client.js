@@ -254,6 +254,11 @@ window.__ModuleLoader__.load({
       plus: { path: 'M12 5v14M5 12h14' },
       calendar: { path: 'M6 4v3M18 4v3M4 9h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z' },
     }
+    // Honours the OS setting for people who ask for less motion: the heatmap pulse
+    // is an endless repaint and the media query cannot reach an inline animation.
+    function motionReduced() {
+      try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch (error) { return false }
+    }
     function LineIcon(props) {
       const size = props.size || 16
       const base = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }
@@ -2162,8 +2167,14 @@ window.__ModuleLoader__.load({
           }
         }
         const dim = selectedWorkspace !== null && day !== undefined && day.turns > 0 && count === 0
-        const style = { background: cellBg(levelOf(count)), opacity: dim ? 0.22 : 1, animationDelay: (index * 1.2) + 'ms' }
-        if (cell.date === props.todayKey) style.animation = 'uh-cell-in .45s ease both, uh-glow 3s ease-in-out .7s infinite'
+        // The entrance wave must finish quickly: a per-cell 1.2ms delay over all
+        // 376 cells kept animating for 444ms, and every running animation costs a
+        // composite/paint while the panel is still loading data. Wrapping the
+        // stagger keeps the wave but ends it in ~150ms.
+        const style = { background: cellBg(levelOf(count)), opacity: dim ? 0.22 : 1, animationDelay: ((index % 25) * 6) + 'ms' }
+        // The today pulse is set inline, so the reduced-motion stylesheet cannot
+        // cancel it; an endless box-shadow animation repaints every frame.
+        if (cell.date === props.todayKey && !motionReduced()) style.animation = 'uh-cell-in .45s ease both, uh-glow 3s ease-in-out .7s infinite'
         return React.createElement('div', { key: cell.date, className: 'uh-cell', style,
           onMouseEnter: (event) => activateCell(cell.date, event),
           onMouseMove: moveTooltip,
