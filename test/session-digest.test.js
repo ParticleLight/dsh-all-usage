@@ -112,6 +112,49 @@ test('a session unwinds from the digest alone, with its rows already gone', () =
   assert.equal(host.state.totals.cost.pricedCalls, 0)
 })
 
+test('settled rows can be dropped and read back without changing a single total', () => {
+  const host = makeHost()
+  const rows = [
+    row('s1:step:1:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1),
+    row('s1:step:1:2', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.2', 1),
+  ]
+  for (const sample of rows) host.aggregation.foldUsageRow(sample)
+  const totalsBefore = { input: host.state.totals.input, pricedCalls: host.state.totals.cost.pricedCalls }
+  assert.equal(totalsBefore.input, 20)
+  assert.equal(totalsBefore.pricedCalls, 2)
+  // The rows are settled (priced, priced from the event time), so they can go.
+  const evicted = host.aggregation.evictColdRows({ rows: 0 })
+  assert.equal(evicted.rows, 2)
+  assert.equal(host.state.usageByStep.size, 0)
+  assert.equal(host.state.perSession.get('s1').keys.size, 2, 'the digest still knows the rows')
+  // Applying the record again must not count anything twice.
+  for (const sample of rows) host.aggregation.foldUsageRow(sample)
+  assert.equal(host.state.usageByStep.size, 0, 'the digest refuses a second fold')
+  assert.deepEqual({ input: host.state.totals.input, pricedCalls: host.state.totals.cost.pricedCalls }, totalsBefore)
+  // Reading a row back for a query is inert: it is data, not a new contribution.
+  assert.equal(host.aggregation.adoptUsageRow(rows[0]), true)
+  assert.equal(host.aggregation.adoptUsageRow(rows[0]), false, 'adopting twice is a no-op')
+  assert.equal(host.state.usageByStep.size, 1)
+  assert.deepEqual({ input: host.state.totals.input, pricedCalls: host.state.totals.cost.pricedCalls }, totalsBefore)
+  // And the session still unwinds exactly, rows resident or not.
+  host.aggregation.removeSession('s1')
+  assert.equal(host.state.totals.input, 0)
+  assert.equal(host.state.totals.cost.pricedCalls, 0)
+})
+
+test('a row whose pricing can still change stays resident', () => {
+  const host = makeHost()
+  const stale = row('s1:step:1:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1)
+  stale.cost = { ...stale.cost, pricingTimeSource: 'request-context', pricingAt: Date.parse('2026-08-17T00:00:00Z') }
+  host.aggregation.foldUsageRow(stale)
+  const settled = row('s2:step:1:1', 's2', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1)
+  host.aggregation.foldUsageRow(settled)
+  const evicted = host.aggregation.evictColdRows({ rows: 0 })
+  assert.equal(evicted.rows, 1, 'only the settled row goes')
+  assert.equal(host.state.usageByStep.has('s1:step:1:1'), true, 'a stale request-context row is kept')
+  assert.equal(host.state.usageByStep.has('s2:step:1:1'), false)
+})
+
 test('retargeting a session moves its digest with its rows', () => {
   const host = makeHost()
   host.aggregation.upsertUsageSample(host.state.usageByStep, row('s1:step:1:1', 's1', 'ws-old', '2026-08-17', 'deepseek-v4-flash', '0.1', 1))
