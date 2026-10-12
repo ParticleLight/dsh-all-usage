@@ -491,11 +491,20 @@ test('keeps the replacement cards and merges cache hits into the rate card', () 
   const rateDetail = source.indexOf("className: 'uh-ios-metric-rate-detail'", rateStart)
   assert.ok(rateStart >= 0 && rateBar > rateStart && rateDetail > rateBar)
   assert.ok(source.includes("language === 'en' ? 'Context reused ' + fmtCompact(agg.totals.cacheRead) + ' tokens' : '复用上下文 ' + fmtCompact(agg.totals.cacheRead) + ' Token'"))
-  assert.ok(source.includes('.uh-ios-metric-rate-detail { min-width:0; overflow:hidden; color:var(--dsw-alias-label-secondary); font-size:14px;'))
+  assert.ok(source.includes('.uh-ios-metric-rate-detail { min-width:0; overflow:hidden; color:var(--dsw-alias-label-secondary); font-size:12px;'))
   assert.ok(source.includes('fmtCompact(agg.totals.cacheRead)'))
   assert.doesNotMatch(source, /summaryMetric/)
   assert.ok(source.includes('.uh-ios-metrics { display:grid; grid-template-columns:repeat(5,minmax(0,1fr));'))
-  assert.ok(source.includes('.uh-ios-metrics > .uh-card { min-width:0; min-height:141px;'))
+  // The summary row is deliberately compact: the cards themselves stay at the
+  // smaller height, so a full-width row no longer eats a quarter of the screen.
+  assert.ok(source.includes('.uh-ios-metrics > .uh-card { min-width:0; min-height:96px; padding:9px 13px;'))
+  assert.ok(source.includes('.uh-ios-metric { min-width:0; min-height:80px; padding:10px 13px;'))
+  // The workspace card drives the row height, so it shows two bars with the rest
+  // pointed at by the details table.
+  assert.ok(source.includes('const tokenCardRows = rows.slice(0, 2).map((w) => {'))
+  assert.ok(source.includes('.uh-wsbar { display:flex; flex-direction:column; gap:1px; cursor:pointer; padding:1px 6px;'))
+  assert.ok(source.includes('.uh-ios-metric-value { min-width:0; color:var(--dsw-alias-label-primary); font-size:22px;'))
+  assert.ok(source.includes('.uh-ios-metric-bar { height:5px;'))
   assert.ok(source.includes('.uh-ios-metrics > .uh-card:nth-child(-n+3) { justify-content:center; }'))
   assert.ok(source.includes('.uh-ios-summary-hero { display:grid; grid-template-columns:minmax(0,1fr) minmax(320px,.48fr);'))
 })

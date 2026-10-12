@@ -10,6 +10,7 @@
 - 没有品牌图标的模型改用插件自己的**层叠标记**（不再是空圆点），图标加载失败时也显示它 —— 这个标记本身不指向任何品牌，所以不会被误读成一次归属。
 - 品牌图标改为**宿主按需提供**（`GET /api/all-usage/icon?key=…`）：bundle 只携带解析元数据，体积 **365 KB → 231 KB**，以后新增品牌不再增加体积；每个图标仍在构建期过一遍 SVG 守卫，并按 key（而非路径）解析、长缓存 + ETag。
 ### 优化
+- **概览那一行卡片压缩了约四分之一** —— 卡片内边距 16→10px、大数字 26→22px（卡内 23→20px）、命中率数值 24→20px 与说明 14→12px、进度条 7→5px、卡片内间距与圆角同步收紧；高度由「各工作区」卡片决定，它现在只列 **2** 个（其余指向明细表）。实测整行 **156px → 114px**（−27%），五张卡高度一致。
 - **请求日志改为内部滚动 + 分页加载** —— 列表限高 `min(62vh, 560px)` 并自带滚动（`overscroll-behavior: contain`），首屏只取**最近 20 条**，滚到距底部 120px 内自动取下一页（每页 20 条，页脚显示「已显示 N 条」并保留手动「加载更多」兜底）；若一页没填满容器会自动补下一页，避免「无法滚动又拿不到更多」的死角。实测 486px 容器 / 688px 内容 → 滚到底后 20 → **40 条**。
 ### 修复
 - **同一个模型的多个路由合并成一个筛选项** —— 之前 `deepseek-v4.1-flash`（4 条路由）、`deepseek-v4-flash` 与 `deepseek-ai/DeepSeek-V4-Flash` 会各占一行，看起来像重复；现在筛选按**模型名**归并（忽略大小写与 `供应商/` 前缀），宿主匹配同样按模型名比较（精确的 identityKey 仍然有效）。实测下拉从 25 项降到 **23 项 = 22 个模型**，无重复。
@@ -25,6 +26,7 @@
 - Models without a bundled brand now show the plugin's own stacked-layers mark instead of an empty dot (a failed icon load uses it too); the mark implies no brand, so it can never be misread as an attribution.
 - Brand marks are now served by the host on demand (`GET /api/all-usage/icon?key=…`): the bundle carries only the resolution metadata and drops from **365 KB to 231 KB**, and adding a brand no longer grows it. Every file is still validated by the SVG guard at build time, resolution is by manifest key (never a path) and the response is long-cached with an ETag.
 ### Improvements
+- **The summary row is about a quarter shorter** — card padding 16→10px, the big numbers 26→22px (23→20px inside cards), the cache-rate value 24→20px with its caption 14→12px, progress bars 7→5px, and tighter inner gaps and radii. The row height is set by the workspace card, which now lists **two** bars and points at the details table for the rest. Measured: **156px → 114px** (−27%), with all five cards matching.
 - **The request log scrolls in its own box and pages as you go** — the list is capped at `min(62vh, 560px)` with its own scrollbar (`overscroll-behavior: contain`), the first paint fetches only the **newest 20** calls, and nearing the end (within 120px) pulls the next page of 20; the footer shows how many are loaded with a manual “Load more” as a fallback. A page that does not fill the box tops itself up, so the list can never end up unscrollable with more history behind it. Measured: a 486px box over 688px of rows, growing from 20 to **40** rows on scroll.
 ### Fixes
 - **Routes of one model now share a single filter entry** — `deepseek-v4.1-flash` (four routes), `deepseek-v4-flash` and `deepseek-ai/DeepSeek-V4-Flash` each took their own row and read as duplicates; the filter now groups by **model name** (case-insensitive, vendor namespace dropped) and the host compares the same key, while an exact identityKey still matches. Measured: 25 entries down to **23 = 22 models**, no duplicates.
