@@ -515,6 +515,37 @@ test('a stale session-level context stamp is not billed as the request window', 
   assert.equal(stored.pricingAt, MONDAY_OFF)
 })
 
+test('a stale stamp is repaired even after the session context moved on', async () => {
+  // The first repair rule missed this shape: by the time the row was re-priced the
+  // session's latest context had already moved past the stamp, so only the freshness
+  // of the stamp itself can decide. No per-request stamp exists for this row.
+  const identity = { identityKey: 'deepseek / deepseek-v4-flash', provider: 'deepseek', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }
+  const staleCost = calculateCost({ input: 1000000, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, resolvePricing(identity, { catalogEntries: [V4_FLASH] }), MONDAY_PEAK, 'request-context')
+  assert.equal(staleCost.pricingBand, 'peak')
+  const record = {
+    version: 3, sessionId: 's-moved', workspaceId: 'ws-mv', lastSeq: 2, lastRevision: 'r1', updatedAt: 1000,
+    turns: [{ key: 's-moved:turn:1', seq: 1, time: MONDAY_OFF, workspaceId: 'ws-mv', turn: 1, identity }],
+    usage: [{ key: 's-moved:step:9:3', seq: 2, time: MONDAY_OFF, workspaceId: 'ws-mv', identity, modelId: 'deepseek-v4-flash', turn: 9, step: 3, values: { input: 1000000, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: staleCost }],
+    contextTimes: [{ key: 'context:__latest__', time: MONDAY_OFF + 60000 }],
+    lastIdentity: identity,
+  }
+  const app = await createApp({
+    withStorage: true,
+    ledgerSeed: { 's-moved': record },
+    workspaces: [{ id: 'ws-mv', path: 'C:\\mv', title: 'MV' }],
+    sessions: [{ header: { id: 's-moved', cwd: 'C:\\mv' } }],
+    readSession: async () => { throw new Error('read failed') },
+  })
+  await waitForScan(app)
+  const snap = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+  await postPricing(app, snap.requestToken, { pricing: { catalogEntries: [V4_FLASH] }, backfill: true })
+  await waitForScan(app, (body) => body.totals.cost.pricedCalls === 1)
+  const stored = app.storageUnit.records.sessions['s-moved'].usage[0].cost
+  assert.equal(stored.pricingBand, 'off-peak')
+  assert.equal(stored.pricingTimeSource, 'usage-event')
+  assert.equal(stored.pricingAt, MONDAY_OFF)
+})
+
 test('catalog refreshes keep priced history auditable; repriceTemporal re-estimates', async () => {
   const app = await createApp({
     withStorage: true,

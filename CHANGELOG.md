@@ -31,7 +31,7 @@
 - **概览卡片行压缩约四分之一** —— 内边距 16→10px、大数字 26→22px 等，整行 **156 → 114px**。
 - **请求日志内部滚动 + 分页** —— 首屏最近 20 条，滚到底再取 20 条（实测 20 → **40 条**）。
 ### 修复
-- **修复「谷时段被记成峰时」** —— DSH 可能整场会话只发一次 `request/context`，而插件把这条**会话级**时间戳当成每次请求的计费时刻，于是晚上 20:02 的调用按 14:10 的峰时窗口计价：峰谷**费率**与「峰/谷」标记一起错。现在会话级时间戳只在 30 分钟内有效（超时改用调用自身的时间）；对账过程还会识别**能证明**来自这种时间戳的历史行（仍等于该会话最新上下文、比调用早 30 分钟以上、且没有 per-request 时间戳与之匹配）并重新按调用时间计价一次。带 turn/step 的每条请求时间戳不受影响。
+- **修复「谷时段被记成峰时」** —— DSH 可能整场会话只发一次 `request/context`，而插件把这条**会话级**时间戳当成每次请求的计费时刻：实测 20:02 的调用按 14:10 的峰时窗口计价，峰谷**费率**与「峰/谷」标记一起错（本机 6.6 万条里有 1.6 万条受此影响）。现在会话级时间戳只在 30 分钟内有效（超时改用调用自身的时间），对账过程也会把历史里「比调用早 30 分钟以上、且该会话没有与这条记录 turn/step 对应的时间戳」的行按调用时间重新计价一次。逐请求（turn/step）时间戳的语义不变。
 - **同一模型的多个路由合并为一个筛选项** —— 按模型名归并（忽略大小写与 `供应商/` 前缀），宿主同样按模型名匹配。
 - **模型筛选不再显示供应商命名空间** —— 只显示模型名，取值仍是原始 id（实测 25 项里含 `/` 的为 0）。
 - **供应商 / 模型下拉不再无限下延** —— 限高 `min(60vh, 420px)` 内滚，打开时滚到当前选中项。
@@ -66,7 +66,7 @@
 - **The summary row is about a quarter shorter** — padding 16 to 10px, big numbers 26 to 22px: 156 down to 114px.
 - **The request log scrolls in its own box and pages as you go** — newest 20 rows first, 20 more at the end (20 to 40 measured).
 ### Fixes
-- **Fixed calls labelled peak that actually ran off-peak** — DSH can emit `request/context` once per session, and the plugin billed every later call at that session-level instant: a 20:02 call was priced in the 14:10 peak window, so the peak rate and the peak/off-peak badge were both wrong. A session-level stamp now only applies within 30 minutes (past that the call's own time is used), and the reconciliation pass re-prices stored rows it can prove came from such a stamp (still equal to the session's latest context, more than 30 minutes older than the call, and with no per-request stamp matching it). Calls carrying their own turn/step stamp are unaffected.
+- **Fixed calls labelled peak that actually ran off-peak** — DSH can emit `request/context` once per session, and the plugin billed every later call at that session-level instant: a 20:02 call was priced in the 14:10 peak window, so both the peak rate and the badge were wrong (16k of this machine's 66k rows were affected). A session-level stamp now only counts within 30 minutes (past that the call's own time is used), and the reconciliation pass re-prices stored rows whose stamp is more than 30 minutes older than the call and which have no turn/step stamp of their own. Per-request stamps keep their meaning.
 - **Routes of one model share a single filter entry** — grouped by model name (case ignored, vendor namespace dropped), matched the same way on the host.
 - **The model filter no longer shows the vendor namespace** — the model name only, while the value stays the raw id (0 of 25 entries still contain a slash).
 - **The provider and model menus no longer run past the window** — capped at min(60vh, 420px) with their own scroll.
