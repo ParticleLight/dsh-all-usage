@@ -5,6 +5,8 @@
 - **模型图标扩到 43 个品牌** —— 从 lobe-icons 固定 revision 取 32 个新商标；9 个 `currentColor` 烘成固定中性色。
 - **网关 / 云的包裹 id 还原真实品牌** —— 覆盖 `openai-gpt-5.5`、`databricks-claude-*`、`eu.anthropic.claude-*` 等写法，原始 id 仍优先。
 ### 优化
+- **首屏快照只带一份时区日历** —— 面板每次开屏会请求自己那份（本地或 UTC），不再同时传两份（原来两份各占一半）；按范围的「会话数」仍来自 /query，口径不变。
+- **每天的会话 id 明细只保留近期** —— 超过 180 天的日子仍带数量与聚合，但不再拖着历史上所有会话 id（面板看旧日期的日志本就按需拉取）。
 - **旧存储文件不再长期占盘** —— 账本改用「一条记录一个文件」后，原来的整单位文件（本机 32 个分片 + 一个遗留大文件，合计约 178 MB）已被逐条播种成新结构；账本现在会在**确认新结构已有记录**后删除这些旧文件并留下一次性的标记，失败则下次启动重试。
 - **账本体积按路由去重** —— 同一条路由（供应商 / 模型）以前在每条用量里都重复一份身份对象；改为每条记录共享一张身份表、用量只存索引。实测本机 1059 条记录 **91.3 → 74.7 MB（−18.2%）**。
 - **渲染不再被无关状态带着重画** —— 趋势 / 热力图（376 格）入参改为稳定引用，图标几何提到模块级；真机实测整页 DOM **6266 → 1719 节点**，bundle 235.2 KB。
@@ -26,6 +28,8 @@
 - **43 model brands** — 32 new marks from the pinned lobe-icons revision; nine had currentColor baked to a fixed neutral.
 - **Gateway and cloud ids resolve to the real brand** — covers openai-gpt-5.5, databricks-claude-*, eu.anthropic.claude-*; the raw id still wins.
 ### Improvements
+- **The first-paint snapshot carries one timezone calendar** — the panel asks for its own copy (local or UTC) instead of both, which used to split the payload in half; per-range session counts still come from /query, so the numbers are unchanged.
+- **Per-day session ids ride along only for recent history** — a day older than 180 days keeps its counts and aggregates but no longer drags every session id ever recorded (opening an old day's log already fetches it on demand).
 - **The old storage files no longer stay on disk** — after the ledger moved to one document per record, each legacy whole-unit file (32 shards plus a leftover monolith, about 178 MB here) has been seeded into the new tree; the ledger now removes those files once the tree provably holds records, leaves a one-time marker, and retries on the next start if anything fails.
 - **Ledger rows share one identity table per session** — a route (provider / model) used to repeat its identity object on every usage item; rows now carry an index into one shared list. Measured: 1059 records drop from **91.3 to 74.7 MB (−18.2%)**.
 - **Unrelated state no longer redraws the charts** — the trend chart and the 376-cell heatmap take stable props now and icon geometry lives at module level; measured: the page DOM drops from **6266 to 1719 nodes**, bundle 235.2 KB.

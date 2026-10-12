@@ -188,6 +188,28 @@ test('emits a UTC day bucket for English-mode calendar data', async () => {
   assert.equal(utcDay && utcDay.turns, 1)
 })
 
+test('serves only the timezone calendar that was asked for', async () => {
+  const eventTime = Date.now() - 60 * 1000
+  const app = await createApp({
+    workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo', sessionIds: ['s-1'] }],
+    sessions: [{ header: { id: 's-1', cwd: 'C:\\repo' } }],
+    events: new Map([['s-1', [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }]]]),
+  })
+  for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  // The route answers on its exact path only, so the timezone choice travels on
+  // the request url — exactly as the browser sends it.
+  const localRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  localRequest.url = '/api/all-usage?utc=0'
+  const localBody = (await call(app, '/api/all-usage', localRequest)).json()
+  assert.ok(localBody.byDay.length > 0)
+  assert.deepEqual(localBody.byDayUtc, [])
+  const utcRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  utcRequest.url = '/api/all-usage?utc=1'
+  const utcBody = (await call(app, '/api/all-usage', utcRequest)).json()
+  assert.ok(utcBody.byDayUtc.length > 0)
+  assert.deepEqual(utcBody.byDay, [])
+})
+
 test('keeps daily usage and turns older than the former 53-week window', async () => {
   const eventTime = Date.now() - 400 * 24 * 60 * 60 * 1000
   const local = new Date(eventTime)
@@ -209,11 +231,13 @@ test('keeps daily usage and turns older than the former 53-week window', async (
   assert.equal(localDay && localDay.turns, 1)
   assert.equal(localDay && localDay.tokens.input, 10)
   assert.equal(localDay && localDay.sessions, 1)
-  assert.deepEqual(localDay && localDay.sessionIds, ['s-1'])
+  // Session ids are detailed history: they ride along only for the recent window
+  // (the panel fetches an old day's log on demand), while the counts stay.
+  assert.deepEqual(localDay && localDay.sessionIds, [])
   assert.equal(utcDay && utcDay.turns, 1)
   assert.equal(utcDay && utcDay.tokens.input, 10)
   assert.equal(utcDay && utcDay.sessions, 1)
-  assert.deepEqual(utcDay && utcDay.sessionIds, ['s-1'])
+  assert.deepEqual(utcDay && utcDay.sessionIds, [])
 })
 
 test('retries the baseline scan when listing sessions fails', async () => {

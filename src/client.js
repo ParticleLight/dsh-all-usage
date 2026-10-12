@@ -2967,8 +2967,14 @@ window.__ModuleLoader__.load({
       tag.textContent = CSS
     }
 
+    // The snapshot carries one timezone calendar per request: the panel reads its
+    // language from storage here (the same key the language switch writes) and
+    // asks for that copy, because shipping both doubled the payload.
+    const snapshotUtcFlag = () => {
+      try { return window.localStorage.getItem(LANGUAGE_STORAGE_KEY) === 'en' ? '?utc=1' : '?utc=0' } catch (_) { return '' }
+    }
     // 与 Host 半的数据接口（webServer 路由）
-    const getStats = () => fetch('/api/all-usage', { headers: { accept: 'application/json' } }).then((r) => {
+    const getStats = () => fetch('/api/all-usage' + snapshotUtcFlag(), { headers: { accept: 'application/json' } }).then((r) => {
       if (!r.ok) throw new Error('HTTP ' + r.status)
       return r.json()
     })
