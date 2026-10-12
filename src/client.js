@@ -165,11 +165,6 @@ window.__ModuleLoader__.load({
       const pricingRevision = revisionPart(data, 'pricingRevision', 0)
       return dataRevision === null ? null : data.instanceId + ':' + dataRevision + ':' + pricingRevision
     }
-    function metadataVersion(data) {
-      if (data === null || typeof data !== 'object' || typeof data.instanceId !== 'string' || data.instanceId === '') return null
-      const metadataRevision = revisionPart(data, 'metadataRevision', revisionPart(data, 'revision', null))
-      return metadataRevision === null ? null : data.instanceId + ':' + metadataRevision
-    }
     function statusRefreshKind(status, snapshot) {
       if (status === null || typeof status !== 'object' || snapshot === null || typeof snapshot !== 'object') return 'full'
       if (typeof status.instanceId !== 'string' || typeof snapshot.instanceId !== 'string' || status.instanceId === '' || status.instanceId !== snapshot.instanceId) return 'full'
@@ -198,12 +193,6 @@ window.__ModuleLoader__.load({
       const statusScan = status.scan
       const snapshotScan = snapshot.scan
       return !!(statusScan && snapshotScan && !!statusScan.done !== !!snapshotScan.done) ? 'full' : 'none'
-    }
-    function statusRequiresFullSnapshot(status, snapshot) {
-      return statusRefreshKind(status, snapshot) === 'full'
-    }
-    function statusRequiresQueryRefresh(status, snapshot) {
-      return statusRefreshKind(status, snapshot) === 'query'
     }
     function retryDelayFor(failures) {
       const count = Math.max(1, Math.min(4, typeof failures === 'number' && Number.isFinite(failures) ? failures : 1))
@@ -1604,11 +1593,6 @@ window.__ModuleLoader__.load({
       const model = modelViewKey(structuredModel || fallbackModel) || unknownModel
       return { provider, model }
     }
-    function modelOptionLabel(row, unknownProvider, unknownModel) {
-      const parts = modelParts(row, unknownProvider, unknownModel)
-      const base = parts.provider + ' / ' + parts.model
-      return row && row.requestedModel && row.actualModel && row.requestedModel !== row.actualModel ? base + ' ← ' + row.requestedModel : base
-    }
     function aggregateModelRows(rows, view, unknownProvider, unknownModel) {
       if (view === 'route') return rows.slice()
       const grouped = new Map()
@@ -1776,21 +1760,6 @@ window.__ModuleLoader__.load({
           return { ...item, index, percentage: item.value / total * 100, startAngle: endAngle <= startAngle ? angle - sweep : startAngle, endAngle: endAngle <= startAngle ? angle : endAngle }
         }),
       }
-    }
-    function donutArcPath(cx, cy, outerRadius, innerRadius, startAngle, endAngle) {
-      const sweep = Math.max(0, endAngle - startAngle)
-      const point = (radius, angle) => ({ x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) })
-      const outerStart = point(outerRadius, startAngle)
-      const innerStart = point(innerRadius, startAngle)
-      if (sweep >= Math.PI * 2 - .0001) {
-        const outerMid = point(outerRadius, startAngle + Math.PI)
-        const innerMid = point(innerRadius, startAngle + Math.PI)
-        return 'M' + outerStart.x.toFixed(2) + ' ' + outerStart.y.toFixed(2) + ' A' + outerRadius + ' ' + outerRadius + ' 0 1 1 ' + outerMid.x.toFixed(2) + ' ' + outerMid.y.toFixed(2) + ' A' + outerRadius + ' ' + outerRadius + ' 0 1 1 ' + outerStart.x.toFixed(2) + ' ' + outerStart.y.toFixed(2) + ' L' + innerStart.x.toFixed(2) + ' ' + innerStart.y.toFixed(2) + ' A' + innerRadius + ' ' + innerRadius + ' 0 1 0 ' + innerMid.x.toFixed(2) + ' ' + innerMid.y.toFixed(2) + ' A' + innerRadius + ' ' + innerRadius + ' 0 1 0 ' + innerStart.x.toFixed(2) + ' ' + innerStart.y.toFixed(2) + ' Z'
-      }
-      const outerEnd = point(outerRadius, endAngle)
-      const innerEnd = point(innerRadius, endAngle)
-      const largeArc = sweep > Math.PI ? 1 : 0
-      return 'M' + outerStart.x.toFixed(2) + ' ' + outerStart.y.toFixed(2) + ' A' + outerRadius + ' ' + outerRadius + ' 0 ' + largeArc + ' 1 ' + outerEnd.x.toFixed(2) + ' ' + outerEnd.y.toFixed(2) + ' L' + innerEnd.x.toFixed(2) + ' ' + innerEnd.y.toFixed(2) + ' A' + innerRadius + ' ' + innerRadius + ' 0 ' + largeArc + ' 0 ' + innerStart.x.toFixed(2) + ' ' + innerStart.y.toFixed(2) + ' Z'
     }
     function donutArcLinePath(cx, cy, radius, startAngle, endAngle) {
       const sweep = Math.max(0, endAngle - startAngle)

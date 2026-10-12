@@ -10,8 +10,8 @@ assert.notEqual(start, -1, 'refresh helper start must exist')
 assert.notEqual(end, -1, 'refresh helper end must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__refreshHelpers = { createRequestGate, snapshotVersion, queryVersion, metadataVersion, statusRefreshKind, statusRequiresFullSnapshot, statusRequiresQueryRefresh, retryDelayFor }', context)
-const { createRequestGate, snapshotVersion, queryVersion, metadataVersion, statusRefreshKind, statusRequiresFullSnapshot, statusRequiresQueryRefresh, retryDelayFor } = context.__refreshHelpers
+vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__refreshHelpers = { createRequestGate, snapshotVersion, queryVersion, statusRefreshKind, retryDelayFor }', context)
+const { createRequestGate, snapshotVersion, queryVersion, statusRefreshKind, retryDelayFor } = context.__refreshHelpers
 
 const pricingStart = source.indexOf('    function pricingDraftOf')
 const pricingEnd = source.indexOf('    function pricingModelKey')
@@ -26,29 +26,30 @@ test('compares full snapshot and status by instance plus revision', () => {
   assert.equal(snapshotVersion(snapshot), 'host-a:7')
   assert.equal(snapshotVersion({ instanceId: '', revision: 7 }), null)
   assert.equal(snapshotVersion({ instanceId: 'host-a', revision: '7' }), null)
-  assert.equal(statusRequiresFullSnapshot({ instanceId: 'host-a', revision: 7, scan: { done: true } }, snapshot), false)
-  assert.equal(statusRequiresFullSnapshot({ instanceId: 'host-a', revision: 8, scan: { done: true } }, snapshot), true)
-  assert.equal(statusRequiresFullSnapshot({ instanceId: 'host-b', revision: 7, scan: { done: true } }, snapshot), true)
-  assert.equal(statusRequiresFullSnapshot({ instanceId: 'host-a', revision: 7, scan: { done: false } }, snapshot), true)
-  assert.equal(statusRequiresFullSnapshot({ instanceId: 'host-a', revision: 7, scan: { done: true } }, null), true)
-  assert.equal(statusRequiresFullSnapshot({ scan: { done: true } }, snapshot), true)
+  // One verdict call: 'full' pulls a snapshot, 'query' scopes one, 'none' keeps
+  // the applied data.
+  assert.equal(statusRefreshKind({ instanceId: 'host-a', revision: 7, scan: { done: true } }, snapshot), 'none')
+  assert.equal(statusRefreshKind({ instanceId: 'host-a', revision: 8, scan: { done: true } }, snapshot), 'full')
+  assert.equal(statusRefreshKind({ instanceId: 'host-b', revision: 7, scan: { done: true } }, snapshot), 'full')
+  assert.equal(statusRefreshKind({ instanceId: 'host-a', revision: 7, scan: { done: false } }, snapshot), 'full')
+  assert.equal(statusRefreshKind({ instanceId: 'host-a', revision: 7, scan: { done: true } }, null), 'full')
+  assert.equal(statusRefreshKind({ scan: { done: true } }, snapshot), 'full')
 })
 
 test('classifies split revisions without promoting data changes to full snapshots', () => {
   const base = { instanceId: 'host-a', revision: 10, dataRevision: 4, metadataRevision: 2, scanRevision: 8, pricingRevision: 1, queryRevision: '4:1', scan: { done: true } }
   assert.equal(queryVersion(base), 'host-a:4:1')
-  assert.equal(metadataVersion(base), 'host-a:2')
   assert.equal(statusRefreshKind({ ...base, revision: 11, dataRevision: 5, queryRevision: '5:1' }, base), 'query')
-  assert.equal(statusRequiresQueryRefresh({ ...base, dataRevision: 5, queryRevision: '5:1' }, base), true)
+  assert.equal(statusRefreshKind({ ...base, dataRevision: 5, queryRevision: '5:1' }, base), 'query')
   assert.equal(statusRefreshKind({ ...base, revision: 11, pricingRevision: 2, queryRevision: '4:2' }, base), 'full')
-  assert.equal(statusRequiresFullSnapshot({ ...base, revision: 11, pricingRevision: 2, queryRevision: '4:2' }, base), true)
+  assert.equal(statusRefreshKind({ ...base, revision: 11, pricingRevision: 2, queryRevision: '4:2' }, base), 'full')
   assert.equal(statusRefreshKind({ ...base, revision: 12, dataRevision: 5, pricingRevision: 2, queryRevision: '5:2' }, base), 'full')
-  assert.equal(statusRequiresQueryRefresh({ ...base, revision: 12, dataRevision: 5, pricingRevision: 2, queryRevision: '5:2' }, base), false)
+  assert.notEqual(statusRefreshKind({ ...base, revision: 12, dataRevision: 5, pricingRevision: 2, queryRevision: '5:2' }, base), 'query')
   assert.equal(statusRefreshKind({ ...base, revision: 12, dataRevision: 5, pricingRevision: 2, queryRevision: '5:2' }, base), 'full')
-  assert.equal(statusRequiresQueryRefresh({ ...base, revision: 12, dataRevision: 5, pricingRevision: 2, queryRevision: '5:2' }, base), false)
+  assert.notEqual(statusRefreshKind({ ...base, revision: 12, dataRevision: 5, pricingRevision: 2, queryRevision: '5:2' }, base), 'query')
   assert.equal(statusRefreshKind({ ...base, revision: 11, scanRevision: 9 }, base), 'status')
   assert.equal(statusRefreshKind({ ...base, revision: 11, metadataRevision: 3 }, base), 'full')
-  assert.equal(statusRequiresFullSnapshot({ ...base, revision: 11, dataRevision: 5, queryRevision: '5:1' }, base), false)
+  assert.notEqual(statusRefreshKind({ ...base, revision: 11, dataRevision: 5, queryRevision: '5:1' }, base), 'full')
 })
 
 test('treats a rotated write capability as a full refresh', () => {
@@ -58,7 +59,7 @@ test('treats a rotated write capability as a full refresh', () => {
   // leave the instance id and every revision untouched. The status payload carries
   // only its derived id, never the capability itself.
   assert.equal(statusRefreshKind({ instanceId: 'host-a', revision: 7, scan: { done: true }, capabilityId: 'cap-b' }, snapshot), 'full')
-  assert.equal(statusRequiresFullSnapshot({ instanceId: 'host-a', revision: 7, scan: { done: true }, capabilityId: 'cap-b' }, snapshot), true)
+  assert.equal(statusRefreshKind({ instanceId: 'host-a', revision: 7, scan: { done: true }, capabilityId: 'cap-b' }, snapshot), 'full')
   // A host that predates the field must not look like a rotation.
   assert.equal(statusRefreshKind({ instanceId: 'host-a', revision: 7, scan: { done: true } }, { instanceId: 'host-a', revision: 7, scan: { done: true } }), 'none')
 })
@@ -228,7 +229,6 @@ test('keeps the base path visible beneath a replayable draw overlay', () => {
 test('adds donut charts to model and workspace detail panels', () => {
   assert.match(source, /function UsageDonutChart/)
   assert.match(source, /function buildDonutSegments/)
-  assert.match(source, /function donutArcPath/)
   assert.match(source, /function donutArcLinePath/)
   assert.ok(source.includes("color: '#b8c2cf'"))
   assert.ok(source.includes('const modelDonutChart ='))

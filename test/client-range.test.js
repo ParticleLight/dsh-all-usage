@@ -10,8 +10,8 @@ assert.notEqual(start, -1, 'client date helpers must exist')
 assert.notEqual(end, -1, 'client range helper boundary must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel }', context)
-const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel } = context.__rangeHelpers
+vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel }', context)
+const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel } = context.__rangeHelpers
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
   return {
@@ -365,11 +365,11 @@ test('builds donut segments with normalized percentages and remainder', () => {
   assert.equal(donut.segments[2].color, '#b8c2cf')
   assert.equal(Math.round(donut.segments.reduce((sum, item) => sum + item.percentage, 0)), 100)
   assert.ok(donut.segments.every((item) => item.endAngle > item.startAngle))
-  assert.match(donutArcPath(130, 130, 94, 61, donut.segments[0].startAngle, donut.segments[0].endAngle), /A94 94/)
+  assert.match(donutArcLinePath(130, 130, 94, donut.segments[0].startAngle, donut.segments[0].endAngle), /A94 94/)
   assert.match(donutArcLinePath(130, 130, 77.5, donut.segments[0].startAngle, donut.segments[0].endAngle), /A77.5 77.5/)
   const single = buildDonutSegments([{ label: 'Only', value: 1 }], '其他')
   assert.equal(single.segments.length, 1)
-  assert.match(donutArcPath(130, 130, 94, 61, single.segments[0].startAngle, single.segments[0].endAngle), /A94 94 0 1 1/)
+  assert.match(donutArcLinePath(130, 130, 94, single.segments[0].startAngle, single.segments[0].endAngle), /A94 94 0 1 1/)
 })
 
 test('carries segment costs into the other bucket', () => {
