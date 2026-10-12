@@ -9,6 +9,8 @@
 - 打包门禁改为从 manifest 推导图标清单，图标测试从目录推导文件清单 —— 以后加品牌不再需要手改任何清单。
 - 没有品牌图标的模型改用插件自己的**层叠标记**（不再是空圆点），图标加载失败时也显示它 —— 这个标记本身不指向任何品牌，所以不会被误读成一次归属。
 - 品牌图标改为**宿主按需提供**（`GET /api/all-usage/icon?key=…`）：bundle 只携带解析元数据，体积 **365 KB → 231 KB**，以后新增品牌不再增加体积；每个图标仍在构建期过一遍 SVG 守卫，并按 key（而非路径）解析、长缓存 + ETag。
+### 优化
+- **请求日志改为内部滚动 + 分页加载** —— 列表限高 `min(62vh, 560px)` 并自带滚动（`overscroll-behavior: contain`），首屏只取**最近 20 条**，滚到距底部 120px 内自动取下一页（每页 20 条，页脚显示「已显示 N 条」并保留手动「加载更多」兜底）；若一页没填满容器会自动补下一页，避免「无法滚动又拿不到更多」的死角。实测 486px 容器 / 688px 内容 → 滚到底后 20 → **40 条**。
 ### 修复
 - **同一个模型的多个路由合并成一个筛选项** —— 之前 `deepseek-v4.1-flash`（4 条路由）、`deepseek-v4-flash` 与 `deepseek-ai/DeepSeek-V4-Flash` 会各占一行，看起来像重复；现在筛选按**模型名**归并（忽略大小写与 `供应商/` 前缀），宿主匹配同样按模型名比较（精确的 identityKey 仍然有效）。实测下拉从 25 项降到 **23 项 = 22 个模型**，无重复。
 - **模型筛选不再显示供应商命名空间** —— `deepseek-ai/DeepSeek-V4-Flash`、`deepseek/deepseek-v4.1-flash` 这类网关 id 只显示模型名（供应商另有筛选与图标），但选项的**取值仍是原始 id**，所以两条路由不会被合成一个筛选；导出/范围说明行同样用短名。实测 25 个选项里含 `/` 的为 0 个，选中后仍精确收敛到 1 行。
@@ -22,6 +24,8 @@
 - The packaging gate derives the icon list from the manifest and the icon tests derive it from the directory, so adding a brand no longer requires editing either list.
 - Models without a bundled brand now show the plugin's own stacked-layers mark instead of an empty dot (a failed icon load uses it too); the mark implies no brand, so it can never be misread as an attribution.
 - Brand marks are now served by the host on demand (`GET /api/all-usage/icon?key=…`): the bundle carries only the resolution metadata and drops from **365 KB to 231 KB**, and adding a brand no longer grows it. Every file is still validated by the SVG guard at build time, resolution is by manifest key (never a path) and the response is long-cached with an ETag.
+### Improvements
+- **The request log scrolls in its own box and pages as you go** — the list is capped at `min(62vh, 560px)` with its own scrollbar (`overscroll-behavior: contain`), the first paint fetches only the **newest 20** calls, and nearing the end (within 120px) pulls the next page of 20; the footer shows how many are loaded with a manual “Load more” as a fallback. A page that does not fill the box tops itself up, so the list can never end up unscrollable with more history behind it. Measured: a 486px box over 688px of rows, growing from 20 to **40** rows on scroll.
 ### Fixes
 - **Routes of one model now share a single filter entry** — `deepseek-v4.1-flash` (four routes), `deepseek-v4-flash` and `deepseek-ai/DeepSeek-V4-Flash` each took their own row and read as duplicates; the filter now groups by **model name** (case-insensitive, vendor namespace dropped) and the host compares the same key, while an exact identityKey still matches. Measured: 25 entries down to **23 = 22 models**, no duplicates.
 - **The model filter no longer shows the vendor namespace** — gateway ids such as `deepseek-ai/DeepSeek-V4-Flash` and `deepseek/deepseek-v4.1-flash` display the model alone (the provider has its own filter and the icon shows the brand), while the option's value stays the raw id so two routes never collapse into one filter; the scope line uses the short name as well. Measured: 0 of 25 options contain a slash, and selecting one still narrows the table to a single row.

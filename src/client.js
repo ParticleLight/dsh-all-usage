@@ -2107,6 +2107,20 @@ window.__ModuleLoader__.load({
       const tr = (zh, en) => language === 'en' ? en : zh
       const rows = Array.isArray(props.rows) ? props.rows : []
       const selected = React.useMemo(() => rows.find((row) => row.id === props.selectedId) || rows[0] || null, [rows, props.selectedId])
+      const scrollRef = React.useRef(null)
+      // Only the newest page is fetched up front; scrolling near the end pulls the
+      // next one. A page that does not fill the box is topped up, otherwise the box
+      // could not be scrolled and the rest of the history would be unreachable.
+      const pullNextPage = () => {
+        if (props.hasMore !== true || props.loading) return
+        if (typeof props.onLoadMore === 'function') props.onLoadMore()
+      }
+      React.useEffect(() => {
+        const element = scrollRef.current
+        if (element === null) return
+        if (props.hasMore !== true || props.loading) return
+        if (element.scrollHeight <= element.clientHeight + 4) pullNextPage()
+      }, [rows, props.hasMore, props.loading])
       const auditSource = (row) => row && row.materialization === 'ledger-recovery' ? tr('账本恢复', 'Ledger recovery') : row && row.materialization === 'ledger-reuse' ? tr('账本复用', 'Ledger reuse') : row && row.materialization === 'scan' ? tr('扫描', 'Scan') : row && row.materialization === 'live' ? tr('实时', 'Live') : tr('未知', 'Unknown')
       const auditTime = (row, detailed) => row && Number.isFinite(row.time) ? new Date(row.time).toLocaleString(language === 'en' ? 'en-US' : 'zh-CN', language === 'en' ? (detailed ? { timeZone: 'UTC' } : { timeZone: 'UTC', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : (detailed ? undefined : { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })) : '—'
       const select = (rowId) => { if (typeof props.onSelect === 'function') props.onSelect(rowId) }
@@ -2123,7 +2137,14 @@ window.__ModuleLoader__.load({
         ),
         props.error !== '' ? React.createElement('div', { className: 'uh-records-error', role: 'alert' }, props.error === 'stale' ? tr('数据已更新，正在重新加载日志…', 'Data changed; reloading logs…') : props.error === 'audit-export' ? tr('日志导出失败', 'Unable to export logs') : tr('日志加载失败，请重试', 'Unable to load logs')) : null,
         React.createElement('div', { className: 'uh-records-note' }, tr('按时间倒序显示可审计的 Token 调用；选择一行查看 turn / step 和完整 Token 分桶。', 'Token calls are newest first; select a row to inspect its turn / step and token buckets.')),
-        rows.length === 0 && !props.loading ? React.createElement('div', { className: 'uh-empty' }, tr('当前范围没有可审计的 Token 调用', 'No auditable Token calls in this scope')) : React.createElement('div', { className: 'uh-records-scroll' },
+        rows.length === 0 && !props.loading ? React.createElement('div', { className: 'uh-empty' }, tr('当前范围没有可审计的 Token 调用', 'No auditable Token calls in this scope')) : React.createElement('div', {
+          className: 'uh-records-scroll',
+          ref: scrollRef,
+          onScroll: (event) => {
+            const element = event.currentTarget
+            if (element.scrollTop + element.clientHeight >= element.scrollHeight - 120) pullNextPage()
+          },
+        },
           React.createElement('div', { className: 'uh-record-grid uh-record-header' },
             React.createElement('div', {}, tr('时间', 'Time')), React.createElement('div', {}, tr('Provider / 模型', 'Provider / Model')), React.createElement('div', { className: 'uh-record-num' }, 'turn / step'), React.createElement('div', { className: 'uh-record-num' }, tr('输入', 'Input')), React.createElement('div', { className: 'uh-record-num' }, tr('缓存命中', 'Cache read')), React.createElement('div', { className: 'uh-record-num' }, tr('缓存写入', 'Cache write')), React.createElement('div', { className: 'uh-record-num' }, tr('输出', 'Output')), React.createElement('div', { className: 'uh-record-num' }, tr('成本', 'Cost')), React.createElement('div', {}, tr('来源', 'Source')),
           ),
@@ -2488,7 +2509,9 @@ window.__ModuleLoader__.load({
 .uh-records-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:7px; }
 .uh-records-note { margin:8px 0 10px; color:var(--dsw-alias-label-secondary); font-size:11px; line-height:1.45; }
 .uh-records-error { margin:7px 0; color:var(--dsw-alias-warning, #a55b00); font-size:11px; }
-.uh-records-scroll { overflow:auto; border:1px solid var(--dsw-alias-border-l1); border-radius:8px; }
+/* The log scrolls inside its own box (and pulls the next page as it nears the end),
+   so a long history never pushes the rest of the panel off the screen. */
+.uh-records-scroll { max-height:min(62vh, 560px); overflow:auto; overscroll-behavior:contain; border:1px solid var(--dsw-alias-border-l1); border-radius:8px; }
 .uh-record-grid { display:grid; grid-template-columns:112px minmax(190px,1.45fr) 78px repeat(4,minmax(76px,.72fr)) 96px 82px; gap:0; min-width:900px; align-items:center; }
 .uh-record-grid > div { min-width:0; padding:8px 7px; border-bottom:1px solid var(--dsw-alias-border-l1); font-size:11px; }
 .uh-record-header { color:var(--dsw-alias-label-secondary); background:var(--dsw-alias-bg-layer-2); font-weight:600; }
@@ -3299,7 +3322,9 @@ window.__ModuleLoader__.load({
           }
           setAuditRows((prev) => prev.concat(data.items))
           setAuditCursor(data.nextCursor || null)
-          setAuditHasMore(data.hasMore === true)
+          // A page that brings nothing new ends the paging, so a stale hasMore flag
+          // cannot turn the scroll trigger into a loop.
+          setAuditHasMore(data.hasMore === true && data.items.length > 0)
           setAuditLoading(false)
           setAuditError('')
         }, (reason) => {

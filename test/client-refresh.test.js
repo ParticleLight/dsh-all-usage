@@ -458,6 +458,13 @@ test('renders cost totals, pricing status, and the merged price table controls',
   // A long provider or model list scrolls inside its menu instead of running past
   // the bottom of the window, and opens on the current choice.
   assert.match(source, /\.uh-filter-options \{ max-height:min\(60vh, 420px\); overflow-y:auto; overscroll-behavior:contain; \}/)
+  // The request log scrolls in its own box, starts with one page and pulls the next
+  // when the reader nears the end (or when a page does not fill the box).
+  assert.match(source, /\.uh-records-scroll \{ max-height:min\(62vh, 560px\); overflow:auto; overscroll-behavior:contain;/)
+  assert.match(source, /if \(element\.scrollTop \+ element\.clientHeight >= element\.scrollHeight - 120\) pullNextPage\(\)/)
+  assert.match(source, /if \(element\.scrollHeight <= element\.clientHeight \+ 4\) pullNextPage\(\)/)
+  assert.match(source, /setAuditHasMore\(data\.hasMore === true && data\.items\.length > 0\)/)
+  assert.match(source, /getUsageRecords\(selectedDetailScope, null, 20\)/)
   assert.match(source, /ref: active \? activeRef : undefined/)
   assert.match(source, /activeRef\.current\.scrollIntoView\(\{ block: 'nearest', inline: 'nearest' \}\)/)
   assert.match(source, /uh-pricing-rate-input \{ box-sizing:border-box/)
