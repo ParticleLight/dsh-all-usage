@@ -10,6 +10,7 @@
 - 没有品牌图标的模型改用插件自己的**层叠标记**（不再是空圆点），图标加载失败时也显示它 —— 这个标记本身不指向任何品牌，所以不会被误读成一次归属。
 - 品牌图标改为**宿主按需提供**（`GET /api/all-usage/icon?key=…`）：bundle 只携带解析元数据，体积 **365 KB → 231 KB**，以后新增品牌不再增加体积；每个图标仍在构建期过一遍 SVG 守卫，并按 key（而非路径）解析、长缓存 + ETag。
 ### 修复
+- **同一个模型的多个路由合并成一个筛选项** —— 之前 `deepseek-v4.1-flash`（4 条路由）、`deepseek-v4-flash` 与 `deepseek-ai/DeepSeek-V4-Flash` 会各占一行，看起来像重复；现在筛选按**模型名**归并（忽略大小写与 `供应商/` 前缀），宿主匹配同样按模型名比较（精确的 identityKey 仍然有效）。实测下拉从 25 项降到 **23 项 = 22 个模型**，无重复。
 - **模型筛选不再显示供应商命名空间** —— `deepseek-ai/DeepSeek-V4-Flash`、`deepseek/deepseek-v4.1-flash` 这类网关 id 只显示模型名（供应商另有筛选与图标），但选项的**取值仍是原始 id**，所以两条路由不会被合成一个筛选；导出/范围说明行同样用短名。实测 25 个选项里含 `/` 的为 0 个，选中后仍精确收敛到 1 行。
 - **供应商 / 模型筛选的下拉不再无限向下延伸** —— 面板限高 `min(60vh, 420px)` 并自带滚动（`overscroll-behavior: contain`，滚到底不会带动页面），打开时把当前选中项滚进可见区域。实测 23 个供应商：面板 430px（内容区 420px）、列表 746px、可内部滚动，且不再越过窗口底边。
 
@@ -22,6 +23,7 @@
 - Models without a bundled brand now show the plugin's own stacked-layers mark instead of an empty dot (a failed icon load uses it too); the mark implies no brand, so it can never be misread as an attribution.
 - Brand marks are now served by the host on demand (`GET /api/all-usage/icon?key=…`): the bundle carries only the resolution metadata and drops from **365 KB to 231 KB**, and adding a brand no longer grows it. Every file is still validated by the SVG guard at build time, resolution is by manifest key (never a path) and the response is long-cached with an ETag.
 ### Fixes
+- **Routes of one model now share a single filter entry** — `deepseek-v4.1-flash` (four routes), `deepseek-v4-flash` and `deepseek-ai/DeepSeek-V4-Flash` each took their own row and read as duplicates; the filter now groups by **model name** (case-insensitive, vendor namespace dropped) and the host compares the same key, while an exact identityKey still matches. Measured: 25 entries down to **23 = 22 models**, no duplicates.
 - **The model filter no longer shows the vendor namespace** — gateway ids such as `deepseek-ai/DeepSeek-V4-Flash` and `deepseek/deepseek-v4.1-flash` display the model alone (the provider has its own filter and the icon shows the brand), while the option's value stays the raw id so two routes never collapse into one filter; the scope line uses the short name as well. Measured: 0 of 25 options contain a slash, and selecting one still narrows the table to a single row.
 - **The provider and model filter menus no longer run past the bottom of the window** — the panel is capped at `min(60vh, 420px)` with its own scrollbar (`overscroll-behavior: contain`, so reaching the end does not scroll the page) and opens scrolled to the current choice. Measured with 23 providers: a 430px panel (420px content box) over a 746px list, scrolling internally and staying inside the window.
 > 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.

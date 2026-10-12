@@ -3395,16 +3395,28 @@ window.__ModuleLoader__.load({
       const filterOptions = React.useMemo(() => {
         const rangeModelOptions = Array.isArray(rangeOnlyAgg.perModel) ? rangeOnlyAgg.perModel.filter((row) => row && typeof row === 'object') : []
         const providerOptions = Array.from(new Set(rangeModelOptions.map((row) => typeof row.provider === 'string' && row.provider !== '' ? row.provider : null).filter((value) => value !== null))).sort()
+        // A filter is about a model, not a route: the option value is the model name
+        // (the part after any vendor namespace), and the host compares it the same
+        // way, so two routes for one model no longer appear as two identical entries.
         const modelFilterValue = (row) => {
           const structured = typeof row.actualModel === 'string' && row.actualModel !== '' ? row.actualModel : typeof row.requestedModel === 'string' && row.requestedModel !== '' ? row.requestedModel : null
-          if (structured !== null) return structured
+          if (structured !== null) return modelDisplayLabel(structured)
           const display = typeof row.model === 'string' && row.model !== '' ? row.model : (language === 'en' ? 'Unknown model' : '未知模型')
           const separator = display.indexOf(' / ')
           const legacyProvider = separator > 0 ? display.slice(0, separator) : ''
-          return separator > 0 && providerOptions.includes(legacyProvider) ? display.slice(separator + 3) : display
+          // Legacy rows carry the provider inside the label; strip it the same way as a
+          // structured id, otherwise one model keys differently per route and shows up
+          // twice in the filter.
+          return modelDisplayLabel(separator > 0 && providerOptions.includes(legacyProvider) ? display.slice(separator + 3) : display)
         }
-        const modelOptions = Array.from(new Set(rangeModelOptions.map(modelFilterValue)))
-          .filter((value) => value !== '')
+        const byModelKey = new Map()
+        for (const value of rangeModelOptions.map(modelFilterValue)) {
+          if (value === '') continue
+          const key = value.toLowerCase()
+          if (!byModelKey.has(key)) byModelKey.set(key, value)
+          else if (value === value.toLowerCase()) byModelKey.set(key, value)
+        }
+        const modelOptions = Array.from(byModelKey.values())
           .sort((left, right) => left.localeCompare(right))
           .map((value) => ({ value, label: modelDisplayLabel(value) }))
         const rangeWorkspaceTotals = new Map((Array.isArray(rangeOnlyAgg.perWs) ? rangeOnlyAgg.perWs : []).map((row) => [row.workspaceId, row]))

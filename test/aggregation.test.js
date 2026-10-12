@@ -967,6 +967,17 @@ test('serves structured scoped aggregates and privacy-safe paginated records', a
   const modelNameQuery = await call(app, '/api/all-usage/query', modelNameRequest)
   assert.equal(modelNameQuery.json().totals.input, 10)
   assert.equal(modelNameQuery.json().totals.sessions, 1)
+  // One model, several routes: a namespaced or differently-cased id must still land
+  // in the same filter, because the filter is about the model rather than the route.
+  for (const variant of ['vendor-ns/' + modelA.actualModel, modelA.actualModel.toUpperCase(), 'Vendor/' + modelA.actualModel.toUpperCase()]) {
+    const variantRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+    variantRequest.url = '/api/all-usage/query?start=' + dateText + '&end=' + dateText + '&utc=0&modelKey=' + encodeURIComponent(variant)
+    const variantQuery = await call(app, '/api/all-usage/query', variantRequest)
+    assert.equal(variantQuery.json().totals.input, 10, variant)
+  }
+  const otherModelRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
+  otherModelRequest.url = '/api/all-usage/query?start=' + dateText + '&end=' + dateText + '&utc=0&modelKey=' + encodeURIComponent('vendor-ns/deepseek-chat-mini')
+  assert.equal((await call(app, '/api/all-usage/query', otherModelRequest)).json().totals.calls, 0)
   const conflictingModelRequest = makeRequest('GET', { host: '127.0.0.1:3080' })
   conflictingModelRequest.url = '/api/all-usage/query?start=' + dateText + '&end=' + dateText + '&utc=0&provider=deepseek&modelKey=actual-b'
   const conflictingModelQuery = await call(app, '/api/all-usage/query', conflictingModelRequest)

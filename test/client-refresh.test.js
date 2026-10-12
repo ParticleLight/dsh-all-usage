@@ -174,9 +174,12 @@ test('uses language-style custom menus for unified filters', () => {
 test('keeps provider and model filters independent', () => {
   assert.ok(source.includes('const modelFilterValue = (row) =>'))
   assert.ok(source.includes('const rangeOnlyAgg = React.useMemo(() => rangeAgg(stats, range, useUtc, activeCustomRange)'))
-  assert.ok(source.includes('const modelOptions = Array.from(new Set(rangeModelOptions.map(modelFilterValue)))'))
-  // The option keeps the raw id as its value (what the host query matches) and
-  // shows the model without the vendor namespace.
+  // The option value is the model name (not the raw route id), so the same model
+  // served through two routes yields one entry; the label drops the namespace too.
+  assert.ok(source.includes("if (structured !== null) return modelDisplayLabel(structured)"))
+  assert.ok(source.includes("return modelDisplayLabel(separator > 0 && providerOptions.includes(legacyProvider) ? display.slice(separator + 3) : display)"))
+  assert.ok(source.includes('const byModelKey = new Map()'))
+  assert.ok(source.includes('if (!byModelKey.has(key)) byModelKey.set(key, value)'))
   assert.ok(source.includes('.map((value) => ({ value, label: modelDisplayLabel(value) }))'))
   assert.ok(source.includes('modelOptions.map((option) => { const icon = resolveModelIcon({ actualModel: option.value, requestedModel: option.value }); return { value: option.value, label: option.label, iconKey: icon === null ? null : icon.key } })'))
   assert.ok(source.includes("if (modelFilter !== null && !modelOptions.some((option) => option.value === modelFilter)) setModelFilter(null)"))
