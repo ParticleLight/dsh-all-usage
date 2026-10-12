@@ -448,6 +448,11 @@ test('renders cost totals, pricing status, and the merged price table controls',
   assert.match(source, /uh-pricing-price-table \{ width:100%; min-width:0; \}/)
   assert.match(source, /uh-pricing-table-wrap \{ max-height:392px; overflow-x:hidden;/)
   assert.match(source, /uh-pricing-row-actions \{ display:flex/)
+  // A long provider or model list scrolls inside its menu instead of running past
+  // the bottom of the window, and opens on the current choice.
+  assert.match(source, /\.uh-filter-options \{ max-height:min\(60vh, 420px\); overflow-y:auto; overscroll-behavior:contain; \}/)
+  assert.match(source, /ref: active \? activeRef : undefined/)
+  assert.match(source, /activeRef\.current\.scrollIntoView\(\{ block: 'nearest', inline: 'nearest' \}\)/)
   assert.match(source, /uh-pricing-rate-input \{ box-sizing:border-box/)
   assert.match(source, /uh-pricing-table-wrap \{[^}]*overflow-y:scroll/)
   assert.match(source, /uh-side-dialog \{[^}]*overflow-y:scroll/)

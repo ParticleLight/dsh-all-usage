@@ -2160,6 +2160,12 @@ window.__ModuleLoader__.load({
       const selected = options.find((option) => String(option.value) === value)
       const [open, setOpen] = React.useState(false)
       const menuRef = React.useRef(null)
+      const activeRef = React.useRef(null)
+      // A long list must open where the reader already is, not at the top.
+      React.useEffect(() => {
+        if (!open || activeRef.current === null) return
+        if (typeof activeRef.current.scrollIntoView === 'function') activeRef.current.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      }, [open])
       React.useEffect(() => {
         if (!open || typeof document === 'undefined') return undefined
         const closeMenu = (event) => {
@@ -2201,6 +2207,7 @@ window.__ModuleLoader__.load({
               type: 'button',
               role: 'option',
               'aria-selected': active,
+              ref: active ? activeRef : undefined,
               className: 'uh-language-option' + (active ? ' uh-on' : ''),
               onClick: () => choose(optionValue),
             },
@@ -2248,6 +2255,9 @@ window.__ModuleLoader__.load({
 .uh-language-option:hover, .uh-language-option:focus-visible { background:color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, var(--dsw-alias-bg-layer-2)); outline:0; }
 .uh-language-option.uh-on { background:color-mix(in srgb, var(--dsw-alias-brand-primary) 19%, var(--dsw-alias-bg-layer-2)); color:var(--dsw-alias-label-primary); font-weight:600; }
 .uh-language-option-check { margin-left:auto; color:var(--dsw-alias-brand-primary); }
+/* Provider and model lists grow with the ledger; the menu scrolls inside itself
+   instead of running past the bottom of the window. */
+.uh-filter-options { max-height:min(60vh, 420px); overflow-y:auto; overscroll-behavior:contain; }
 .uh-range { display:inline-flex; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; overflow:hidden; }
 .uh-range button { border:0; background:transparent; color:var(--dsw-alias-label-secondary); padding:4px 12px; font-size:12px; cursor:pointer; font-family:inherit; transition:background-color .15s ease, color .15s ease; }
 .uh-range button + button { border-left:1px solid var(--dsw-alias-border-l2); }

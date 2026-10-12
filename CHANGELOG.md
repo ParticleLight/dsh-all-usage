@@ -9,6 +9,8 @@
 - 打包门禁改为从 manifest 推导图标清单，图标测试从目录推导文件清单 —— 以后加品牌不再需要手改任何清单。
 - 没有品牌图标的模型改用插件自己的**层叠标记**（不再是空圆点），图标加载失败时也显示它 —— 这个标记本身不指向任何品牌，所以不会被误读成一次归属。
 - 品牌图标改为**宿主按需提供**（`GET /api/all-usage/icon?key=…`）：bundle 只携带解析元数据，体积 **365 KB → 231 KB**，以后新增品牌不再增加体积；每个图标仍在构建期过一遍 SVG 守卫，并按 key（而非路径）解析、长缓存 + ETag。
+### 修复
+- **供应商 / 模型筛选的下拉不再无限向下延伸** —— 面板限高 `min(60vh, 420px)` 并自带滚动（`overscroll-behavior: contain`，滚到底不会带动页面），打开时把当前选中项滚进可见区域。实测 23 个供应商：面板 430px（内容区 420px）、列表 746px、可内部滚动，且不再越过窗口底边。
 
 ### Features
 - **43 model brands** — 32 new marks from the pinned lobe-icons revision (Mistral, NVIDIA, Cohere, Amazon Nova, Microsoft, Perplexity, Baidu, Tencent, StepFun, Baichuan, SenseNova, InternLM, LongCat, Xiaomi MiMo, AI21, IBM, Upstage, Liquid, Ai2, BAAI, Voyage, ByteDance Seed, Kling, Skywork, Aion, Nous, TII, Aleph Alpha, Yandex, Snowflake, iFlytek), nine of which had `currentColor` baked to a fixed neutral and are marked `modified`.
@@ -18,6 +20,8 @@
 - The packaging gate derives the icon list from the manifest and the icon tests derive it from the directory, so adding a brand no longer requires editing either list.
 - Models without a bundled brand now show the plugin's own stacked-layers mark instead of an empty dot (a failed icon load uses it too); the mark implies no brand, so it can never be misread as an attribution.
 - Brand marks are now served by the host on demand (`GET /api/all-usage/icon?key=…`): the bundle carries only the resolution metadata and drops from **365 KB to 231 KB**, and adding a brand no longer grows it. Every file is still validated by the SVG guard at build time, resolution is by manifest key (never a path) and the response is long-cached with an ETag.
+### Fixes
+- **The provider and model filter menus no longer run past the bottom of the window** — the panel is capped at `min(60vh, 420px)` with its own scrollbar (`overscroll-behavior: contain`, so reaching the end does not scroll the page) and opens scrolled to the current choice. Measured with 23 providers: a 430px panel (420px content box) over a 746px list, scrolling internally and staying inside the window.
 > 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.18 (2026-10-07)
