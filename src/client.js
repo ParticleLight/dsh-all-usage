@@ -1291,6 +1291,20 @@ window.__ModuleLoader__.load({
       if (dayRows === 0) return scoped === 0
       return Math.abs(scoped - dayRows) <= Math.max(dayRows * 0.05, 200000)
     }
+    /**
+     * The hourly points of one day, accepted only while their own sum matches the day
+     * row the snapshot carries. The host answers both from different structures, and a
+     * disagreement means the shape would not add up to the number above it.
+     */
+    function trustedHourlyRows(hourly, stats, date) {
+      const dayRow = stats !== null && stats !== undefined && Array.isArray(stats.byDay) ? stats.byDay.find((entry) => entry.date === date) : undefined
+      const dayTotal = dayRow === undefined ? null : processedTokensOf(dayRow.tokens)
+      if (dayTotal === null) return []
+      let hourlyTotal = 0
+      for (const row of hourly) hourlyTotal += processedTokensOf(row.tokens) || 0
+      if (hourlyTotal <= 0) return []
+      return Math.abs(hourlyTotal - dayTotal) <= Math.max(dayTotal * 0.05, 200000) ? hourly : []
+    }
     function heatCellLabel(date, count, language) {
       const text = humanDate(date, language)
       const uses = Number.isFinite(count) && count > 0 ? count : 0
@@ -3783,7 +3797,15 @@ window.__ModuleLoader__.load({
       const pricingRows = React.useMemo(() => pricingOpen ? pricingRowsOf(currentPricing, pricingDraft, pricingPickedTargets) : [], [pricingOpen, currentPricing, pricingDraft, pricingPickedTargets])
       const trendRows = React.useMemo(() => {
         const bounds = queryScope !== null ? { start: queryScope.start, end: queryScope.end } : resolveRangeBounds(stats, range, useUtc, activeCustomRange)
-        const hourlyRows = queryUsable && queryScope !== null && queryScope.start === queryScope.end && queryResult && Array.isArray(queryResult.hourly) ? buildTrendHourlyRows(queryResult.hourly, useUtc) : []
+        // Today's hourly series is a shape, not a total: it is shown while its own sum
+        // agrees with the day row the snapshot carries, so a drifting source costs the
+        // curve instead of the numbers.
+        const hourlySource = queryScope !== null && queryScope.start === queryScope.end && queryResult && Array.isArray(queryResult.hourly) && queryResult.hourly.length > 0
+          ? trustedHourlyRows(queryResult.hourly, stats, queryScope.start)
+          : []
+        const hourlyRows = hourlySource.length > 0 ? buildTrendHourlyRows(hourlySource, useUtc) : []
+          ? trustedHourlyRows(queryResult.hourly, stats, queryScope.start)
+          : []
         return hourlyRows.length > 0 ? hourlyRows : buildTrendRows(queryUsable && queryResult && Array.isArray(queryResult.daily) ? queryResult.daily : activeDayRows, bounds, useUtc)
       }, [queryScope, queryUsable, queryResult, activeDayRows, stats, range, useUtc, activeCustomRangeKey])
       const trendAnimationKey = queryUsable && queryResult ? queryKey + ':' + (queryVersion(queryResult) || 'query') : queryKey

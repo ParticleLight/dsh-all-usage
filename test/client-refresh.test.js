@@ -206,7 +206,10 @@ test('memoizes expensive scope derivations and active detail panels', () => {
 test('selects hourly query data for single-day trend scopes', () => {
   assert.match(source, /Array\.isArray\(queryResult\.hourly\)/)
   assert.match(source, /queryScope !== null && queryScope\.start === queryScope\.end/)
-  assert.match(source, /buildTrendHourlyRows\(queryResult\.hourly, useUtc\)/)
+  // The hourly series is filtered through the day row before it is drawn, so the
+  // assertion covers both the gate and the builder it feeds.
+  assert.match(source, /trustedHourlyRows\(queryResult\.hourly, stats, queryScope\.start\)/)
+  assert.match(source, /buildTrendHourlyRows\(hourlySource, useUtc\)/)
   assert.match(source, /Hourly Token usage trend/)
   assert.match(source, /pointLabel\(row, true\)/)
 })
