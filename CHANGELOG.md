@@ -2,38 +2,38 @@
 
 ## v1.2.0（未发布）
 ### 新功能
-- **模型图标扩到 43 个品牌** —— 从 lobe-icons 固定 revision 取 32 个新商标（Mistral、NVIDIA、Cohere、Amazon Nova、Microsoft、Perplexity、百度、腾讯、阶跃、百川、商汤、InternLM、LongCat、小米 MiMo、AI21、IBM、Upstage、Liquid、Ai2、BAAI、Voyage、字节 Seed、Kling、Skywork、Aion、Nous、TII、Aleph Alpha、Yandex、Snowflake、讯飞星火），其中 9 个 `currentColor` 烘成固定中性色并标 `modified`。
-- **网关与云的包裹写法能还原到真实品牌** —— `openai-gpt-5.5`、`databricks-claude-*`、`google.gemma-3-12b-it`、`eu.anthropic.claude-*`、SAP 的 `anthropic--claude-*` 都按真实品牌着色；原始 id 优先，因此 `deepseek-v4` 不会被包裹规则抢走，包着未知模型时仍然中性。另给 10 个已覆盖品牌补「无连字符」前缀（`llama3-70b`、`gemma3-12b`、`glm4-9b`、`gpt4o`），且只在后跟数字时命中。
+- **模型图标扩到 43 个品牌** —— 从 lobe-icons 固定 revision 取 32 个新商标；9 个 `currentColor` 烘成固定中性色。
+- **网关 / 云的包裹 id 还原真实品牌** —— 覆盖 `openai-gpt-5.5`、`databricks-claude-*`、`eu.anthropic.claude-*` 等写法，原始 id 仍优先。
 ### 优化
-- **趋势图点数封顶 180** —— 半年以内按天，更长先降到 3 天一点，再按需扩到周 / 月 / 季 / 年，图表不再随时间无限变长；桶不重叠不丢天，面板标注汇总粒度，多日点不再进入当日明细。实测 1 年 122 点、20 年 120 点。
-- 图标溯源路径修正：原先 11 条记录的 `packages/static-svg/svg/` 在该 revision 并不存在（实际是 `icons/`），并新增「upstream 路径必须指向 bundled 文件」的断言（`openai-color.svg` 是唯一记录在案的例外）。
-- 打包门禁改为从 manifest 推导图标清单，图标测试从目录推导文件清单 —— 以后加品牌不再需要手改任何清单。
-- 没有品牌图标的模型改用插件自己的**层叠标记**（不再是空圆点），图标加载失败时也显示它 —— 这个标记本身不指向任何品牌，所以不会被误读成一次归属。
-- 品牌图标改为**宿主按需提供**（`GET /api/all-usage/icon?key=…`）：bundle 只携带解析元数据，体积 **365 KB → 231 KB**，以后新增品牌不再增加体积；每个图标仍在构建期过一遍 SVG 守卫，并按 key（而非路径）解析、长缓存 + ETag。
-- **DeepSeek 余额按金额显示两位小数** —— 主数值 `¥13.8600` → **`¥13.86`**，同一张卡的「赠送 ¥0.00 · 充值 ¥13.86」同步；**其它币种的余额保持原来的四位**（接口给什么就显示什么）。
-- **概览那一行卡片压缩了约四分之一** —— 卡片内边距 16→10px、大数字 26→22px（卡内 23→20px）、命中率数值 24→20px 与说明 14→12px、进度条 7→5px、卡片内间距与圆角同步收紧；高度由「各工作区」卡片决定，它现在只列 **2** 个（其余指向明细表）。实测整行 **156px → 114px**（−27%），五张卡高度一致。
-- **请求日志改为内部滚动 + 分页加载** —— 列表限高 `min(62vh, 560px)` 并自带滚动（`overscroll-behavior: contain`），首屏只取**最近 20 条**，滚到距底部 120px 内自动取下一页（每页 20 条，页脚显示「已显示 N 条」并保留手动「加载更多」兜底）；若一页没填满容器会自动补下一页，避免「无法滚动又拿不到更多」的死角。实测 486px 容器 / 688px 内容 → 滚到底后 20 → **40 条**。
+- **趋势图点数封顶 180** —— 半年以内按天，更长先降到 3 天一点再按需扩到周 / 月 / 季 / 年；桶不重叠不丢天，面板标注汇总粒度。实测 1 年 122 点、20 年 120 点。
+- 图标溯源修正：11 条记录的路径改为 bundled 的 `icons/`，并断言 upstream 路径必须指向 bundled 文件。
+- 图标清单改由 manifest / 目录推导 —— 以后加品牌不用手改清单。
+- 没有品牌图标的模型用插件自己的**层叠标记**（不是空圆点），不指向任何品牌。
+- 品牌图标改**宿主按需提供**（`GET /api/all-usage/icon?key=`），bundle **365 KB → 231 KB**，加品牌不再增体积。
+- **DeepSeek 余额两位小数** —— 主数值 `¥13.8600` → **`¥13.86`**；其它币种仍四位。
+- **概览卡片行压缩约四分之一** —— 内边距 16→10px、大数字 26→22px 等，整行 **156 → 114px**。
+- **请求日志内部滚动 + 分页** —— 首屏最近 20 条，滚到底再取 20 条（实测 20 → **40 条**）。
 ### 修复
-- **同一个模型的多个路由合并成一个筛选项** —— 之前 `deepseek-v4.1-flash`（4 条路由）、`deepseek-v4-flash` 与 `deepseek-ai/DeepSeek-V4-Flash` 会各占一行，看起来像重复；现在筛选按**模型名**归并（忽略大小写与 `供应商/` 前缀），宿主匹配同样按模型名比较（精确的 identityKey 仍然有效）。实测下拉从 25 项降到 **23 项 = 22 个模型**，无重复。
-- **模型筛选不再显示供应商命名空间** —— `deepseek-ai/DeepSeek-V4-Flash`、`deepseek/deepseek-v4.1-flash` 这类网关 id 只显示模型名（供应商另有筛选与图标），但选项的**取值仍是原始 id**，所以两条路由不会被合成一个筛选；导出/范围说明行同样用短名。实测 25 个选项里含 `/` 的为 0 个，选中后仍精确收敛到 1 行。
-- **供应商 / 模型筛选的下拉不再无限向下延伸** —— 面板限高 `min(60vh, 420px)` 并自带滚动（`overscroll-behavior: contain`，滚到底不会带动页面），打开时把当前选中项滚进可见区域。实测 23 个供应商：面板 430px（内容区 420px）、列表 746px、可内部滚动，且不再越过窗口底边。
+- **同一模型的多个路由合并为一个筛选项** —— 按模型名归并（忽略大小写与 `供应商/` 前缀），宿主同样按模型名匹配。
+- **模型筛选不再显示供应商命名空间** —— 只显示模型名，取值仍是原始 id（实测 25 项里含 `/` 的为 0）。
+- **供应商 / 模型下拉不再无限下延** —— 限高 `min(60vh, 420px)` 内滚，打开时滚到当前选中项。
 
 ### Features
-- **43 model brands** — 32 new marks from the pinned lobe-icons revision (Mistral, NVIDIA, Cohere, Amazon Nova, Microsoft, Perplexity, Baidu, Tencent, StepFun, Baichuan, SenseNova, InternLM, LongCat, Xiaomi MiMo, AI21, IBM, Upstage, Liquid, Ai2, BAAI, Voyage, ByteDance Seed, Kling, Skywork, Aion, Nous, TII, Aleph Alpha, Yandex, Snowflake, iFlytek), nine of which had `currentColor` baked to a fixed neutral and are marked `modified`.
-- **Gateway and cloud envelopes resolve to the real brand** — `openai-gpt-5.5`, `databricks-claude-*`, `google.gemma-3-12b-it`, `eu.anthropic.claude-*` and SAP's `anthropic--claude-*`; the raw id is always tried first, so `deepseek-v4` cannot lose its brand to the rule and an envelope around an unknown model stays neutral. Ten covered brands also gained a bare prefix for ids that drop the hyphen (`llama3-70b`, `gemma3-12b`, `glm4-9b`, `gpt4o`), which only matches when a digit follows.
+- **43 model brands** — 32 new marks from the pinned lobe-icons revision; nine had currentColor baked to a fixed neutral.
+- **Gateway and cloud ids resolve to the real brand** — covers openai-gpt-5.5, databricks-claude-*, eu.anthropic.claude-*; the raw id still wins.
 ### Improvements
-- **The trend chart is capped at 180 points** — a span up to half a year stays daily, a longer one drops to three days first and widens to week / month / quarter / year as needed, so the chart can no longer grow with the years of history behind it; buckets neither overlap nor drop a day, the panel names the stride, and a multi-day point skips the single-day drilldown. Measured: a year is 122 points, 20 years 120.
-- Icon provenance corrected: the original eleven entries recorded `packages/static-svg/svg/`, which does not exist at that revision (it is `icons/`), and a test now asserts that an upstream path names the file it came from (`openai-color.svg` is the documented exception).
-- The packaging gate derives the icon list from the manifest and the icon tests derive it from the directory, so adding a brand no longer requires editing either list.
-- Models without a bundled brand now show the plugin's own stacked-layers mark instead of an empty dot (a failed icon load uses it too); the mark implies no brand, so it can never be misread as an attribution.
-- Brand marks are now served by the host on demand (`GET /api/all-usage/icon?key=…`): the bundle carries only the resolution metadata and drops from **365 KB to 231 KB**, and adding a brand no longer grows it. Every file is still validated by the SVG guard at build time, resolution is by manifest key (never a path) and the response is long-cached with an ETag.
-- **The DeepSeek balance reads with two decimals** — the headline `¥13.8600` becomes **`¥13.86`** and the same card's “赠送 ¥0.00 · 充值 ¥13.86” follows, while a balance in any other currency keeps the **four decimals the API reports**.
-- **The summary row is about a quarter shorter** — card padding 16→10px, the big numbers 26→22px (23→20px inside cards), the cache-rate value 24→20px with its caption 14→12px, progress bars 7→5px, and tighter inner gaps and radii. The row height is set by the workspace card, which now lists **two** bars and points at the details table for the rest. Measured: **156px → 114px** (−27%), with all five cards matching.
-- **The request log scrolls in its own box and pages as you go** — the list is capped at `min(62vh, 560px)` with its own scrollbar (`overscroll-behavior: contain`), the first paint fetches only the **newest 20** calls, and nearing the end (within 120px) pulls the next page of 20; the footer shows how many are loaded with a manual “Load more” as a fallback. A page that does not fill the box tops itself up, so the list can never end up unscrollable with more history behind it. Measured: a 486px box over 688px of rows, growing from 20 to **40** rows on scroll.
+- **The trend chart is capped at 180 points** — a span up to half a year stays daily, a longer one drops to three days first and widens on demand; buckets never overlap or drop a day, and the panel names the stride.
+- Icon provenance corrected: eleven entries now point at the bundled icons/ path, and a test asserts an upstream path names the file it came from.
+- The icon list is derived from the manifest and the directory, so a new brand needs no hand-edited list.
+- A model without a bundled brand shows the plugin own stacked-layers mark (never an empty dot), which implies no brand.
+- Brand marks are served by the host on demand (GET /api/all-usage/icon?key=), dropping the bundle from 365 KB to 231 KB; a new brand no longer grows it.
+- **The DeepSeek balance reads with two decimals** — ¥13.8600 becomes ¥13.86, while any other currency keeps the four the API reports.
+- **The summary row is about a quarter shorter** — padding 16 to 10px, big numbers 26 to 22px: 156 down to 114px.
+- **The request log scrolls in its own box and pages as you go** — newest 20 rows first, 20 more at the end (20 to 40 measured).
 ### Fixes
-- **Routes of one model now share a single filter entry** — `deepseek-v4.1-flash` (four routes), `deepseek-v4-flash` and `deepseek-ai/DeepSeek-V4-Flash` each took their own row and read as duplicates; the filter now groups by **model name** (case-insensitive, vendor namespace dropped) and the host compares the same key, while an exact identityKey still matches. Measured: 25 entries down to **23 = 22 models**, no duplicates.
-- **The model filter no longer shows the vendor namespace** — gateway ids such as `deepseek-ai/DeepSeek-V4-Flash` and `deepseek/deepseek-v4.1-flash` display the model alone (the provider has its own filter and the icon shows the brand), while the option's value stays the raw id so two routes never collapse into one filter; the scope line uses the short name as well. Measured: 0 of 25 options contain a slash, and selecting one still narrows the table to a single row.
-- **The provider and model filter menus no longer run past the bottom of the window** — the panel is capped at `min(60vh, 420px)` with its own scrollbar (`overscroll-behavior: contain`, so reaching the end does not scroll the page) and opens scrolled to the current choice. Measured with 23 providers: a 430px panel (420px content box) over a 746px list, scrolling internally and staying inside the window.
+- **Routes of one model share a single filter entry** — grouped by model name (case ignored, vendor namespace dropped), matched the same way on the host.
+- **The model filter no longer shows the vendor namespace** — the model name only, while the value stays the raw id (0 of 25 entries still contain a slash).
+- **The provider and model menus no longer run past the window** — capped at min(60vh, 420px) with their own scroll.
 > 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.18 (2026-10-07)
