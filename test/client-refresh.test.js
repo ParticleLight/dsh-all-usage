@@ -185,7 +185,9 @@ test('keeps provider and model filters independent', () => {
   assert.ok(source.includes('const byModelKey = new Map()'))
   assert.ok(source.includes('if (!byModelKey.has(key)) byModelKey.set(key, value)'))
   assert.ok(source.includes('.map((value) => ({ value, label: modelDisplayLabel(value) }))'))
-  assert.ok(source.includes('modelOptions.map((option) => { const icon = resolveModelIcon({ actualModel: option.value, requestedModel: option.value }); return { value: option.value, label: option.label, iconKey: icon === null ? null : icon.key } })'))
+  // Icon resolution moved out of the render body: the menu list is memoised and
+  // each option carries its resolved icon key.
+  assert.ok(source.includes('const modelFilterOptions = React.useMemo(() =>'))
   assert.ok(source.includes("if (modelFilter !== null && !modelOptions.some((option) => option.value === modelFilter)) setModelFilter(null)"))
   assert.ok(source.includes('option.iconKey === undefined || option.iconKey === null'))
   assert.ok(source.includes('React.createElement(MemoModelIcon, { iconKey, size: 14 })'))

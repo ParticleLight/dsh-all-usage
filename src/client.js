@@ -2409,6 +2409,10 @@ window.__ModuleLoader__.load({
       )
     }
 
+    // Memoised so an unrelated page render (a poll, a hover) cannot rebuild the
+    // menus' option rows; their lists are memoised at the call site.
+    const MemoUsageFilterMenu = React.memo(UsageFilterMenu)
+
     const CSS = `
 .uh-page { display:flex; flex-direction:column; gap:14px; padding:2px 2px 28px; font-family:inherit; }
 .uh-head { position:relative; z-index:20; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
@@ -3619,6 +3623,13 @@ window.__ModuleLoader__.load({
         return { providerOptions, modelOptions, rangeWorkspaceOptions, rangeWorkspaceIds: new Set(rangeWorkspaceOptions.map((workspace) => workspace.id)) }
       }, [rangeOnlyAgg.perModel, rangeOnlyAgg.perWs, workspaces, language])
       const { providerOptions, modelOptions, rangeWorkspaceOptions, rangeWorkspaceIds } = filterOptions
+      // The three filter menus are memoised, so their option lists have to keep a
+      // stable identity: rebuilding them per render was the reason opening a menu
+      // cost ~157ms even with only a couple of dozen entries.
+      const workspaceFilterOptions = React.useMemo(() => [{ value: '', label: language === 'en' ? 'All workspaces' : '全部工作区' }].concat(rangeWorkspaceOptions.map((w) => ({ value: w.id, label: wsTitle(w.id) }))), [rangeWorkspaceOptions, wsTitle, language])
+      const providerFilterOptions = React.useMemo(() => [{ value: '', label: language === 'en' ? 'All providers' : '全部供应商' }].concat(providerOptions.map((value) => ({ value, label: value }))), [providerOptions, language])
+      // Icons resolve at list build time instead of inside the render.
+      const modelFilterOptions = React.useMemo(() => [{ value: '', label: language === 'en' ? 'All models' : '全部模型' }].concat(modelOptions.map((option) => ({ value: option.value, label: option.label, iconKey: (() => { const icon = resolveModelIcon({ actualModel: option.value, requestedModel: option.value }); return icon === null ? null : icon.key })() }))), [modelOptions, language])
       const workspaceLookup = React.useMemo(() => {
         const byId = new Map()
         const indexes = new Map()
@@ -4823,31 +4834,31 @@ window.__ModuleLoader__.load({
           ),
         ),
         React.createElement('div', { className: 'uh-filter-bar', role: 'group', 'aria-label': tr('统一筛选', 'Unified filters') },
-          React.createElement(UsageFilterMenu, {
+          React.createElement(MemoUsageFilterMenu, {
             label: tr('全部工作区', 'All workspaces'),
             ariaLabel: tr('工作区筛选', 'Workspace filter'),
             className: 'uh-filter-workspace',
             icon: 'folder',
             value: wsFilter || '',
-            options: [{ value: '', label: tr('全部工作区', 'All workspaces') }].concat(rangeWorkspaceOptions.map((w) => ({ value: w.id, label: wsTitle(w.id) }))),
+            options: workspaceFilterOptions,
             onChange: (value) => setWsFilter(value || null),
           }),
-          React.createElement(UsageFilterMenu, {
+          React.createElement(MemoUsageFilterMenu, {
             label: tr('全部供应商', 'All providers'),
             ariaLabel: tr('供应商筛选', 'Provider filter'),
             className: 'uh-filter-provider',
             icon: 'chart',
             value: providerFilter || '',
-            options: [{ value: '', label: tr('全部供应商', 'All providers') }].concat(providerOptions.map((value) => ({ value, label: value }))),
+            options: providerFilterOptions,
             onChange: (value) => chooseProvider(value),
           }),
-          React.createElement(UsageFilterMenu, {
+          React.createElement(MemoUsageFilterMenu, {
             label: tr('全部模型', 'All models'),
             ariaLabel: tr('模型筛选', 'Model filter'),
             className: 'uh-filter-model',
             icon: 'cache',
             value: modelFilter || '',
-            options: [{ value: '', label: tr('全部模型', 'All models') }].concat(modelOptions.map((option) => { const icon = resolveModelIcon({ actualModel: option.value, requestedModel: option.value }); return { value: option.value, label: option.label, iconKey: icon === null ? null : icon.key } })),
+            options: modelFilterOptions,
             onChange: (value) => chooseModel(value),
           }),
           (wsFilter !== null || providerFilter !== null || modelFilter !== null) ? React.createElement('button', { type: 'button', className: 'uh-filter-clear', onClick: clearFilters }, tr('清除筛选', 'Clear filters')) : null,
