@@ -1384,21 +1384,112 @@ window.__ModuleLoader__.load({
       const tokens = row && row.tokens && typeof row.tokens === 'object' ? row.tokens : row || {}
       return { input: Number.isFinite(tokens.input) ? tokens.input : 0, output: Number.isFinite(tokens.output) ? tokens.output : 0, cacheRead: Number.isFinite(tokens.cacheRead) ? tokens.cacheRead : 0, cacheWrite: Number.isFinite(tokens.cacheWrite) ? tokens.cacheWrite : 0, reasoning: Number.isFinite(tokens.reasoning) ? tokens.reasoning : 0 }
     }
-    function buildTrendRows(rows, bounds, utc) {
+    function shiftCalendarDateText(date, days, utc) {
+      const parts = date.split('-').map(Number)
+      const cursor = utc ? new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + days)) : new Date(parts[0], parts[1] - 1, parts[2] + days)
+      return fmtDate(cursor, utc)
+    }
+    // A daily series is capped at this many points; a longer span is summarised
+    // so the chart can never grow with the years of history behind it.
+    const TREND_MAX_POINTS = 180
+    // Calendar-aligned strides, each roughly double the previous one, so any span
+    // first visits the fine ones (1, 2, 3, 4, 8, 12, 24 weeks, then months) and
+    // takes the first that fits the point budget.
+    const TREND_BUCKET_STEPS = [
+      { days: 7, unit: 'week', stride: 1 },
+      { days: 14, unit: 'week', stride: 2 },
+      { days: 21, unit: 'week', stride: 3 },
+      { days: 28, unit: 'week', stride: 4 },
+      { days: 56, unit: 'week', stride: 8 },
+      { days: 84, unit: 'week', stride: 12 },
+      { days: 168, unit: 'week', stride: 24 },
+      { days: 30, unit: 'month', stride: 1 },
+      { days: 61, unit: 'month', stride: 2 },
+      { days: 91, unit: 'month', stride: 3 },
+      { days: 182, unit: 'month', stride: 6 },
+      { days: 365, unit: 'month', stride: 12 }
+    ]
+    function trendBucketStepFor(days, maxPoints) {
+      if (!Number.isFinite(days) || days <= maxPoints) return null
+      for (let index = 0; index < TREND_BUCKET_STEPS.length - 1; index += 1) {
+        if (days <= TREND_BUCKET_STEPS[index].days * maxPoints) return TREND_BUCKET_STEPS[index]
+      }
+      return TREND_BUCKET_STEPS[TREND_BUCKET_STEPS.length - 1]
+    }
+    function buildTrendRows(rows, bounds, utc, options) {
       if (bounds === null || typeof bounds !== 'object') return []
+      const maxPoints = options && Number.isFinite(options.maxPoints) ? options.maxPoints : TREND_MAX_POINTS
       const source = new Map((Array.isArray(rows) ? rows : []).filter((row) => row && typeof row.date === 'string').map((row) => [row.date, row]))
       const startParts = bounds.start.split('-').map(Number)
       const endParts = bounds.end.split('-').map(Number)
       const cursor = utc ? new Date(Date.UTC(startParts[0], startParts[1] - 1, startParts[2])) : new Date(startParts[0], startParts[1] - 1, startParts[2])
       const end = utc ? new Date(Date.UTC(endParts[0], endParts[1] - 1, endParts[2])) : new Date(endParts[0], endParts[1] - 1, endParts[2])
+      const step = trendBucketStepFor(Math.round((end.getTime() - cursor.getTime()) / 86400000), maxPoints)
+      if (step === null) {
+        const result = []
+        while (cursor.getTime() <= end.getTime()) {
+          const date = fmtDate(cursor, utc)
+          const row = source.get(date)
+          const tokens = rowTokens(row)
+          result.push({ date, turns: row && Number.isFinite(row.turns) ? row.turns : 0, calls: row && Number.isFinite(row.calls) ? row.calls : 0, sessions: row && Number.isFinite(row.sessions) ? row.sessions : 0, tokens, cost: costAggregate(row), total: tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite + tokens.reasoning, bucket: { start: date, end: date, days: 1, granularity: 'day' } })
+          if (utc) cursor.setUTCDate(cursor.getUTCDate() + 1)
+          else cursor.setDate(cursor.getDate() + 1)
+        }
+        return result
+      }
+      return buildBucketedTrendRows(source, bounds.start, bounds.end, utc, step)
+    }
+    function buildBucketedTrendRows(source, startDate, endDate, utc, step) {
       const result = []
-      while (cursor.getTime() <= end.getTime()) {
-        const date = fmtDate(cursor, utc)
-        const row = source.get(date)
-        const tokens = rowTokens(row)
-        result.push({ date, turns: row && Number.isFinite(row.turns) ? row.turns : 0, calls: row && Number.isFinite(row.calls) ? row.calls : 0, sessions: row && Number.isFinite(row.sessions) ? row.sessions : 0, tokens, cost: costAggregate(row), total: tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite + tokens.reasoning })
-        if (utc) cursor.setUTCDate(cursor.getUTCDate() + 1)
-        else cursor.setDate(cursor.getDate() + 1)
+      let bucketStart = startDate
+      while (bucketStart <= endDate) {
+        const startParts = bucketStart.split('-').map(Number)
+        let nextText
+        if (step.unit === 'week') {
+          // Weeks stay tied to Monday so a bucket cannot drift by the day the
+          // range happens to start on.
+          const weekday = utc ? new Date(Date.UTC(startParts[0], startParts[1] - 1, startParts[2])).getUTCDay() : new Date(startParts[0], startParts[1] - 1, startParts[2]).getDay()
+          // Snap the end to Monday and keep the whole stride inside the bucket, so
+          // a week bucket is exactly N weeks (7/14/21/28... days) and only the
+          // first one can be short when the range itself starts mid-week.
+          nextText = shiftCalendarDateText(bucketStart, step.stride * 7 - (weekday === 1 ? 0 : (weekday + 6) % 7), utc)
+        } else {
+          const cursor = utc ? new Date(Date.UTC(startParts[0], startParts[1] - 1, startParts[2])) : new Date(startParts[0], startParts[1] - 1, startParts[2])
+          if (utc) cursor.setUTCMonth(cursor.getUTCMonth() + step.stride)
+          else cursor.setMonth(cursor.getMonth() + step.stride)
+          nextText = fmtDate(cursor, utc)
+        }
+        // A day-by-day walk needs no month-length arithmetic and keeps both
+        // calendar modes on the same code path.
+        const bucketEnd = shiftCalendarDateText(nextText, -1, utc)
+        const last = bucketEnd > endDate ? endDate : bucketEnd
+        const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }
+        const cost = emptyCostAggregate()
+        let turns = 0
+        let calls = 0
+        let sessions = 0
+        let total = 0
+        let days = 0
+        let day = bucketStart
+        while (day <= last) {
+          const row = source.get(day)
+          const dayTokens = rowTokens(row)
+          turns += row && Number.isFinite(row.turns) ? row.turns : 0
+          calls += row && Number.isFinite(row.calls) ? row.calls : 0
+          sessions += row && Number.isFinite(row.sessions) ? row.sessions : 0
+          tokens.input += dayTokens.input
+          tokens.output += dayTokens.output
+          tokens.cacheRead += dayTokens.cacheRead
+          tokens.cacheWrite += dayTokens.cacheWrite
+          tokens.reasoning += dayTokens.reasoning
+          total += dayTokens.input + dayTokens.output + dayTokens.cacheRead + dayTokens.cacheWrite + dayTokens.reasoning
+          addCostAggregate(cost, row)
+          days += 1
+          day = shiftCalendarDateText(day, 1, utc)
+        }
+        result.push({ date: bucketStart, turns, calls, sessions, tokens, cost, total, bucket: { start: bucketStart, end: last, days, granularity: step.unit, stride: step.stride } })
+        if (last >= endDate) break
+        bucketStart = shiftCalendarDateText(last, 1, utc)
       }
       return result
     }
@@ -1424,6 +1515,51 @@ window.__ModuleLoader__.load({
       if (row && Number.isFinite(row.time)) return trendHourLabel(row.time, language, detailed)
       if (!row || typeof row.date !== 'string') return ''
       return detailed ? humanDate(row.date, language) : row.date.slice(5)
+    }
+    /**
+     * A span longer than TREND_MAX_POINTS days is summarised into calendar buckets, so
+     * one point can hold several days. The label then names the span instead of
+     * pretending the point is one day, and such a point cannot open a single day.
+     */
+    function trendRowIsRange(row) {
+      const bucket = row && row.bucket && typeof row.bucket === 'object' ? row.bucket : null
+      return bucket !== null && bucket.days > 1 && typeof bucket.end === 'string'
+    }
+    /** The stride most rows use: the first and last bucket can be partial. */
+    function trendBucketStrideDays(rows) {
+      const counts = new Map()
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const days = row && row.bucket && Number.isFinite(row.bucket.days) ? row.bucket.days : 0
+        if (days <= 0) continue
+        counts.set(days, (counts.get(days) || 0) + 1)
+      }
+      let best = 0
+      let bestCount = 0
+      for (const [days, count] of counts) {
+        if (count > bestCount || (count === bestCount && days > best)) { best = days; bestCount = count }
+      }
+      return best
+    }
+    /** Names the stride on screen: "Weekly", "Every 2 weeks", "Quarterly", "Yearly". */
+    function trendStrideLabel(rows, language) {
+      const first = rows && rows[0] && rows[0].bucket ? rows[0].bucket : null
+      if (first === null) return ''
+      const days = trendBucketStrideDays(rows)
+      if (first.granularity === 'week') {
+        const weeks = Math.max(1, Math.round(days / 7))
+        if (weeks <= 1) return language === 'en' ? 'Weekly' : '按周汇总'
+        return language === 'en' ? 'Every ' + weeks + ' weeks' : '每 ' + weeks + ' 周汇总'
+      }
+      const months = Number.isFinite(first.stride) ? first.stride : 1
+      if (months <= 1) return language === 'en' ? 'Monthly' : '按月汇总'
+      if (months === 3) return language === 'en' ? 'Quarterly' : '按季度汇总'
+      if (months === 6) return language === 'en' ? 'Half-yearly' : '按半年汇总'
+      return language === 'en' ? 'Yearly' : '按年汇总'
+    }
+    /** A range point is always named as a span; a single-day point keeps its day label. */
+    function trendRowLabelRange(row, language, detailed) {
+      const label = trendRowLabel(row, language, detailed)
+      return detailed ? label + ' – ' + humanDate(row.bucket.end, language) : label
     }
     function trendRowKey(row, index) {
       return row && Number.isFinite(row.time) ? String(row.time) : (row && typeof row.date === 'string' ? row.date : String(index))
@@ -1793,6 +1929,13 @@ window.__ModuleLoader__.load({
       const tickIndexes = React.useMemo(() => rows.length <= 1 ? [0] : Array.from(new Set([0, Math.floor((rows.length - 1) / 4), Math.floor((rows.length - 1) / 2), Math.floor((rows.length - 1) * 3 / 4), rows.length - 1])), [rows])
       const chartReady = !props.loading && !props.error && rows.length > 0
       const hourly = rows.length > 0 && Number.isFinite(rows[0].time)
+      // Long ranges are summarised, so say which stride is on screen instead of
+      // letting the reader assume one point is one day.
+      const aggregated = !hourly && rows.length > 0 && trendRowIsRange(rows[0])
+      // A daily point is one day and says nothing extra; only a summarised range
+      // carries a stride badge.
+      const aggregatedLabel = aggregated && rows[0].bucket.granularity !== 'day' ? trendStrideLabel(rows, language) : ''
+      const pointLabel = React.useCallback((row, detailed) => trendRowIsRange(row) ? trendRowLabelRange(row, language, detailed) : trendRowLabel(row, language, detailed), [language])
       const chartAriaLabel = hourly ? tr('每小时 Token 使用趋势，选择小时查看当天请求日志', 'Hourly Token usage trend; select an hour to view request logs') : tr('每日 Token 使用趋势，选择日期查看请求日志', 'Daily Token usage trend; select a date to view request logs')
       const hovered = hoverIndex === null ? null : (rows[hoverIndex] || null)
       const hoverPoint = hoverIndex === null ? null : ((geometry.points[visible[0]] || [])[hoverIndex] || null)
@@ -1848,16 +1991,16 @@ window.__ModuleLoader__.load({
                   if (!point) return null
                   const next = (geometry.points[visible[0]] || [])[index + 1]
                   const cellWidth = next ? Math.max(8, next.x - point.x) : (index > 0 ? Math.max(8, point.x - (geometry.points[visible[0]] || [])[index - 1].x) : 24)
-                  return React.createElement('rect', { key: trendRowKey(row, index), x: Math.max(geometry.padding.left, point.x - cellWidth / 2), y: geometry.padding.top, width: cellWidth, height: height - geometry.padding.top - geometry.padding.bottom, className: 'uh-trend-hit', tabIndex: 0, role: 'button', 'aria-label': trendRowLabel(row, language, true) + ' ' + trendSeriesLabel('total', language) + ' ' + fmtCompact(row.total), onMouseEnter: () => activateHover(index), onMouseLeave: () => setHoverIndex(null), onFocus: () => activateHover(index), onBlur: () => setHoverIndex(null), onKeyDown: (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (typeof props.onPointClick === 'function') props.onPointClick(trendRowDate(row)) } }, onClick: () => { if (typeof props.onPointClick === 'function') props.onPointClick(trendRowDate(row)) } })
+                  return React.createElement('rect', { key: trendRowKey(row, index), x: Math.max(geometry.padding.left, point.x - cellWidth / 2), y: geometry.padding.top, width: cellWidth, height: height - geometry.padding.top - geometry.padding.bottom, className: 'uh-trend-hit', tabIndex: aggregated ? -1 : 0, role: aggregated ? 'img' : 'button', 'aria-label': pointLabel(row, true) + ' ' + trendSeriesLabel('total', language) + ' ' + fmtCompact(row.total), onMouseEnter: () => activateHover(index), onMouseLeave: () => setHoverIndex(null), onFocus: () => activateHover(index), onBlur: () => setHoverIndex(null), onKeyDown: (event) => { if (aggregated) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (typeof props.onPointClick === 'function') props.onPointClick(trendRowDate(row)) } }, onClick: () => { if (aggregated) return; if (typeof props.onPointClick === 'function') props.onPointClick(trendRowDate(row)) } })
                 }),
                 tickIndexes.map((index) => {
                   const point = (geometry.points[visible[0]] || [])[index]
                   const row = rows[index]
-                  return point && row ? React.createElement('text', { key: trendRowKey(row, index), x: point.x, y: height - 8, className: 'uh-trend-axis-label', textAnchor: index === 0 ? 'start' : index === rows.length - 1 ? 'end' : 'middle' }, trendRowLabel(row, language, false)) : null
+                  return point && row ? React.createElement('text', { key: trendRowKey(row, index), x: point.x, y: height - 8, className: 'uh-trend-axis-label', textAnchor: index === 0 ? 'start' : index === rows.length - 1 ? 'end' : 'middle' }, pointLabel(row, false)) : null
                 }),
               ),
               tooltipRow && tooltipPoint ? React.createElement('div', { className: 'uh-trend-tooltip' + tooltipSide + (tooltipVisible ? ' uh-visible' : ''), style: tooltipStyle, 'aria-hidden': !tooltipVisible },
-                React.createElement('strong', { className: 'uh-trend-tooltip-title' }, trendRowLabel(tooltipRow, language, true)),
+                React.createElement('strong', { className: 'uh-trend-tooltip-title' }, pointLabel(tooltipRow, true)),
                 visible.map((key) => React.createElement('div', { key, className: 'uh-trend-tooltip-row', style: { color: colors[key] || '#9aa4b2' } },
                   React.createElement('span', { className: 'uh-trend-dot', style: { background: colors[key] || '#9aa4b2' } }),
                   React.createElement('span', { className: 'uh-trend-tooltip-label' }, trendSeriesLabel(key, language)),
@@ -1867,8 +2010,8 @@ window.__ModuleLoader__.load({
             )
       return React.createElement('div', { className: 'uh-panel uh-trend-panel' },
         React.createElement('div', { className: 'uh-trend-head' },
-          React.createElement('div', {}, React.createElement('h3', { className: 'uh-tbl-title uh-title-with-icon' }, React.createElement(LineIcon, { name: 'chart', size: 16 }), tr('Token 使用趋势', 'Token Usage Trend')), React.createElement('div', { className: 'uh-note' }, props.rangeLabel || '')),
-          chartReady ? React.createElement('div', { className: 'uh-note' }, tr('点击数据点查看当日明细', 'Click a point to inspect that day')) : null,
+          React.createElement('div', {}, React.createElement('h3', { className: 'uh-tbl-title uh-title-with-icon' }, React.createElement(LineIcon, { name: 'chart', size: 16 }), tr('Token 使用趋势', 'Token Usage Trend')), React.createElement('div', { className: 'uh-note' }, (props.rangeLabel || '') + (aggregated ? (props.rangeLabel ? ' · ' : '') + aggregatedLabel : ''))),
+          chartReady ? React.createElement('div', { className: 'uh-note' }, aggregated ? tr('区间较长，每点为一个周期', 'Long range summarised: one point per period') : tr('点击数据点查看当日明细', 'Click a point to inspect that day')) : null,
         ),
         chartBody,
         chartReady ? React.createElement('div', { className: 'uh-trend-legend' },

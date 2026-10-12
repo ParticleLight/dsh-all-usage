@@ -10,8 +10,8 @@ assert.notEqual(start, -1, 'client date helpers must exist')
 assert.notEqual(end, -1, 'client range helper boundary must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel }', context)
-const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel } = context.__rangeHelpers
+vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel }', context)
+const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcPath, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel } = context.__rangeHelpers
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
   return {
@@ -265,6 +265,65 @@ test('calculates streaks from complete history instead of selected range', () =>
   assert.equal(todayResult.best, 1)
   assert.equal(fullResult.streak, 3)
   assert.equal(fullResult.best, 3)
+})
+
+function trendSeries(from, to) {
+  const rows = []
+  const cursor = new Date(from + 'T00:00:00Z')
+  const stop = new Date(to + 'T00:00:00Z')
+  while (cursor.getTime() <= stop.getTime()) {
+    rows.push(day(cursor.toISOString().slice(0, 10), 1, 10))
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+  return rows
+}
+
+test('summarises a long trend range into calendar buckets with a bounded point count', () => {
+  const daily = buildTrendRows(trendSeries('2026-04-15', '2026-10-11'), { start: '2026-04-15', end: '2026-10-11' }, true)
+  assert.equal(daily.length, 180)
+  assert.equal(daily[0].bucket.days, 1)
+  assert.equal(daily[0].bucket.granularity, 'day')
+
+  const oneYear = buildTrendRows(trendSeries('2025-10-12', '2026-10-11'), { start: '2025-10-12', end: '2026-10-11' }, true)
+  // 365 days is 53 points: weeks end on Sunday and only the first bucket may be short.
+  assert.equal(oneYear.length, 53)
+  assert.equal(oneYear[0].bucket.granularity, 'week')
+  assert.equal(oneYear[0].bucket.start, '2025-10-12')
+  assert.equal(oneYear[0].bucket.end, '2025-10-12')
+  assert.equal(oneYear[1].bucket.end, '2025-10-19')
+  assert.equal(oneYear.at(-1).bucket.end, '2026-10-11')
+  assert.equal(oneYear.reduce((sum, row) => sum + row.turns, 0), 365)
+
+  const threeYears = buildTrendRows(trendSeries('2023-10-13', '2026-10-11'), { start: '2023-10-13', end: '2026-10-11' }, true)
+  assert.equal(threeYears.length, 157)
+  assert.ok(threeYears.length <= 180)
+  assert.equal(threeYears.reduce((sum, row) => sum + row.turns, 0), 1095)
+  const fullWeek = threeYears.find((row) => row.bucket.days === 7)
+  assert.equal(fullWeek.tokens.input, 70)
+  assert.equal(fullWeek.total, 7 * (10 + 20 + 30 + 40 + 50))
+
+  const fiveYears = buildTrendRows(trendSeries('2021-10-13', '2026-10-11'), { start: '2021-10-13', end: '2026-10-11' }, true)
+  assert.ok(fiveYears.length <= 180)
+  assert.equal(fiveYears.reduce((sum, row) => sum + row.turns, 0), 1825)
+
+  const twentyYears = buildTrendRows(trendSeries('2006-10-13', '2026-10-11'), { start: '2006-10-13', end: '2026-10-11' }, true)
+  assert.ok(twentyYears.length <= 180)
+  assert.equal(twentyYears[0].bucket.start, '2006-10-13')
+  assert.equal(twentyYears.at(-1).bucket.end, '2026-10-11')
+  assert.equal(twentyYears.reduce((sum, row) => sum + row.turns, 0), 7304)
+})
+
+test('labels a summarised point with its stride and never pretends it is one day', () => {
+  const rows = buildTrendRows(trendSeries('2023-10-13', '2026-10-11'), { start: '2023-10-13', end: '2026-10-11' }, true)
+  assert.equal(trendStrideLabel(rows, 'zh'), '按周汇总')
+  assert.equal(trendStrideLabel(rows, 'en'), 'Weekly')
+  assert.equal(trendRowIsRange(rows[0]), true)
+  // The span is named with the same date style as a single day, weekday included.
+  assert.equal(trendRowLabelRange(rows[0], 'en', true), 'Oct 13, 2023 (Fri, UTC) – Oct 15, 2023 (Sun, UTC)')
+  assert.equal(trendRowLabelRange(rows[0], 'en', false), '10-13')
+  const dailyRows = buildTrendRows(trendSeries('2026-10-01', '2026-10-03'), { start: '2026-10-01', end: '2026-10-03' }, true)
+  assert.equal(trendRowIsRange(dailyRows[0]), false)
+  assert.equal(trendRowLabel(dailyRows[0], 'en', true), 'Oct 1, 2026 (Thu, UTC)')
 })
 
 test('normalizes hourly trend rows with unique time points', () => {

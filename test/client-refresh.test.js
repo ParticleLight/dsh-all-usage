@@ -132,7 +132,11 @@ test('uses scoped query and records endpoints with stale-cursor recovery', () =>
   assert.match(source, /fetch\('\/api\/all-usage\/query\?/)
   assert.match(source, /fetch\('\/api\/all-usage\/records\?/)
   assert.match(source, /reason && reason\.status === 409/)
-  assert.match(source, /tabIndex: 0, role: 'button'/)
+  // The trend point rectangles are the keyboard-focusable day drilldown; a
+  // summarised (multi-day) point is deliberately not a button, so the assertion
+  // follows the focus target and the click wiring instead of one literal.
+  assert.match(source, /'uh-trend-hit', tabIndex: aggregated \? -1 : 0, role: aggregated \? 'img' : 'button'/)
+  assert.match(source, /props\.onPointClick\(trendRowDate\(row\)\)/)
   assert.match(source, /setAuditReload\(\(value\) => value \+ 1\)/)
   assert.ok(source.includes("const recordsVisible = detailView === 'logs'"))
   assert.ok(source.includes("}, [detailKey, detailView, liveQueryVersion, auditReload])"))
@@ -201,7 +205,7 @@ test('selects hourly query data for single-day trend scopes', () => {
   assert.match(source, /queryScope !== null && queryScope\.start === queryScope\.end/)
   assert.match(source, /buildTrendHourlyRows\(queryResult\.hourly, useUtc\)/)
   assert.match(source, /Hourly Token usage trend/)
-  assert.match(source, /trendRowLabel\(row, language, true\)/)
+  assert.match(source, /pointLabel\(row, true\)/)
 })
 
 test('uses a centered spinner without idle chart controls while trend data loads', () => {
