@@ -190,6 +190,21 @@ test('a replayed row is stored without being counted twice', () => {
   assert.deepEqual({ input: host.state.totals.input, pricedCalls: host.state.totals.cost.pricedCalls, turns: host.state.totals.turns }, totals, 'and nothing was counted twice')
 })
 
+test('a replayed event older than the newest folded row is ignored', () => {
+  const host = makeHost()
+  const first = row('s1:step:1:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1)
+  host.aggregation.foldUsageRow(first)
+  const later = row('s1:step:2:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.2', 2)
+  later.time = first.time + 3600000
+  host.aggregation.foldUsageRow(later)
+  const totals = { input: host.state.totals.input, pricedCalls: host.state.totals.cost.pricedCalls }
+  assert.equal(totals.pricedCalls, 2)
+  // The same history replayed after a restart, renumbered and with its own timestamp.
+  const replay = row('s1:step:9:9', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 9)
+  host.aggregation.upsertUsageSample(host.state.usageByStep, replay)
+  assert.deepEqual({ input: host.state.totals.input, pricedCalls: host.state.totals.cost.pricedCalls }, totals, 'the replay was stored but not counted')
+})
+
 test('retargeting a session moves its digest with its rows', () => {
   const host = makeHost()
   host.aggregation.upsertUsageSample(host.state.usageByStep, row('s1:step:1:1', 's1', 'ws-old', '2026-08-17', 'deepseek-v4-flash', '0.1', 1))
