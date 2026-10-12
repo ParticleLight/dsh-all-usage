@@ -10,8 +10,8 @@ assert.notEqual(start, -1, 'client date helpers must exist')
 assert.notEqual(end, -1, 'client range helper boundary must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText }', context)
-const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText } = context.__rangeHelpers
+vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate }', context)
+const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate } = context.__rangeHelpers
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
   return {
@@ -559,4 +559,20 @@ test('reads and writes the effective-from boundary in the reader zone', () => {
   const draft = plain(pricingTemporalDraftOfPlan(plan, 480))
   assert.equal(draft.effectiveFromText, '2026-01-01')
   assert.deepEqual(plain(pricingTemporalPlanFromDraft(draft, 480)), plain(plan))
+})
+
+test('heatmap cells name themselves for assistive technology', () => {
+  // The cell tooltip is mouse-only, so the accessible name has to carry the same
+  // fact: the date and how many uses that day had.
+  assert.equal(typeof heatCellLabel, 'function')
+  const zhBusy = heatCellLabel('2026-08-17', 7, 'zh')
+  assert.ok(zhBusy.indexOf(humanDate('2026-08-17', 'zh')) === 0, 'the label starts with the date: ' + zhBusy)
+  assert.ok(zhBusy.indexOf('7 次使用') > 0, zhBusy)
+  const zhEmpty = heatCellLabel('2026-08-18', 0, 'zh')
+  assert.ok(zhEmpty.indexOf('无使用记录') > 0, zhEmpty)
+  const enBusy = heatCellLabel('2026-08-17', 7, 'en')
+  assert.ok(enBusy.indexOf('7 uses') > 0, enBusy)
+  assert.ok(heatCellLabel('2026-08-18', 0, 'en').indexOf('no usage') > 0)
+  // A missing count must not read as a count of NaN.
+  assert.ok(heatCellLabel('2026-08-18', undefined, 'zh').indexOf('无使用记录') > 0)
 })

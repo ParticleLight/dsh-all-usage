@@ -5,6 +5,7 @@
 - **模型图标扩到 43 个品牌** —— 从 lobe-icons 固定 revision 取 32 个新商标；9 个 `currentColor` 烘成固定中性色。
 - **网关 / 云的包裹 id 还原真实品牌** —— 覆盖 `openai-gpt-5.5`、`databricks-claude-*`、`eu.anthropic.claude-*` 等写法，原始 id 仍优先。
 ### 优化
+- **热力图可以用键盘操作了** —— 每个日期格子现在是真正的按钮，带读屏可读的名字（如「2026年10月12日 周一：63 次使用」）；整块日历**只有一个 Tab 停靠点**（今天），方向键按天/按周移动、Home / End 到首尾、回车打开当日明细，悬停提示会跟着焦点走；图例对读屏隐藏（纯装饰），说明文字补上了键盘用法。
 - **生效起点也按北京时间** —— 该日期现在表示「那天 00:00（北京时间）」，与时段同一时区。内置 DeepSeek 文本表本来就锚定在北京时间零点（存的是前一天 16:00 UTC），改前界面显示成 UTC 日期（差一天），现在显示正确、原样保存不变；英文界面仍按 UTC，留空仍表示全部历史。
 - **成本设置里的时段改用北京时间** —— 峰的时段在宿主里按 UTC 存（DeepSeek 自己的峰时是北京时间 09:00–12:00 / 14:00–18:00），中文界面现在直接按北京时间显示与填写、保存时自动换回 UTC；跨午夜的时段会拆到次日并顺延星期；英文界面仍按 UTC。生效日期仍是 UTC（留空 = 全部历史）。
 - **热力图改成蓝色** —— 方块由 GitHub 绿换成蓝色渐变（同一个强调色按 20/45/70/96% 混进面板底色，明暗主题都保持可读），图例与「今日」光晕同步换色。
@@ -40,6 +41,7 @@
 - **43 model brands** — 32 new marks from the pinned lobe-icons revision; nine had currentColor baked to a fixed neutral.
 - **Gateway and cloud ids resolve to the real brand** — covers openai-gpt-5.5, databricks-claude-*, eu.anthropic.claude-*; the raw id still wins.
 ### Improvements
+- **The heatmap is keyboard-operable** — every date cell is a real button with a screen-reader name (for example "2026-10-12 Monday: 63 uses"), the calendar is a single tab stop (today), arrows move by a day or a week, Home/End jump to the ends, Enter opens the day's detail, and the tooltip follows focus; the legend is hidden from screen readers because it is decorative, and the note mentions the keyboard.
 - **The effective-from date follows Beijing time too** — the date now means 00:00 Beijing, the same zone as the windows. DeepSeek's built-in text plan already anchors at Beijing midnight (stored as 16:00 UTC the day before) and used to display as the previous calendar day; it reads correctly now and saves back unchanged. English keeps UTC, and an empty field still means the whole history.
 - **Time-of-day pricing is edited in Beijing time** — the host stores peak plans in UTC while DeepSeek's own peak hours are 09:00-12:00 and 14:00-18:00 Beijing time, so Chinese now shows and accepts those times directly and converts back on save (a window crossing midnight moves to the next weekday); English keeps UTC, and the effective date stays a UTC date.
 - **The heatmap is blue now** — cells switch from GitHub green to a blue ramp (one accent mixed into the panel surface at 20/45/70/96%, so it stays readable in both themes), and the legend and today's glow follow.

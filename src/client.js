@@ -1267,6 +1267,14 @@ window.__ModuleLoader__.load({
       const week = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][weekIndex]
       return parts[0] + '年' + Number(parts[1]) + '月' + Number(parts[2]) + '日 ' + week
     }
+    /** The accessible name of one heatmap cell: the same fact the tooltip shows. */
+    function heatCellLabel(date, count, language) {
+      const text = humanDate(date, language)
+      const uses = Number.isFinite(count) && count > 0 ? count : 0
+      return language === 'en'
+        ? text + ': ' + (uses > 0 ? uses + ' uses' : 'no usage')
+        : text + '：' + (uses > 0 ? uses + ' 次使用' : '无使用记录')
+    }
     function monthLabel(year, month, language) {
       if (language === 'en') {
         const label = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][month]
@@ -2163,6 +2171,42 @@ window.__ModuleLoader__.load({
         }
         scheduleTooltipPosition(event.clientX, event.clientY)
       }, [scheduleTooltipPosition])
+      // The calendar is a grid of dates, so it is keyboard-navigable: one tab stop
+      // (today), arrows move by a day or a week, Enter opens the day's detail. The
+      // tooltip follows focus, positioned from the focused cell's rectangle.
+      const cellNodesRef = React.useRef([])
+      const focusCellAt = React.useCallback((index) => {
+        const nodes = cellNodesRef.current
+        const node = nodes === undefined || nodes === null ? undefined : nodes[index]
+        if (node === undefined || node === null || typeof node.focus !== 'function') return
+        for (const other of nodes) if (other !== undefined && other !== null) other.tabIndex = -1
+        node.tabIndex = 0
+        node.focus()
+      }, [])
+      const focusCell = React.useCallback((date, node) => {
+        const rect = node === null || node === undefined || typeof node.getBoundingClientRect !== 'function' ? null : node.getBoundingClientRect()
+        activateCell(date, { clientX: rect === null ? 0 : rect.left + rect.width / 2, clientY: rect === null ? 0 : rect.top })
+      }, [activateCell])
+      const onCellKeyDown = React.useCallback((event, index, total) => {
+        const key = event.key
+        if (key === 'Enter' || key === ' ' || key === 'Spacebar') {
+          event.preventDefault()
+          const date = event.currentTarget === null ? '' : event.currentTarget.getAttribute('data-date')
+          if (typeof dateClickRef.current === 'function' && typeof date === 'string') dateClickRef.current(date)
+          return
+        }
+        const target = key === 'ArrowRight' ? index + 1
+          : key === 'ArrowLeft' ? index - 1
+            : key === 'ArrowDown' ? index + 7
+              : key === 'ArrowUp' ? index - 7
+                : key === 'Home' ? 0
+                  : key === 'End' ? total - 1
+                    : null
+        if (target === null) return
+        event.preventDefault()
+        if (target < 0 || target >= total) return
+        focusCellAt(target)
+      }, [focusCellAt])
       const moveTooltip = React.useCallback((event) => {
         scheduleTooltipPosition(event.clientX, event.clientY)
       }, [scheduleTooltipPosition])
@@ -2174,6 +2218,13 @@ window.__ModuleLoader__.load({
         if (typeof workspaceSelectRef.current === 'function') workspaceSelectRef.current(workspaceId)
         clearHover()
       }, [clearHover])
+      const tabbableDate = React.useMemo(() => {
+        const dates = calendar.cells.map((cell) => cell.date)
+        if (dates.indexOf(props.todayKey) >= 0) return props.todayKey
+        for (let index = dates.length - 1; index >= 0; index -= 1) if (heatmapMap.has(dates[index])) return dates[index]
+        return dates.length > 0 ? dates[0] : null
+      }, [calendar.cells, heatmapMap, props.todayKey])
+      const cellTotal = calendar.cells.length
       const cellElements = React.useMemo(() => calendar.cells.map((cell, index) => {
         const day = heatmapMap.get(cell.date)
         let count = 0
@@ -2185,6 +2236,9 @@ window.__ModuleLoader__.load({
           }
         }
         const dim = selectedWorkspace !== null && day !== undefined && day.turns > 0 && count === 0
+        // A screen reader gets the same fact the tooltip shows, and the calendar has
+        // exactly one tab stop (today, or the newest day with usage).
+        const label = heatCellLabel(cell.date, count, language)
         // The entrance wave must finish quickly: a per-cell 1.2ms delay over all
         // 376 cells kept animating for 444ms, and every running animation costs a
         // composite/paint while the panel is still loading data. Wrapping the
@@ -2193,13 +2247,24 @@ window.__ModuleLoader__.load({
         // The today pulse is set inline, so the reduced-motion stylesheet cannot
         // cancel it; an endless box-shadow animation repaints every frame.
         if (cell.date === props.todayKey && !motionReduced()) style.animation = 'uh-cell-in .45s ease both, uh-glow 3s ease-in-out .7s infinite'
-        return React.createElement('div', { key: cell.date, className: 'uh-cell', style,
+        return React.createElement('div', {
+          key: cell.date,
+          className: 'uh-cell',
+          style,
+          role: 'button',
+          'data-date': cell.date,
+          'aria-label': label,
+          tabIndex: cell.date === tabbableDate ? 0 : -1,
+          ref: (node) => { cellNodesRef.current[index] = node },
           onMouseEnter: (event) => activateCell(cell.date, event),
           onMouseMove: moveTooltip,
           onMouseLeave: clearHover,
+          onFocus: (event) => focusCell(cell.date, event.currentTarget),
+          onBlur: clearHover,
+          onKeyDown: (event) => onCellKeyDown(event, index, cellTotal),
           onClick: () => { if (typeof dateClickRef.current === 'function') dateClickRef.current(cell.date) },
         })
-      }), [calendar.cells, heatmapMap, props.queryUsable, props.todayKey, selectedWorkspace, activateCell, moveTooltip, clearHover])
+      }), [calendar.cells, heatmapMap, props.queryUsable, props.todayKey, selectedWorkspace, activateCell, moveTooltip, clearHover, focusCell, onCellKeyDown, tabbableDate, cellTotal, language])
       const hoverDay = hoverDate === null ? undefined : heatmapMap.get(hoverDate)
       return React.createElement('div', { className: 'uh-panel' },
         React.createElement('div', { className: 'uh-section-title' }, React.createElement(LineIcon, { name: 'calendar', size: 16 }), tr('使用热力图', 'Usage Heatmap')),
@@ -2219,7 +2284,7 @@ window.__ModuleLoader__.load({
                 onClick: () => { if (typeof props.onSpanChange === 'function') props.onSpanChange(key) },
               }, key === '30d' ? tr('30 天', '30 days') : key === '90d' ? tr('90 天', '90 days') : tr('12 个月', '12 months'))),
             ),
-            React.createElement('div', { className: 'uh-legend' },
+            React.createElement('div', { className: 'uh-legend', 'aria-hidden': true },
               React.createElement('span', {}, tr('少', 'Less')),
               [0, 1, 2, 3, 4].map((level) => React.createElement('span', { key: level, className: 'uh-cell', style: { background: cellBg(level) } })),
               React.createElement('span', {}, tr('多', 'More')),
@@ -2230,10 +2295,15 @@ window.__ModuleLoader__.load({
           React.createElement('div', { className: 'uh-months', style: monthsStyle }, calendar.months.map((month, index) => React.createElement('span', { key: index, style: { left: month.left } }, month.text))),
           React.createElement('div', { className: 'uh-hm-body' },
             React.createElement('div', { className: 'uh-wdays' }, calendar.weekdays.map((weekday, index) => React.createElement('span', { key: index }, weekday))),
-            React.createElement('div', { className: 'uh-grid', style: gridStyle }, cellElements),
+            React.createElement('div', {
+              className: 'uh-grid',
+              style: gridStyle,
+              role: 'group',
+              'aria-label': tr('使用热力图日历：方向键浏览，回车查看当日明细', 'Usage heatmap calendar: arrow keys to browse, Enter for the day detail'),
+            }, cellElements),
           ),
         ),
-        React.createElement('div', { className: 'uh-note', style: { marginTop: 10 } }, tr('口径：每完成一个回合点亮一次（含子代理会话）；悬停查看按工作区明细，点击工作区可筛选热力图与明细表。日期按本地时区。', 'Methodology: one cell lights up for each completed turn, including subagent sessions. Hover to view workspace details; click a workspace to filter the heatmap and detail tables. English dates and day boundaries use UTC.')),
+        React.createElement('div', { className: 'uh-note', style: { marginTop: 10 } }, tr('口径：每完成一个回合点亮一次（含子代理会话）；悬停查看按工作区明细，点击工作区可筛选热力图与明细表；键盘可用方向键浏览、回车查看当日明细。日期按本地时区。', 'Methodology: one cell lights up for each completed turn, including subagent sessions. Hover to view workspace details; click a workspace to filter the heatmap and detail tables. English dates and day boundaries use UTC.')),
         hoverDate !== null ? React.createElement(MemoUsageHeatmapTooltip, { date: hoverDate, day: hoverDay, language, tooltipRef, workspaceTitles: workspaceLookup.titles, workspaceIndexes: workspaceLookup.indexes, onWorkspaceSelect: selectWorkspace }) : null,
       )
     }

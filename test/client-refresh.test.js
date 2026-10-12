@@ -431,6 +431,14 @@ test('renders cost totals, pricing status, and the merged price table controls',
   assert.ok(source.includes('缓存读 / 1M'))
   assert.ok(source.includes('缓存写 / 1M'))
   assert.ok(source.includes('生效起点（北京时间，留空 = 全部历史）'))
+  // The heatmap is a keyboard-navigable grid: cells are buttons with a name, one tab
+  // stop, and arrow/Enter handling, so the tooltip is not the only way in.
+  assert.match(source, /role: 'button'/)
+  assert.match(source, /'data-date': cell\.date/)
+  assert.match(source, /'aria-label': label/)
+  assert.match(source, /tabIndex: cell\.date === tabbableDate \? 0 : -1/)
+  assert.match(source, /onKeyDown: \(event\) => onCellKeyDown\(event, index, cellTotal\)/)
+  assert.match(source, /'aria-label': tr\('使用热力图日历：方向键浏览，回车查看当日明细'/)
   assert.ok(source.includes('pricingUtcToDateText(policy.effectiveFrom, shiftMinutes)'))
   assert.ok(source.includes('该时刻之前的用量没有可用档位，会失败关闭为未计价。'))
   assert.match(source, /pricingTierBandLabel/)
