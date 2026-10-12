@@ -937,7 +937,10 @@ window.__ModuleLoader__.load({
       }
       return result
     }
-    function pricingDateTextToUtc(value) {
+    // A plan's effective-from is an instant. The host reads it as UTC midnight, but
+    // the reader of a Chinese plan means "that calendar day in Beijing", so the
+    // editor reads and writes the boundary in the same zone as the peak windows.
+    function pricingDateTextToUtc(value, shiftMinutes = 0) {
       const text = String(value === undefined || value === null ? '' : value).trim()
       if (text === '') return 0
       const match = text.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/)
@@ -948,12 +951,14 @@ window.__ModuleLoader__.load({
       const at = Date.UTC(year, month - 1, day)
       const date = new Date(at)
       if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null
-      return at
+      const shift = Number.isFinite(shiftMinutes) ? Math.trunc(shiftMinutes) : 0
+      return at - shift * 60000
     }
-    function pricingUtcToDateText(value) {
+    function pricingUtcToDateText(value, shiftMinutes = 0) {
       const at = Number(value)
       if (!Number.isFinite(at) || at <= 0) return ''
-      return new Date(at).toISOString().slice(0, 10)
+      const shift = Number.isFinite(shiftMinutes) ? Math.trunc(shiftMinutes) : 0
+      return new Date(at + shift * 60000).toISOString().slice(0, 10)
     }
     // Statutory holidays are stored as an explicit date list: one date per line
     // or a `start..end` range, following the China Standard Time calendar day.
@@ -1006,7 +1011,7 @@ window.__ModuleLoader__.load({
       if (rules.length === 0) return null
       return {
         policyId: typeof policy.policyId === 'string' && policy.policyId !== '' ? policy.policyId : 'custom-peak',
-        effectiveFromText: pricingUtcToDateText(policy.effectiveFrom),
+        effectiveFromText: pricingUtcToDateText(policy.effectiveFrom, shiftMinutes),
         holidaysEnabled: Array.isArray(policy.holidays) && policy.holidays.length > 0,
         holidaysText: Array.isArray(policy.holidays) ? policy.holidays.join('\n') : '',
         holidaysSourceText: typeof policy.holidaysSource === 'string' ? policy.holidaysSource : '',
@@ -1107,7 +1112,7 @@ window.__ModuleLoader__.load({
       return pricingTemporalDraftRulePatch(draft, index, { rates })
     }
     function pricingTemporalPlanFromDraft(draft, shiftMinutes = 0) {
-      const effectiveFrom = pricingDateTextToUtc(draft !== null && typeof draft === 'object' ? draft.effectiveFromText : '')
+      const effectiveFrom = pricingDateTextToUtc(draft !== null && typeof draft === 'object' ? draft.effectiveFromText : '', shiftMinutes)
       const rules = pricingTemporalShiftRules((draft !== null && typeof draft === 'object' && Array.isArray(draft.rules) ? draft.rules : []).map((rule, index) => ({
         id: typeof rule.id === 'string' && rule.id !== '' ? rule.id : 'peak-' + (index + 1),
         weekdays: (Array.isArray(rule.weekdays) ? rule.weekdays : []).slice().sort((left, right) => left - right),
@@ -4403,7 +4408,7 @@ window.__ModuleLoader__.load({
           return React.createElement('div', { className: 'uh-pricing-tier-editor uh-pricing-temporal-editor' }, header,
             React.createElement('div', { className: 'uh-pricing-tier-empty' }, view.temporalRulesUnavailable === true ? tr('该行已启用峰谷计划（', 'This row already uses a peak plan (') + view.temporalPolicyId + tr('），但运行中的宿主尚未提供规则内容；重启 DSH 后即可查看与编辑。', '), but the running host does not expose its rules yet; restart DSH to view and edit them.') : tr('未启用时段规则：所有请求都使用该行基础价。', 'No time-of-day rules: every request uses the row base rates.')))
         }
-        const effectiveFrom = pricingDateTextToUtc(draft.effectiveFromText)
+        const effectiveFrom = pricingDateTextToUtc(draft.effectiveFromText, pricingTemporalShift(language))
         const holidayDates = draft.holidaysEnabled === true ? pricingHolidayDatesFromText(draft.holidaysText) : null
         const rules = draft.rules.map((rule, ruleIndex) => {
           const windows = rule.windows.map((window, windowIndex) => React.createElement('div', { key: windowIndex, className: 'uh-pricing-temporal-window' },
@@ -4437,7 +4442,7 @@ window.__ModuleLoader__.load({
           React.createElement('div', { className: 'uh-pricing-tier-empty' }, tr('谷时段（未命中规则）使用该行基础价，峰时段使用规则费率；周几与时间均为 UTC。', 'Off-peak (no rule match) uses the row base rates, peak uses the rule rates. Weekdays and times are UTC.')),
           React.createElement('div', { className: 'uh-pricing-temporal-fields' },
             React.createElement('label', {}, React.createElement('span', {}, tr('策略 ID', 'Policy ID')), React.createElement('input', { type: 'text', value: draft.policyId, disabled: pricingBusy, onChange: (event) => applyTemporalDraft(view, Object.assign(pricingTemporalDraftClone(draft), { policyId: event.target.value })) })),
-            React.createElement('label', {}, React.createElement('span', {}, tr('生效起点（UTC，留空 = 全部历史）', 'Effective from (UTC, empty = all history)')), React.createElement('input', { type: 'date', value: draft.effectiveFromText, disabled: pricingBusy, onChange: (event) => applyTemporalDraft(view, Object.assign(pricingTemporalDraftClone(draft), { effectiveFromText: event.target.value })) })),
+            React.createElement('label', {}, React.createElement('span', {}, tr('生效起点（北京时间，留空 = 全部历史）', 'Effective from (UTC, empty = all history)')), React.createElement('input', { type: 'date', value: draft.effectiveFromText, disabled: pricingBusy, onChange: (event) => applyTemporalDraft(view, Object.assign(pricingTemporalDraftClone(draft), { effectiveFromText: event.target.value })) })),
           ),
           effectiveFrom !== null && effectiveFrom > 0 ? React.createElement('div', { className: 'uh-pricing-warning' }, tr('该时刻之前的用量没有可用档位，会失败关闭为未计价。', 'Usage before this instant has no applicable band and fails closed as unpriced.')) : null,
           React.createElement('div', { className: 'uh-pricing-temporal-holidays' },

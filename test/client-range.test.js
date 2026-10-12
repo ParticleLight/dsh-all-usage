@@ -10,8 +10,8 @@ assert.notEqual(start, -1, 'client date helpers must exist')
 assert.notEqual(end, -1, 'client range helper boundary must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft }', context)
-const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft } = context.__rangeHelpers
+vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText }', context)
+const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText } = context.__rangeHelpers
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
   return {
@@ -527,4 +527,36 @@ test('a peak window that crosses midnight moves to the next weekday', () => {
   const late = [{ id: 'x', weekdays: [0], windows: [{ startMinute: 1380, endMinute: 1440 }], rates: {} }]
   assert.deepEqual(plain(pricingTemporalShiftRules(late, 480)), [{ id: 'x', weekdays: [1], windows: [{ startMinute: 420, endMinute: 480 }], rates: {} }])
   assert.deepEqual(plain(pricingTemporalShiftRules(pricingTemporalShiftRules(late, 480), -480)), plain(late))
+})
+
+test('reads and writes the effective-from boundary in the reader zone', () => {
+  // English keeps the host's UTC midnight.
+  assert.equal(pricingDateTextToUtc('2026-01-01', 0), Date.UTC(2026, 0, 1))
+  assert.equal(pricingUtcToDateText(Date.UTC(2026, 0, 1), 0), '2026-01-01')
+  // Chinese means 00:00 Beijing time, which is 16:00 UTC on the day before.
+  assert.equal(pricingDateTextToUtc('2026-01-01', 480), Date.UTC(2025, 11, 31, 16))
+  assert.equal(pricingUtcToDateText(Date.UTC(2026, 0, 1), 480), '2026-01-01')
+  // Once stored in Beijing terms the pair is stable: saving again changes nothing.
+  const stored = pricingDateTextToUtc('2026-01-01', 480)
+  assert.equal(pricingDateTextToUtc(pricingUtcToDateText(stored, 480), 480), stored)
+  assert.equal(pricingUtcToDateText(stored, 480), '2026-01-01')
+  // An empty field still means "the whole history" in either zone.
+  assert.equal(pricingDateTextToUtc('', 480), 0)
+  assert.equal(pricingUtcToDateText(0, 480), '')
+  // A plan anchored at Beijing midnight survives a save unchanged.
+  const plan = {
+    policies: [{
+      policyId: 'p',
+      timezone: 'UTC',
+      effectiveFrom: stored,
+      effectiveUntil: null,
+      defaultPlan: null,
+      holidays: [],
+      holidaysSource: '',
+      rules: [{ id: 'peak', weekdays: [1], windows: [{ startMinute: 60, endMinute: 240 }], rates: { input: '1', output: '1', cacheRead: '0', cacheWrite: '0' } }],
+    }],
+  }
+  const draft = plain(pricingTemporalDraftOfPlan(plan, 480))
+  assert.equal(draft.effectiveFromText, '2026-01-01')
+  assert.deepEqual(plain(pricingTemporalPlanFromDraft(draft, 480)), plain(plan))
 })

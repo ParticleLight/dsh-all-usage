@@ -5,6 +5,7 @@
 - **模型图标扩到 43 个品牌** —— 从 lobe-icons 固定 revision 取 32 个新商标；9 个 `currentColor` 烘成固定中性色。
 - **网关 / 云的包裹 id 还原真实品牌** —— 覆盖 `openai-gpt-5.5`、`databricks-claude-*`、`eu.anthropic.claude-*` 等写法，原始 id 仍优先。
 ### 优化
+- **生效起点也按北京时间** —— 该日期现在表示「那天 00:00（北京时间）」，与时段同一时区。内置 DeepSeek 文本表本来就锚定在北京时间零点（存的是前一天 16:00 UTC），改前界面显示成 UTC 日期（差一天），现在显示正确、原样保存不变；英文界面仍按 UTC，留空仍表示全部历史。
 - **成本设置里的时段改用北京时间** —— 峰的时段在宿主里按 UTC 存（DeepSeek 自己的峰时是北京时间 09:00–12:00 / 14:00–18:00），中文界面现在直接按北京时间显示与填写、保存时自动换回 UTC；跨午夜的时段会拆到次日并顺延星期；英文界面仍按 UTC。生效日期仍是 UTC（留空 = 全部历史）。
 - **热力图改成蓝色** —— 方块由 GitHub 绿换成蓝色渐变（同一个强调色按 20/45/70/96% 混进面板底色，明暗主题都保持可读），图例与「今日」光晕同步换色。
 - **冷启动再快一倍：小数累加走快路** —— 折叠阶段每加一个成本字段都要做两次 `10n ** k` 幂运算和三次「去尾零」规整，且每条用量的成本在装载与折叠时被**解析两遍**。改为查表取 10 的幂、省掉多余的规整、并把装载时解析出的数直接交给累加缓存后：同一份真机账本（139.3 MB / 1060 条 / 6.6 万行）的**折入 3.83 → 1.80 s**、**加载 2.8 → 2.5 s**，**完整冷启动 ~6.7 → ~4.3 s**（审计基线 8.6 s）。金额逐字校验：离线折叠与线上宿主的总成本完全一致（`2027.6934100306`、65,633 次计价）。
@@ -38,6 +39,7 @@
 - **43 model brands** — 32 new marks from the pinned lobe-icons revision; nine had currentColor baked to a fixed neutral.
 - **Gateway and cloud ids resolve to the real brand** — covers openai-gpt-5.5, databricks-claude-*, eu.anthropic.claude-*; the raw id still wins.
 ### Improvements
+- **The effective-from date follows Beijing time too** — the date now means 00:00 Beijing, the same zone as the windows. DeepSeek's built-in text plan already anchors at Beijing midnight (stored as 16:00 UTC the day before) and used to display as the previous calendar day; it reads correctly now and saves back unchanged. English keeps UTC, and an empty field still means the whole history.
 - **Time-of-day pricing is edited in Beijing time** — the host stores peak plans in UTC while DeepSeek's own peak hours are 09:00-12:00 and 14:00-18:00 Beijing time, so Chinese now shows and accepts those times directly and converts back on save (a window crossing midnight moves to the next weekday); English keeps UTC, and the effective date stays a UTC date.
 - **The heatmap is blue now** — cells switch from GitHub green to a blue ramp (one accent mixed into the panel surface at 20/45/70/96%, so it stays readable in both themes), and the legend and today's glow follow.
 - **Cold start halves again: the decimal path takes a fast route** — every accumulated cost field paid for two `10n ** k` powers and three trailing-zero normalizations, and each usage row's cost was parsed twice (once on load, once when folded). A power table, fewer normalizing passes and handing the load-time parse to the accumulator cache took the same real ledger (139.3 MB, 1060 records, 66k rows) from a **3.83 s fold to 1.80 s** and a **2.8 s load to 2.5 s**: a **full cold start of about 4.3 s instead of 6.7 s** (the audit measured 8.6 s). The money is unchanged to the last digit — an offline fold and the live host agree exactly (`2027.6934100306`, 65,633 priced calls).
