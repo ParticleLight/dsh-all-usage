@@ -33,6 +33,10 @@
 - **概览卡片行压缩约四分之一** —— 内边距 16→10px、大数字 26→22px 等，整行 **156 → 114px**。
 - **请求日志内部滚动 + 分页** —— 首屏最近 20 条，滚到底再取 20 条（实测 20 → **40 条**）。
 ### 修复
+- **用量数字不再虚高** —— 面板此前会把宿主「按范围聚合」的数字直接上屏，而它当天可能被重复计入（实测高出 2.3 倍，且每换一个查询口径就越读越大）；现在概览与图表只采用与账本一致的那一套（日聚合），宿主侧发现偏差时也会用每会话摘要把当天整份重建。
+- **「总请求数」不再被重启重复计入** —— 重启后 DSH 会重放当前会话的事件，插件把已经计过的行又加了一遍（某天记成 34,012 次，真实约 1,500 次）；现在同一行只计一次。
+- **旧日期的请求日志不再空白** —— 明细行交还账本后，日志按「日期 → 会话」索引把它们读回来（此前被淘汰过的日期会显示 0 行）。
+- **面板不再一打开就报错** —— 一次未完成的编辑留下半截三元表达式，运行时读到空数据抛异常、直接落进错误边界。
 - **修复「谷时段被记成峰时」** —— DSH 可能整场会话只发一次 `request/context`，而插件把这条**会话级**时间戳当成每次请求的计费时刻：实测 20:02 的调用按 14:10 的峰时窗口计价，峰谷**费率**与「峰/谷」标记一起错（本机 6.6 万条里有 1.6 万条受此影响）。现在会话级时间戳只在 30 分钟内有效（超时改用调用自身的时间），对账过程也会把历史里「比调用早 30 分钟以上、且该会话没有与这条记录 turn/step 对应的时间戳」的行按调用时间重新计价一次。逐请求（turn/step）时间戳的语义不变。
 - **同一模型的多个路由合并为一个筛选项** —— 按模型名归并（忽略大小写与 `供应商/` 前缀），宿主同样按模型名匹配。
 - **模型筛选不再显示供应商命名空间** —— 只显示模型名，取值仍是原始 id（实测 25 项里含 `/` 的为 0）。
@@ -70,6 +74,10 @@
 - **The summary row is about a quarter shorter** — padding 16 to 10px, big numbers 26 to 22px: 156 down to 114px.
 - **The request log scrolls in its own box and pages as you go** — newest 20 rows first, 20 more at the end (20 to 40 measured).
 ### Fixes
+- **Usage numbers no longer run away** — the page used to show the host's per-scope aggregate, which could count the current day several times over (measured 2.3x, and it grew with every distinct read); the summary and charts now only use the figure that matches the ledger (the day rows), and the host rebuilds a drifted day from its per-session digest.
+- **"Total requests" is no longer counted again on every restart** — DSH replays the current session's events after a restart and every already-counted row was added a second time (one day read 34,012 against roughly 1,500); a row is now counted once.
+- **The request log of an older day is no longer empty** — once detail rows are handed back to the ledger the log finds them again through the date-to-session index (days whose rows had been dropped showed zero rows).
+- **The panel no longer fails on open** — a half-finished edit left a stray ternary that read a null query result at runtime and dropped the page into its error boundary.
 - **Fixed calls labelled peak that actually ran off-peak** — DSH can emit `request/context` once per session, and the plugin billed every later call at that session-level instant: a 20:02 call was priced in the 14:10 peak window, so both the peak rate and the badge were wrong (16k of this machine's 66k rows were affected). A session-level stamp now only counts within 30 minutes (past that the call's own time is used), and the reconciliation pass re-prices stored rows whose stamp is more than 30 minutes older than the call and which have no turn/step stamp of their own. Per-request stamps keep their meaning.
 - **Routes of one model share a single filter entry** — grouped by model name (case ignored, vendor namespace dropped), matched the same way on the host.
 - **The model filter no longer shows the vendor namespace** — the model name only, while the value stays the raw id (0 of 25 entries still contain a slash).
