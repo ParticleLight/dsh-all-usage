@@ -16,7 +16,8 @@ function makeHost() {
     totals: { turns: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: createCostAccumulator() },
     statsRevision: 0, dataRevision: 0, metadataRevision: 0, scanRevision: 0, pricingRevision: 0,
     statsDirtyScheduled: false, statsDirtyKinds: new Set(), aggregationGeneration: 0, retiredBucketUsed: false,
-    pricingState: null, instanceId: 'test', snapshotCache: null, queryCache: new Map(), recordsQueryCache: new Map(),
+    pricingState: null, instanceId: 'test', statsUpdatedAt: 0, snapshotCache: null, queryCache: new Map(), recordsQueryCache: new Map(),
+    scan: { started: true, done: true, scanned: 0, total: 0, failed: 0 },
     ledgerRecords: new Map(), ledgerRevision: 0, sync: {},
   }
   const host = {
@@ -153,6 +154,25 @@ test('a row whose pricing can still change stays resident', () => {
   assert.equal(evicted.rows, 1, 'only the settled row goes')
   assert.equal(host.state.usageByStep.has('s1:step:1:1'), true, 'a stale request-context row is kept')
   assert.equal(host.state.usageByStep.has('s2:step:1:1'), false)
+})
+
+test('a scoped cube that drifted is rebuilt from the digest', () => {
+  const host = makeHost()
+  host.aggregation.foldUsageRow(row('s1:step:1:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1))
+  host.aggregation.foldUsageRow(row('s2:step:1:1', 's2', 'ws-b', '2026-08-17', 'deepseek-v4-pro', '0.2', 1))
+  const day = host.state.byDay.get('2026-08-17')
+  const scopedInput = () => {
+    let total = 0
+    for (const models of day.queryUsage.values()) for (const bucket of models.values()) total += bucket.input
+    return total
+  }
+  assert.equal(scopedInput(), day.tokens.input, 'both cubes start in step')
+  // Inflate the scoped cube the way the live path did for the current day.
+  for (const models of day.queryUsage.values()) for (const bucket of models.values()) bucket.input += 5000
+  assert.equal(scopedInput(), day.tokens.input + 10000)
+  // A read rebuilds it from the digest, which describes the same rows.
+  host.aggregation.queryUsageScope({ start: '2026-08-17', end: '2026-08-17', utc: false })
+  assert.equal(scopedInput(), day.tokens.input, 'the scoped cube is back in step with the day cube')
 })
 
 test('retargeting a session moves its digest with its rows', () => {
