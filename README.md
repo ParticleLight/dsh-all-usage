@@ -202,8 +202,16 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - Mapping 语义：带 `identityKey` 的 mapping 只对精确路由身份生效；不带身份键的 mapping 才按模型做全局回退；旧配置中的 `usageIdentityKey` 会在加载时归一化。
 - 节假日日历只在用户点击「从公开日历载入」时抓取：目标主机是 `cdn.jsdelivr.net`（失败时 `raw.githubusercontent.com`），请求里只有年份，**不发送任何用量、会话或凭据数据**；返回的日期串在用户保存前不会生效，保存后连同来源说明一起冻结进该模型的峰谷计划（来源不参与政策哈希）
 - 余额查询走 DeepSeek 官方 `/user/balance` 接口；未配置 API Key 时卡片显示引导文案
-- 账本按 session ID 稳定 hash 到 32 个 JSON shard，单次 flush 只重写对应 shard；旧的 `all_usage_ledger.json` 会在首次加载时迁移，异步写失败或退出前未落盘不会丢失内存统计，只会让下次启动重新扫描
+- 账本按 session ID 稳定 hash 到 32 个分片目录，**每个会话一条记录文件**：一次 flush 只发布这一个文件，不再重写整个分片；旧的整体式分片文件（含最初的 `all_usage_ledger.json`）在记录树确认已写入后会被清理，`DSH_ALL_USAGE_KEEP_LEGACY=1` 可保留它们。异步写失败或退出前未落盘不会丢失内存统计，只会让下次启动重新扫描
 - 仅统计能归属到已注册工作区（按会话 cwd 匹配）的会话
+### 存储与性能
+
+- **一个会话一条记录**：账本把每个会话写成独立文档（按 session ID 稳定 hash 到 32 个目录），一次更新只发布一个文件。实测同一份数据下，单次更新的落盘成本从「重写整个 13.27 MB 分片 / 273 ms」降到「写一条记录 / 中位 4.6 ms」
+- **同一路由只存一次身份**：记录里的用量条目只引用身份与价格定义，相同的供应商 / 模型不再逐条重复；实测本机 1059 条记录体积 **91.3 → 74.7 MB（−18%）**
+- **快照只为当前时区买单**：`GET /api/all-usage?utc=0|1` 只返回一份日历（此前两份各占一半载荷），每个日期只保留最近 **180 天**的会话 ID 明细，更早的日期保留数量与聚合
+- **趋势点数封顶 180**：超过半年自动降到 3 天一点，再按需要扩到周 / 月 / 季 / 年，图表不随历史无限变长
+- **预算写进代码**：查询与记录缓存各 20 条、定价解析缓存 5000、每会话上下文归档 512、价格行 500、分片 32、单图点数 180、快照会话 ID 窗口 180 天 —— 由 `test/perf-budgets.test.js` 守着，放开任何一项都必须显式修改那张表
+- **可复现的基准**：`node bench/ledger.mjs`（账本体积与单次重写成本）、`node bench/ledger-layout.mjs`（两种存储布局对比，在真实分片的副本上跑）、`node bench/endpoints.mjs`（5 个读接口的中位延迟与载荷）
 
 ### 开发
 
@@ -394,8 +402,18 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 - The holiday calendar is fetched only when the user clicks "Load from public calendar": the request goes to `cdn.jsdelivr.net` (falling back to `raw.githubusercontent.com`), carries nothing but the year, and **never includes usage, session, or credential data**; the returned dates stay inert until saved, and saving freezes them together with their source note into that model's peak plan (the source is excluded from the policy hash)
 - Balance data comes from DeepSeek’s official `/user/balance` endpoint; the card shows guidance when no API key is configured
 - English mode uses UTC for date buckets, range filters, streaks, heatmap dates, and export timestamps; Chinese mode uses local time
-- The ledger assigns each session ID to one of 32 stable-hash JSON shards, so a flush rewrites only its shard; the old `all_usage_ledger.json` is migrated on first load. An async write failure or an unflushed shutdown does not lose in-memory statistics; the next startup simply scans that session again
+- The ledger assigns each session ID to one of 32 stable-hash directories and keeps **one record document per session**, so a flush publishes that one file instead of rewriting a shard; the old whole-unit files (including the original `all_usage_ledger.json`) are removed once the record tree provably holds the data, and `DSH_ALL_USAGE_KEEP_LEGACY=1` keeps them. An async write failure or an unflushed shutdown does not lose in-memory statistics; the next startup simply scans that session again
 - Only sessions that can be mapped to a registered workspace by their working directory are included
+
+
+### Storage and performance
+
+- **One record per session**: the ledger writes each session as its own document (stable-hashed into 32 directories), so an update publishes one file. Measured on the same data: a single update went from rewriting a 13.27 MB shard (273 ms) to writing one record (a 4.6 ms median)
+- **One identity per route**: usage items reference the route identity and its price definition instead of repeating them, so 1059 records shrank from **91.3 to 74.7 MB (-18%)**
+- **The snapshot pays for one timezone only**: `GET /api/all-usage?utc=0|1` returns a single calendar (both copies used to split the payload in half), and a day keeps its session-id detail for the last **180 days** while older days keep counts and aggregates
+- **The trend chart is capped at 180 points**: past half a year it drops to three days per point and widens to week / month / quarter / year, so the chart cannot grow with history
+- **Budgets live in the code**: 20 query and 20 records cache entries, 5000 pricing resolutions, 512 context entries per session, 500 price rows, 32 shards, 180 trend points and a 180-day session-id window - guarded by `test/perf-budgets.test.js`, so relaxing one means editing that table
+- **Reproducible benchmarks**: `node bench/ledger.mjs` (ledger size and per-update rewrite cost), `node bench/ledger-layout.mjs` (the two storage layouts, on copies of real shards) and `node bench/endpoints.mjs` (median latency and payload of five read endpoints)
 
 ### Development
 
