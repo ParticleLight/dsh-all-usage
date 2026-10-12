@@ -1305,6 +1305,15 @@ window.__ModuleLoader__.load({
       if (hourlyTotal <= 0) return []
       return Math.abs(hourlyTotal - dayTotal) <= Math.max(dayTotal * 0.05, 200000) ? hourly : []
     }
+    /**
+     * How many calls a cost aggregate counted: priced plus the ones it could not price.
+     * This is the figure the ledger backs, unlike the per-model call counter.
+     */
+    function costCallsOf(cost) {
+      if (cost === null || cost === undefined) return 0
+      const total = Number(cost.pricedCalls || 0) + Number(cost.unpricedCalls || 0) + Number(cost.ambiguousCalls || 0) + Number(cost.unsupportedCalls || 0)
+      return Number.isFinite(total) && total > 0 ? total : 0
+    }
     function heatCellLabel(date, count, language) {
       const text = humanDate(date, language)
       const uses = Number.isFinite(count) && count > 0 ? count : 0
@@ -3718,7 +3727,11 @@ window.__ModuleLoader__.load({
       const animatedTotal = useCountUp(agg.totals.input + agg.totals.output + agg.totals.cacheRead + agg.totals.cacheWrite + agg.totals.reasoning, timer)
       const animatedRate = useCountUp(Math.round(rateOf(agg.totals.input, agg.totals.cacheRead) * 10), timer)
       const scopedCountIsCalls = providerFilter !== null || modelFilter !== null
-      const requestCount = Number.isFinite(agg.totals.calls) && agg.totals.calls > 0 ? agg.totals.calls : agg.totals.turns
+      // The cost counters are the ones the ledger agrees with; the model buckets' own
+      // call count drifts when the live feed replays a finished turn, so it is only a
+      // fallback.
+      const countedCalls = costCallsOf(agg.totals.cost)
+      const requestCount = countedCalls > 0 ? countedCalls : (Number.isFinite(agg.totals.calls) && agg.totals.calls > 0 ? agg.totals.calls : agg.totals.turns)
       const displayedCount = scopedCountIsCalls ? requestCount : agg.totals.turns
       const animatedTurns = useCountUp(displayedCount, timer)
       const animatedRequests = useCountUp(requestCount, timer)
