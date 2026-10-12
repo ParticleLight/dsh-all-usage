@@ -2072,7 +2072,12 @@ window.__ModuleLoader__.load({
       const failed = failedIdentity !== null && failedIdentity === identity
       const style = { width: size, height: size, minWidth: size }
       if (icon === null || failed) {
-        return React.createElement('span', { className: 'uh-model-icon uh-model-icon-fallback' + (props.className ? ' ' + props.className : ''), style, 'aria-hidden': true })
+        // A model with no bundled brand (or one whose icon failed to load) keeps the
+        // plugin's own stacked-layers mark: the row still reads as a model row instead
+        // of losing its icon, and the mark is never a guess at a brand.
+        return React.createElement('span', { className: 'uh-model-icon uh-model-icon-fallback' + (props.className ? ' ' + props.className : ''), style, 'aria-hidden': true },
+          React.createElement(LineIcon, { name: 'cache', size }),
+        )
       }
       // showTitle exposes the brand through the image's accessible name; the
       // decorative default stays fully hidden because the adjacent text already
@@ -2473,7 +2478,7 @@ window.__ModuleLoader__.load({
 .uh-record-num { text-align:right; }
 .uh-model-icon { display:inline-flex; align-items:center; justify-content:center; flex:none; vertical-align:middle; }
 .uh-model-icon img { display:block; width:100%; height:100%; object-fit:contain; }
-.uh-model-icon-fallback { border-radius:50%; background:var(--dsw-alias-fill-tertiary, rgba(128,128,128,.22)); box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l1, rgba(128,128,128,.3)); }
+.uh-model-icon-fallback { color:var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); opacity:.85; }
 .uh-model-label { display:flex; align-items:center; gap:7px; min-width:0; }
 .uh-model-label .uh-model-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
 .uh-record-model { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:550; }

@@ -7,6 +7,7 @@
 ### 优化
 - 图标溯源路径修正：原先 11 条记录的 `packages/static-svg/svg/` 在该 revision 并不存在（实际是 `icons/`），并新增「upstream 路径必须指向 bundled 文件」的断言（`openai-color.svg` 是唯一记录在案的例外）。
 - 打包门禁改为从 manifest 推导图标清单，图标测试从目录推导文件清单 —— 以后加品牌不再需要手改任何清单。
+- 没有品牌图标的模型改用插件自己的**层叠标记**（不再是空圆点），图标加载失败时也显示它 —— 这个标记本身不指向任何品牌，所以不会被误读成一次归属。
 
 ### Features
 - **43 model brands** — 32 new marks from the pinned lobe-icons revision (Mistral, NVIDIA, Cohere, Amazon Nova, Microsoft, Perplexity, Baidu, Tencent, StepFun, Baichuan, SenseNova, InternLM, LongCat, Xiaomi MiMo, AI21, IBM, Upstage, Liquid, Ai2, BAAI, Voyage, ByteDance Seed, Kling, Skywork, Aion, Nous, TII, Aleph Alpha, Yandex, Snowflake, iFlytek), nine of which had `currentColor` baked to a fixed neutral and are marked `modified`.
@@ -14,6 +15,7 @@
 ### Improvements
 - Icon provenance corrected: the original eleven entries recorded `packages/static-svg/svg/`, which does not exist at that revision (it is `icons/`), and a test now asserts that an upstream path names the file it came from (`openai-color.svg` is the documented exception).
 - The packaging gate derives the icon list from the manifest and the icon tests derive it from the directory, so adding a brand no longer requires editing either list.
+- Models without a bundled brand now show the plugin's own stacked-layers mark instead of an empty dot (a failed icon load uses it too); the mark implies no brand, so it can never be misread as an attribution.
 > 每条改动的背景、真机证据与踩过的坑，见对应提交信息。 / Background, evidence and pitfalls for each change live in the corresponding commit message.
 
 ## v1.1.18 (2026-10-07)
