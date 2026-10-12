@@ -402,10 +402,11 @@ window.__ModuleLoader__.load({
       const magnitude = chineseMagnitude(raw, language)
       return React.createElement(React.Fragment, null, value, magnitude ? React.createElement('span', { className: 'uh-unit' }, magnitude) : null)
     }
-    function money(currency, n, language) {
+    function money(currency, n, language, places) {
       if (n === null || n === undefined) return '—'
       const sym = currency === 'CNY' ? '¥' : currency === 'USD' ? '$' : currency + ' '
-      return sym + n.toLocaleString(language === 'en' ? 'en-US' : 'zh-CN', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
+      const digits = Number.isFinite(places) ? places : 4
+      return sym + n.toLocaleString(language === 'en' ? 'en-US' : 'zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })
     }
     function decimalParts(value) {
       const raw = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim().toLowerCase() : ''
@@ -3876,8 +3877,10 @@ window.__ModuleLoader__.load({
           const list = balance.currencies
           const primary = list.find((c) => c.currency === 'CNY') || list[0]
           const others = list.filter((c) => c !== primary)
-          balanceValue = money(primary.currency, primary.total, language)
-          let sub = primary.total !== null ? tr('赠送 ', 'Granted ') + money(primary.currency, primary.granted, language) + ' · ' + tr('充值 ', 'Top-up ') + money(primary.currency, primary.toppedUp, language) : ''
+          // This account's figures read as money (¥13.86, 赠送 ¥0.00 · 充值 ¥13.86); a
+          // balance in another currency keeps the exact four decimals the API reports.
+          balanceValue = money(primary.currency, primary.total, language, 2)
+          let sub = primary.total !== null ? tr('赠送 ', 'Granted ') + money(primary.currency, primary.granted, language, 2) + ' · ' + tr('充值 ', 'Top-up ') + money(primary.currency, primary.toppedUp, language, 2) : ''
           if (others.length > 0) sub += (sub ? ' ｜ ' : '') + others.map((c) => money(c.currency, c.total, language)).join(' ')
           balanceSub = sub
         } else {

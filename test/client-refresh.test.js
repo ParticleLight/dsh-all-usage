@@ -338,7 +338,14 @@ test('keeps audit details in a persistent compact request log panel', () => {
 test('renders cost totals, pricing status, and the merged price table controls', () => {
   assert.match(source, /uh-ios-summary-meta-cost/)
   assert.match(source, /costDisplay/)
-  assert.match(source, /minimumFractionDigits: 4, maximumFractionDigits: 4/)
+  // One account in one currency reads as money: the headline and its granted/top-up
+  // breakdown take two decimals; a balance in another currency keeps the four the
+  // API reports (and money() still defaults to four).
+  assert.match(source, /balanceValue = money\(primary\.currency, primary\.total, language, 2\)/)
+  assert.match(source, /const digits = Number\.isFinite\(places\) \? places : 4/)
+  assert.match(source, /money\(primary\.currency, primary\.granted, language, 2\)/)
+  assert.match(source, /money\(primary\.currency, primary\.toppedUp, language, 2\)/)
+  assert.match(source, /money\(c\.currency, c\.total, language\)/)
   assert.match(source, /costCoverageLabel/)
   assert.match(source, /api\/all-usage\/pricing/)
   assert.match(source, /api\/all-usage\/pricing\/sync/)
