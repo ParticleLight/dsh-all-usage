@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { apply } from '../lib/index.js'
 import {
   calculateCost,
@@ -589,6 +592,135 @@ test('catalog refreshes keep priced history auditable; repriceTemporal re-estima
   const request = makeRequest('GET', { host: '127.0.0.1:3080' })
   request.url = '/api/all-usage/query?start=' + snap.byDay[0].date + '&end=' + snap.byDay[0].date + '&utc=0'
   assert.equal((await call(app, '/api/all-usage/query', request)).json().totals.cost.total, '0.5')
+})
+
+test('explicit temporal repricing includes settled rows evicted before the request', async () => {
+  const oldBudget = process.env.DSH_ALL_USAGE_RESIDENT_ROWS
+  process.env.DSH_ALL_USAGE_RESIDENT_ROWS = '0'
+  const unit = {
+    global: { pricing: { catalogEntries: [V4_FLASH], sync: { autoEnabled: false } } },
+    records: { sessions: {} },
+    async loadAll() { return { global: this.global, tables: this.records } },
+    async putRecord(table, key, value) { this.records[table][key] = value },
+    async setGlobal(value) { this.global = value },
+    async close() {},
+  }
+  let app
+  try {
+    app = await createApp({
+      withStorage: true, storage: unit,
+      workspaces: [{ id: 'ws-evicted', path: 'C:/evicted', title: 'Evicted' }],
+      sessions: [{ header: { id: 's-evicted', cwd: 'C:/evicted' } }],
+      events: new Map([['s-evicted', [usageEvent(MONDAY_OFF, 1, 1, { inputTokens: 1000000 }, 0)]]]),
+    })
+    const initial = (await waitForScan(app)).json()
+    assert.equal(initial.scan.done, true)
+    assert.equal(initial.totals.cost.total, '0.22')
+    assert.equal(initial.memory.residentRows, 0, 'the regression must exercise the nonresident row path')
+    const updated = await postPricing(app, initial.requestToken, { pricing: { catalogEntries: [{ ...V4_FLASH, input: '0.25' }] }, repriceTemporal: true })
+    assert.equal(updated.json().ok, true)
+    const after = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+    assert.equal(after.totals.cost.total, '0.25', 'evicted history is part of explicit repricing')
+    assert.equal(unit.records.sessions['s-evicted'].usage[0].cost.total, '0.25', 'repricing reaches the durable record')
+  } finally {
+    if (app !== undefined) for (const cleanup of app.cleanups.reverse()) await cleanup()
+    if (oldBudget === undefined) delete process.env.DSH_ALL_USAGE_RESIDENT_ROWS
+    else process.env.DSH_ALL_USAGE_RESIDENT_ROWS = oldBudget
+  }
+})
+
+test('backfill reads evicted ledger records, persists costs, and cold records paginate', async () => {
+  const oldRows = process.env.DSH_ALL_USAGE_RESIDENT_ROWS
+  const oldCache = process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
+  process.env.DSH_ALL_USAGE_RESIDENT_ROWS = '0'
+  process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = '0'
+  const directory = await mkdtemp(join(tmpdir(), 'all-usage-cold-pricing-'))
+  const unit = {
+    global: { pricing: { catalogEntries: [], sync: { autoEnabled: false } } },
+    records: { sessions: { __all_usage_ledger_meta__: { version: 1, migratedAt: 1 } } },
+    tableDir() { return directory },
+    async loadAll() { return { global: structuredClone(this.global), tables: structuredClone(this.records) } },
+    async putRecord(table, key, value) {
+      this.records[table][key] = structuredClone(value)
+      await writeFile(join(directory, key + '.json'), JSON.stringify({ version: 0, record: value }))
+    },
+    async setGlobal(value) { this.global = structuredClone(value) },
+    async close() {},
+  }
+  let app
+  try {
+    app = await createApp({ withStorage: true, storage: unit,
+      workspaces: [{ id: 'ws-cold', path: 'C:/cold', title: 'Cold' }],
+      sessions: ['s-cold-a', 's-cold-b'].map((id) => ({ header: { id, cwd: 'C:/cold' } })),
+      events: new Map([
+        ['s-cold-a', [usageEvent(MONDAY_OFF, 1, 1, { inputTokens: 1000000 }, 0), usageEvent(MONDAY_OFF + 1000, 1, 2, { inputTokens: 1000000 }, 1)]],
+        ['s-cold-b', [usageEvent(MONDAY_OFF + 2000, 1, 1, { inputTokens: 1000000 }, 0)]],
+      ]),
+    })
+    const initial = (await waitForScan(app)).json()
+    assert.equal(initial.totals.cost.unpricedCalls, 3)
+    assert.ok(initial.memory.residentRecords < 2, 'at least one durable record was evicted from the LRU')
+    await postPricing(app, initial.requestToken, { pricing: { catalogEntries: [V4_FLASH] }, backfill: true })
+    for (const [sid, expectedRows] of [['s-cold-a', 2], ['s-cold-b', 1]]) {
+      const document = JSON.parse(await readFile(join(directory, sid + '.json'), 'utf8'))
+      assert.equal(document.record.usage.length, expectedRows)
+      assert.ok(document.record.usage.every((item) => item.cost.status === 'priced' && item.cost.total === '0.22'), 'every cost reaches disk, including the evicted record')
+    }
+    // Zero residency forces /records to re-read the document instead of reusing
+    // the newly priced live rows. Both pages must conserve the aggregate.
+    const query = async (cursor = '') => {
+      const request = makeRequest('GET', { host: '127.0.0.1:3080' })
+      request.url = '/api/all-usage/records?utc=1&start=2026-08-17&end=2026-08-17&limit=2' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '')
+      return (await call(app, '/api/all-usage/records', request)).json()
+    }
+    const first = await query()
+    const middle = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+    assert.equal(middle.memory.residentRows, 0)
+    const second = await query(first.nextCursor)
+    const rows = first.items.concat(second.items)
+    assert.equal(rows.length, 3)
+    assert.equal(new Set(rows.map((item) => item.id)).size, 3)
+    assert.ok(rows.every((item) => item.cost.total === '0.22'))
+    assert.equal(middle.totals.cost.total, '0.66')
+  } finally {
+    if (app !== undefined) for (const cleanup of app.cleanups.reverse()) await cleanup()
+    await rm(directory, { recursive: true, force: true })
+    if (oldRows === undefined) delete process.env.DSH_ALL_USAGE_RESIDENT_ROWS
+    else process.env.DSH_ALL_USAGE_RESIDENT_ROWS = oldRows
+    if (oldCache === undefined) delete process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
+    else process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = oldCache
+  }
+})
+
+test('repricing a retired workspace preserves its original durable attribution', async () => {
+  const workspaces = [{ id: 'ws-retire', path: 'C:/retire', title: 'Retire' }]
+  const unit = {
+    global: { pricing: { catalogEntries: [], sync: { autoEnabled: false } } }, records: { sessions: {} },
+    async loadAll() { return { global: structuredClone(this.global), tables: structuredClone(this.records) } },
+    async putRecord(table, key, value) { this.records[table][key] = structuredClone(value) },
+    async setGlobal(value) { this.global = structuredClone(value) },
+    async close() {},
+  }
+  const app = await createApp({ withStorage: true, storage: unit, workspaces,
+    sessions: [{ header: { id: 's-retire', cwd: 'C:/retire' } }],
+    events: new Map([['s-retire', [usageEvent(MONDAY_OFF, 1, 1, { inputTokens: 1000000 }, 0)]]]),
+  })
+  try {
+    const initial = (await waitForScan(app)).json()
+    workspaces.length = 0
+    for (const listener of app.listeners['domain/changed'] || []) listener({ domain: 'workspace', table: 'workspaces', operation: 'deleted', key: 'ws-retire' })
+    await new Promise((resolve) => setTimeout(resolve, 450))
+    await postPricing(app, initial.requestToken, { pricing: { catalogEntries: [V4_FLASH] }, backfill: true })
+    const stored = unit.records.sessions['s-retire']
+    assert.equal(stored.workspaceId, 'ws-retire')
+    assert.equal(stored.usage[0].workspaceId, 'ws-retire')
+    assert.equal(stored.usage[0].cost.total, '0.22')
+    const after = (await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
+    const retired = after.workspaces.find((workspace) => workspace.retiredBucket === true)
+    assert.ok(retired)
+    assert.equal(after.totals.cost.total, '0.22')
+    assert.equal(after.workspaces.some((workspace) => workspace.id === 'ws-retire'), false)
+  } finally { for (const cleanup of app.cleanups.reverse()) await cleanup() }
 })
 
 test('reseller routes never inherit the DeepSeek band plan end to end', async () => {
