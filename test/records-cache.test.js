@@ -106,3 +106,17 @@ test('partially overlapping compact ranges release only their exclusive identifi
   cacheRecordsResult(cache, 'c', legacyRange('new', 'new:logical:only'))
   assert.deepEqual(saved, [{ sid: 's', key: 's:step:0:0' }, { sid: 's', key: 's:step:1:0' }])
 })
+
+test('forceIndex compacts a small scope and never retains metadata rows', () => {
+  const cache = new Map()
+  const metadata = Array.from({ length: 2 }, (_, index) => ({ item: { sid: 's', key: 's:step:' + index + ':0' }, date: '2026-10-13' }))
+  const forced = cacheRecordsResult(cache, 'forced', metadata, true)
+  assert.equal(forced.kind, 'index')
+  assert.equal('rows' in forced, false, 'metadata stand-ins must never be held as real rows')
+  assert.equal(recordsCacheStats(cache).rows, 0)
+  assert.deepEqual(recordPageReferences(forced, 0, 5), [{ sid: 's', key: 's:step:0:0' }, { sid: 's', key: 's:step:1:0' }])
+  const resident = cacheRecordsResult(cache, 'resident', rows(2, 'r'))
+  assert.equal(resident.kind, 'rows')
+  const small = cacheRecordsResult(cache, 'small', rows(2, 't'))
+  assert.equal(small.kind, 'rows', 'without forceIndex a small scope keeps its payloads')
+})

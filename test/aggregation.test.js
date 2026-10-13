@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { apply } from '../lib/index.js'
+import { createAggregation } from '../lib/aggregation.js'
+import { createCostAccumulator, normalizePricingState } from '../lib/pricing.js'
 
 function makeResponse() {
   let body = ''
@@ -2314,4 +2316,227 @@ test('a registry change during the baseline is deferred instead of dropped', asy
   const status = (await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
   assert.equal(status.sync.workspaceSyncDeferred >= 1, true)
   assert.equal(status.sync.workspaceSyncAdded >= 1, true)
+})
+
+// ---------- Digest-backed /records scopes ----------
+// These tests drive createAggregation directly with a stubbed ledger so the
+// digest enumeration and paging can be compared against the full range read.
+const UNIT_RATES = { input: '1', output: '2', cacheRead: '0.25', cacheWrite: '0.5' }
+const digestCatalog = () => [
+  { providerId: 'deepseek', modelId: 'deepseek-chat', displayName: 'Digest A', ...UNIT_RATES },
+  { providerId: 'deepseek', modelId: 'deepseek-chat-mini', displayName: 'Digest B', ...UNIT_RATES },
+  { providerId: 'other', modelId: 'other-chat', displayName: 'Digest C', ...UNIT_RATES },
+]
+const localDateOf = (ms) => { const d = new Date(ms); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
+const utcDateOf = (ms) => new Date(ms).toISOString().slice(0, 10)
+
+function createDigestHost() {
+  const tokenKeys = ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning']
+  const state = {
+    byDay: new Map(), byDayUtc: new Map(), perWorkspace: new Map(), perModel: new Map(), perSession: new Map(),
+    usageByStep: new Map(), turnRecords: new Map(), usageByLocalDate: new Map(), usageByUtcDate: new Map(),
+    sessionsByLocalDate: new Map(), sessionsByUtcDate: new Map(), rowTouch: new Map(),
+    sessionModel: new Map(), sessionContextTimes: new Map(), sessionCount: new Set(), sessionSeq: new Map(),
+    wsMeta: new Map(), pathIndex: new Map(), memberOf: new Map(), chains: new Map(),
+    totals: { turns: 0, ...Object.fromEntries(tokenKeys.map(k => [k, 0])), cost: createCostAccumulator() },
+    statsRevision: 0, dataRevision: 0, metadataRevision: 0, scanRevision: 0, pricingRevision: 0,
+    statsDirtyScheduled: false, statsDirtyKinds: new Set(), aggregationGeneration: 0, retiredBucketUsed: false,
+    pricingState: normalizePricingState({ catalogEntries: digestCatalog(), sync: { autoEnabled: false } }),
+    pricingResolutionCache: new Map(),
+    instanceId: 'digest-unit', statsUpdatedAt: 0, snapshotCache: null, queryCache: new Map(), recordsQueryCache: new Map(),
+    scan: { started: true, done: true, scanned: 0, total: 0, failed: 0 },
+    ledgerDirtySessions: new Set(), ledgerPending: new Map(), ledgerWriting: new Set(), ledgerReading: new Map(),
+    liveResyncPending: new Set(), ledgerPrefetching: new Set(), knownSessionIds: new Set(),
+  }
+  const disk = new Map()
+  const stats = { loads: 0, readPages: [] }
+  const host = {
+    state,
+    markStatsChanged(kind = 'data') {
+      state.statsRevision += 1
+      if (kind === 'pricing') state.pricingRevision += 1
+      else state.dataRevision += 1
+      state.snapshotCache = null; state.queryCache.clear(); state.recordsQueryCache.clear()
+    },
+    commitPendingStats() {}, resetSyncState() {}, pricingSnapshot: () => ({}), syncSnapshot: () => ({}),
+    ledger: {
+      async loadRowsForRange(utc, start, end) {
+        stats.loads += 1
+        for (const record of disk.values()) {
+          for (const item of record.usage) {
+            const date = utc === true ? item.dateUtc : item.date
+            if (typeof start === 'string' && start !== '' && date < start) continue
+            if (typeof end === 'string' && end !== '' && date > end) continue
+            if (!state.usageByStep.has(item.key)) state.usageByStep.set(item.key, item)
+          }
+        }
+        return 0
+      },
+      async readUsageRows(references, utc) {
+        stats.readPages.push(references)
+        return references.map(({ sid, key }) => {
+          const resident = state.usageByStep.get(key)
+          if (resident !== undefined && resident.sid === sid) return { item: resident, date: utc === true ? resident.dateUtc : resident.date }
+          const record = disk.get(sid)
+          const stored = record && record.usage.find(item => item.key === key)
+          return stored === undefined ? undefined : { item: stored, date: utc === true ? stored.dateUtc : stored.date }
+        })
+      },
+    },
+  }
+  host.aggregation = createAggregation(host)
+  host.add = (sid, wsId, time, turn, step, provider, model, input, seq) => {
+    const identity = host.aggregation.makeIdentity(provider, model, model, null)
+    // Ledger materialization: out-of-order historical rows are authoritative and
+    // must fold, unlike the live feed's replay heuristic.
+    host.aggregation.addUsage(wsId, time, { inputTokens: input, outputTokens: input + 1, cacheReadTokens: 1, cacheWriteTokens: 1, reasoningTokens: 1 }, identity, sid, { turn, step }, seq, 'ledger-reuse')
+  }
+  host.evict = () => {
+    for (const item of state.usageByStep.values()) {
+      let record = disk.get(item.sid)
+      if (record === undefined) { record = { sessionId: item.sid, usage: [] }; disk.set(item.sid, record) }
+      record.usage.push(item)
+    }
+    state.usageByStep.clear()
+  }
+  return { host, disk, stats, state, aggregation: host.aggregation }
+}
+
+async function pageAll(aggregation, scope, limit) {
+  const items = []
+  let cursor
+  for (let pages = 0; ; pages += 1) {
+    assert.ok(pages < 200, 'pagination must terminate')
+    const page = await aggregation.queryRecords(scope, cursor, limit)
+    assert.equal(page.error, undefined)
+    items.push(...page.items)
+    if (!page.hasMore) return { items }
+    cursor = page.nextCursor
+  }
+}
+
+const DIGEST_SCOPE = { utc: true, start: '2026-10-13', end: '2026-10-13' }
+
+test('cold digest pages read only the sessions each page needs and match the full-read oracle', async () => {
+  const { host, stats, state, aggregation } = createDigestHost()
+  const base = Date.parse('2026-10-13T00:00:00Z')
+  const rows = [
+    ['a', 'w1', base + 5 * 3600000, 1, 'deepseek', 'deepseek-chat', 10],
+    ['a', 'w1', base + 4 * 3600000, 2, 'deepseek', 'deepseek-chat', 11],
+    ['b', 'w1', base + 3 * 3600000, 1, 'deepseek', 'deepseek-chat', 12],
+    ['b', 'w2', base + 2 * 3600000, 1, 'deepseek', 'deepseek-chat-mini', 13],
+    ['c', 'w2', base + 1 * 3600000, 1, 'other', 'other-chat', 14],
+  ]
+  rows.forEach((row, index) => host.add(row[0], row[1], row[2], row[3], index + 1, row[4], row[5], row[6], index))
+  assert.equal(state.usageByStep.size, 5)
+  host.evict()
+  assert.equal(state.usageByStep.size, 0)
+  const digest = await pageAll(aggregation, DIGEST_SCOPE, 2)
+  assert.deepEqual(digest.items.map(item => item.values.input), [10, 11, 12, 13, 14])
+  assert.equal(stats.loads, 0, 'the digest path never loads the whole range')
+  for (const references of stats.readPages) assert.ok(references.length <= 2, 'a page reads only its own rows')
+  assert.deepEqual([...new Set(stats.readPages.flat().map(reference => reference.sid))].sort(), ['a', 'b', 'c'])
+  const signature = (items) => items.map(item => [item.id, item.values.input, item.cost.total, item.time, item.workspaceId, item.provider, item.model])
+  const digestSignature = signature(digest.items)
+  const readUsageRows = host.ledger.readUsageRows
+  host.ledger.readUsageRows = undefined
+  state.recordsQueryCache.clear()
+  try {
+    const oracle = await pageAll(aggregation, DIGEST_SCOPE, 2)
+    assert.ok(stats.loads >= 1, 'the fallback reads the range')
+    assert.deepEqual(signature(oracle.items), digestSignature)
+  } finally { host.ledger.readUsageRows = readUsageRows }
+})
+
+test('an all-resident digest scope keeps real rows in the hot cache', async () => {
+  const { host, stats, state, aggregation } = createDigestHost()
+  const base = Date.parse('2026-10-13T00:00:00Z')
+  host.add('a', 'w1', base + 3600000, 1, 1, 'deepseek', 'deepseek-chat', 10, 1)
+  host.add('a', 'w1', base + 7200000, 2, 1, 'deepseek', 'deepseek-chat', 11, 2)
+  const first = await aggregation.queryRecords(DIGEST_SCOPE, undefined, 10)
+  const entry = Array.from(state.recordsQueryCache.values())[0]
+  assert.equal(entry.kind, 'rows')
+  assert.ok(entry.rows.every(row => row.item.values !== undefined), 'resident payloads are kept, not metadata stand-ins')
+  assert.equal(stats.loads, 0)
+  const reads = stats.readPages.length
+  const second = await aggregation.queryRecords(DIGEST_SCOPE, undefined, 10)
+  assert.equal(stats.readPages.length, reads, 'the hot scope is served from the cache')
+  assert.deepEqual(second.items.map(item => item.id), first.items.map(item => item.id))
+})
+
+test('digest scopes filter by local and UTC day, workspace, provider and model', async () => {
+  const { host, state, aggregation } = createDigestHost()
+  const first = Date.parse('2026-10-13T20:00:00Z')
+  const second = Date.parse('2026-10-14T02:00:00Z')
+  const rows = [
+    { sid: 'a', ws: 'w1', time: first, provider: 'deepseek', model: 'deepseek-chat', input: 10 },
+    { sid: 'b', ws: 'w2', time: first, provider: 'other', model: 'other-chat', input: 20 },
+    { sid: 'c', ws: 'w1', time: second, provider: 'deepseek', model: 'deepseek-chat-mini', input: 30 },
+  ]
+  rows.forEach((row, index) => host.add(row.sid, row.ws, row.time, 1, 1, row.provider, row.model, row.input, index))
+  host.evict()
+  const start = utcDateOf(Math.min(first, second)), end = utcDateOf(Math.max(first, second))
+  const expect = (filter) => rows.filter(filter).map(row => row.input).sort((a, b) => a - b)
+  const selected = (items) => items.map(item => item.values.input).sort((a, b) => a - b)
+  const utcDay = utcDateOf(first)
+  const utcPage = await pageAll(aggregation, { utc: true, start: utcDay, end: utcDay }, 10)
+  assert.deepEqual(selected(utcPage.items), expect(row => utcDateOf(row.time) === utcDay))
+  const localDay = localDateOf(first)
+  const localPage = await pageAll(aggregation, { utc: false, start: localDay, end: localDay }, 10)
+  assert.deepEqual(selected(localPage.items), expect(row => localDateOf(row.time) === localDay))
+  const wide = { utc: true, start, end }
+  assert.deepEqual(selected((await pageAll(aggregation, { ...wide, workspaceId: 'w1' }, 10)).items), expect(row => row.ws === 'w1'))
+  assert.deepEqual(selected((await pageAll(aggregation, { ...wide, provider: 'deepseek' }, 10)).items), expect(row => row.provider === 'deepseek'))
+  assert.deepEqual(selected((await pageAll(aggregation, { ...wide, modelKey: 'deepseek-chat-mini' }, 10)).items), expect(row => row.model === 'deepseek-chat-mini'))
+  assert.deepEqual((await pageAll(aggregation, { ...wide, provider: 'other', workspaceId: 'w1' }, 10)).items, [])
+})
+
+test('incomplete digest metadata falls back to the full range read', async () => {
+  const { host, stats, state, aggregation } = createDigestHost()
+  const base = Date.parse('2026-10-13T00:00:00Z')
+  host.add('a', 'w1', base + 3600000, 1, 1, 'deepseek', 'deepseek-chat', 10, 1)
+  host.add('a', 'w1', base + 7200000, 2, 1, 'deepseek', 'deepseek-chat', 11, 2)
+  host.evict()
+  const session = state.perSession.get('a')
+  const [key] = session.keys.keys()
+  session.keys.get(key).time = undefined
+  state.recordsQueryCache.clear()
+  const page = await aggregation.queryRecords(DIGEST_SCOPE, undefined, 10)
+  assert.equal(page.error, undefined)
+  assert.ok(stats.loads >= 1, 'missing metadata forces the full read')
+  assert.deepEqual(page.items.map(item => item.values.input), [11, 10])
+})
+
+test('a digest index cursor goes stale when pricing or data moves', async () => {
+  const { host, state, aggregation } = createDigestHost()
+  const base = Date.parse('2026-10-13T00:00:00Z')
+  host.add('a', 'w1', base + 3600000, 1, 1, 'deepseek', 'deepseek-chat', 10, 1)
+  host.add('a', 'w1', base + 7200000, 2, 1, 'deepseek', 'deepseek-chat', 11, 2)
+  host.evict()
+  const first = await aggregation.queryRecords(DIGEST_SCOPE, undefined, 1)
+  assert.equal(first.error, undefined)
+  state.pricingRevision += 1
+  assert.equal((await aggregation.queryRecords(DIGEST_SCOPE, first.nextCursor, 1)).error, 'stale-cursor')
+  state.recordsQueryCache.clear()
+  const fresh = await aggregation.queryRecords(DIGEST_SCOPE, undefined, 1)
+  host.add('a', 'w1', base + 10800000, 3, 1, 'deepseek', 'deepseek-chat', 12, 3)
+  assert.equal((await aggregation.queryRecords(DIGEST_SCOPE, fresh.nextCursor, 1)).error, 'stale-cursor')
+})
+
+test('an all-evicted cold scope pages twenty pages without loading the range', async () => {
+  const { host, stats, state, aggregation } = createDigestHost()
+  const base = Date.parse('2026-10-13T00:00:00Z')
+  const total = 40
+  for (let index = 0; index < total; index += 1) {
+    const sid = 's' + (index % 4)
+    host.add(sid, 'w1', base + (total - index) * 60000, index + 1, 1, 'deepseek', 'deepseek-chat', index + 1, index)
+  }
+  assert.equal(state.usageByStep.size, total)
+  host.evict()
+  const pages = await pageAll(aggregation, DIGEST_SCOPE, 2)
+  assert.equal(pages.items.length, total)
+  assert.equal(stats.readPages.length, 20, 'twenty pages each read only their own rows')
+  for (const references of stats.readPages) assert.ok(references.length <= 2)
+  assert.equal(stats.loads, 0, 'the range is never loaded')
+  assert.equal(new Set(pages.items.map(item => item.id)).size, total)
 })

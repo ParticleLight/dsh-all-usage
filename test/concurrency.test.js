@@ -373,8 +373,14 @@ test('a cold records page created during repricing uses the same revision as its
   await host.install('s', events)
   host.aggregation.evictColdRows({ rows: 0 })
   const entered = deferred(), gate = deferred()
-  const load = host.ledger.loadRowsForRange
-  host.ledger.loadRowsForRange = async (...args) => { entered.resolve(); await gate.promise; return load(...args) }
+  // The cold digest path has no range load to gate; the page read is the await
+  // window in which a reprice can move the revision.
+  const readRows = host.ledger.readUsageRows
+  let holdRead = true
+  host.ledger.readUsageRows = async (...args) => {
+    if (holdRead) { holdRead = false; entered.resolve(); await gate.promise }
+    return readRows(...args)
+  }
   const scope = { start: '2026-10-12', end: '2026-10-13', utc: true }
   let query
   try {
@@ -1033,7 +1039,11 @@ test('compact cold pages preserve workspace, model, provider, local-day and UTC-
     host.ledger.loadRowsForRange = range
     const full = await host.aggregation.queryRecords(scope, undefined, 100)
     assert.deepEqual(full.items.map(view), expected.map(view))
-    compactCachedScope(host); discardReadResidency(host)
+    // An evicted scope already comes back as a compact index; only an all-resident
+    // result still needs forcing into one before the residency is discarded.
+    const cached = Array.from(host.state.recordsQueryCache.values()).find(result => result.kind === 'rows' && result.rows.length > 0)
+    if (cached !== undefined) compactCachedScope(host)
+    discardReadResidency(host)
     const reads = new Map()
     host.state.ledgerUnit.readRecord = async sid => { reads.set(sid, (reads.get(sid) || 0) + 1); return read(sid) }
     host.ledger.loadRowsForRange = async () => { throw new Error('a compact filtered page must not reload the scope') }
@@ -1150,9 +1160,12 @@ test('compact page reads cap missing sessions at eight and leave residency uncha
 test('unstable first-page construction returns stale after exactly three attempts', async t => {
   const host = makeHost(); t.after(host.close)
   await host.install('s', [usage(MIDNIGHT_UTC - 1000, 1, 1, 10, 0)])
-  const load = host.ledger.loadRowsForRange
+  host.aggregation.evictColdRows({ rows: 0 })
+  // The page read is the await point the digest index is constructed around, so
+  // mutating the revision there is what forces the retry loop.
+  const readRows = host.ledger.readUsageRows
   let attempts = 0
-  host.ledger.loadRowsForRange = async (...args) => { attempts++; await load(...args); host.markStatsChanged('data') }
+  host.ledger.readUsageRows = async (...args) => { attempts++; const page = await readRows(...args); host.markStatsChanged('data'); return page }
   const result = await host.aggregation.queryRecords(recordsScope, undefined, 1)
   assert.equal(result.error, 'stale-cursor')
   assert.equal(attempts, 3)
