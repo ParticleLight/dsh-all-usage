@@ -50,6 +50,7 @@
     "lib/index.js",
     "lib/plugin.js",
     "lib/aggregation.js",
+    "lib/records-cache.js",
     "lib/ledger.js",
     "lib/session-sync.js",
     "lib/pricing-runtime.js",

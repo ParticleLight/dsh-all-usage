@@ -9,6 +9,7 @@ import test from 'node:test'
 const client = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
 const aggregation = await readFile(new URL('../lib/aggregation.js', import.meta.url), 'utf8')
 const ledger = await readFile(new URL('../lib/ledger.js', import.meta.url), 'utf8')
+const recordsCache = await readFile(new URL('../lib/records-cache.js', import.meta.url), 'utf8')
 const pricingRuntime = await readFile(new URL('../lib/pricing-runtime.js', import.meta.url), 'utf8')
 const plugin = await readFile(new URL('../lib/plugin.js', import.meta.url), 'utf8')
 const usageCore = await readFile(new URL('../lib/usage-core.js', import.meta.url), 'utf8')
@@ -17,7 +18,8 @@ const budgets = [
   ['trend chart points', client, 'const TREND_MAX_POINTS = 180'],
   ['snapshot session-id window (days)', aggregation, 'const SNAPSHOT_SESSION_WINDOW_DAYS = 180'],
   ['query result cache entries', aggregation, 'state.queryCache.size > 20'],
-  ['records result cache entries', aggregation, 'state.recordsQueryCache.size > 20'],
+  ['records result cache entries', recordsCache, 'RECORDS_CACHE_ENTRY_LIMIT = 20'],
+  ['records result cache rows', recordsCache, 'RECORDS_CACHE_ROW_LIMIT = 24000'],
   ['pricing resolution cache entries', aggregation, '5000'],
   ['context archive per session', usageCore, 'const MAX_CONTEXT_TIMES = 512'],
   ['pricing rows per snapshot', pricingRuntime, 'const MAX_PRICING_ROWS = 500'],

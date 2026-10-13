@@ -58,6 +58,7 @@ const expected = [
   'assets/screenshot-3.png',
   'cordis.patch.yml',
   'lib/aggregation.js',
+  'lib/records-cache.js',
   'lib/balance.js',
   'lib/client.js',
   'lib/http.js',

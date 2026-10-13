@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { setImmediate as yieldLoop } from 'node:timers/promises'
 import { createAggregation } from '../lib/aggregation.js'
+import { cacheRecordsResult, recordKeyHash, recordPageReferences } from '../lib/records-cache.js'
 import { createLedger } from '../lib/ledger.js'
 import { createPricingRuntime } from '../lib/pricing-runtime.js'
 import { createSessionSync } from '../lib/session-sync.js'
@@ -83,9 +84,9 @@ function makeHost(disk = new Map(), logs = new Map()) {
     async readRecord(sid) { const record = structuredClone(disk.get(sid)); await yieldLoop(); return record },
     async putRecord(table, sid, record) { await yieldLoop(); disk.set(sid, structuredClone(record)) },
   }
-  host.install = async (sid, events) => {
+  host.install = async (sid, events, workspaceId = 'w') => {
     logs.set(sid, structuredClone(events))
-    const record = host.ledger.buildLedgerRecord({ id: sid, events }, 'w', 'scan', undefined, null, true)
+    const record = host.ledger.buildLedgerRecord({ id: sid, events }, workspaceId, 'scan', undefined, null, true)
     host.ledger.replaceLedgerRecord(record)
     host.ledger.applyLedgerRecord(record, 'ledger-reuse')
     state.sessionSeq.set(sid, record.lastSeq)
@@ -756,4 +757,373 @@ test('seeded mixed live, history rewrite, cold paging, repricing, and recovery s
     else process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = previousBudget
   }
   console.log('CONCURRENCY_STRESS ' + JSON.stringify(result))
+})
+
+function compactCachedScope(host) {
+  const entry = Array.from(host.state.recordsQueryCache.values()).find(result => result.kind === 'rows' && result.rows.length > 0)
+  assert.ok(entry)
+  cacheRecordsResult(host.state.recordsQueryCache, 'test-padding', new Array(24000).fill(entry.rows[0]))
+  assert.equal(entry.kind, 'index')
+  return entry
+}
+function discardReadResidency(host) {
+  // Date key indices survive residency eviction; cold adoption only restores
+  // payload objects, so clearing those indices would create an invalid fixture.
+  for (const name of ['usageByStep', 'rowTouch', 'ledgerRecords', 'ledgerRecordSizes']) host.state[name].clear()
+  host.state.ledgerRecordBytes = 0
+}
+const recordsScope = { start: '2026-10-12', end: '2026-10-13', utc: true }
+
+test('compact pages preserve tie order, read only missing page sessions, and recover after index eviction', async t => {
+  const host = makeHost(); t.after(host.close)
+  const a = [usage(MIDNIGHT_UTC - 1000, 1, 1, 1, 1, 'a'), usage(MIDNIGHT_UTC + 1000, 1, 2, 2, 2, 'a')]
+  const b = [usage(MIDNIGHT_UTC - 1000, 1, 1, 11, 1, 'b'), usage(MIDNIGHT_UTC + 1000, 1, 2, 12, 2, 'b')]
+  const older = [usage(MIDNIGHT_UTC - 2000, 1, 1, 100, 0, 'c')]
+  await host.install('a', a); await host.install('b', b); await host.install('c', older)
+  assertOracle(host, [...a, ...b, ...older])
+  const all = await host.aggregation.queryRecords(recordsScope, undefined, 100)
+  assert.deepEqual(all.items.map(item => item.values.input), [2, 12, 1, 11, 100])
+  const first = await host.aggregation.queryRecords(recordsScope, undefined, 2)
+  compactCachedScope(host); discardReadResidency(host)
+  const residentRecord = host.disk.get('a')
+  host.aggregation.adoptUsageRow(host.aggregation.usageRowOf(residentRecord, residentRecord.usage[0], 'ledger-reuse'))
+  const read = host.state.ledgerUnit.readRecord, reads = []
+  host.state.ledgerUnit.readRecord = async sid => { reads.push(sid); return read(sid) }
+  const load = host.ledger.loadRowsForRange
+  host.ledger.loadRowsForRange = async () => { throw new Error('an index hit must not read the whole range') }
+  const second = await host.aggregation.queryRecords(recordsScope, first.nextCursor, 2)
+  assert.deepEqual(second.items.map(item => item.values.input), [1, 11])
+  assert.deepEqual(reads, ['b'], 'resident a is reused; c is outside this page')
+  const last = await host.aggregation.queryRecords(recordsScope, second.nextCursor, 2)
+  assert.deepEqual(last.items.map(item => item.values.input), [100])
+  assert.deepEqual(reads, ['b', 'c'])
+  assert.equal(last.hasMore, false); assert.equal(last.nextCursor, null)
+  const ids = [...first.items, ...second.items, ...last.items].map(item => item.id)
+  assert.deepEqual(ids, all.items.map(item => item.id)); assert.equal(new Set(ids).size, 5)
+  const decoded = JSON.parse(Buffer.from(first.nextCursor, 'base64url').toString())
+  decoded.offset = 5
+  const empty = await host.aggregation.queryRecords(recordsScope, Buffer.from(JSON.stringify(decoded)).toString('base64url'), 2)
+  assert.deepEqual(empty.items, []); assert.equal(empty.hasMore, false); assert.equal(empty.nextCursor, null)
+  host.state.recordsQueryCache.clear(); host.ledger.loadRowsForRange = load
+  const rebuilt = await host.aggregation.queryRecords(recordsScope, first.nextCursor, 2)
+  assert.deepEqual(rebuilt.items.map(item => item.id), second.items.map(item => item.id))
+  assertOracle(host, [...a, ...b, ...older])
+})
+
+test('index page rejects a stale cursor while repriced costs await durable persistence', async t => {
+  const host = makeHost(); t.after(host.close)
+  const events = [usage(MIDNIGHT_UTC - 1000, 1, 1, 10, 0), usage(MIDNIGHT_UTC + 1000, 1, 2, 20, 1)]
+  await host.install('s', events)
+  const first = await host.aggregation.queryRecords(recordsScope, undefined, 1)
+  compactCachedScope(host); discardReadResidency(host)
+  const readEntered = deferred(), readGate = deferred(), writeEntered = deferred(), writeGate = deferred()
+  const read = host.state.ledgerUnit.readRecord, write = host.state.ledgerUnit.putRecord
+  let holdRead = true, holdWrite = true, querying, repricing
+  host.state.ledgerUnit.readRecord = async sid => {
+    const snapshot = await read(sid)
+    if (holdRead) { holdRead = false; readEntered.resolve(); await readGate.promise }
+    return snapshot
+  }
+  host.state.ledgerUnit.putRecord = async (...args) => {
+    if (holdWrite) { holdWrite = false; writeEntered.resolve(); await writeGate.promise }
+    return write(...args)
+  }
+  try {
+    querying = host.aggregation.queryRecords(recordsScope, first.nextCursor, 1)
+    await readEntered.promise
+    repricing = host.pricing.updatePricingState({ catalogEntries: catalog(2) }, false, true)
+    await writeEntered.promise
+    readGate.resolve()
+    const stale = await querying
+    assert.equal(stale.error, 'stale-cursor', 'new costs are published before persistence completes')
+    const current = await host.aggregation.queryRecords(recordsScope, undefined, 1)
+    assert.notEqual(current.pricingRevision, first.pricingRevision)
+    assert.equal(current.items[0].cost.rates.input, '2')
+    writeGate.resolve(); await repricing; await host.ledger.drainLedgerWrites()
+    assertOracle(host, events, 2)
+    assert.equal(host.state.ledgerReading.size, 0); assert.equal(host.state.ledgerWriting.size, 0)
+  } finally {
+    readGate.resolve(); writeGate.resolve()
+    await Promise.allSettled([querying, repricing].filter(Boolean))
+  }
+})
+
+test('index first page retries after data changes during page materialization', async t => {
+  const host = makeHost(); t.after(host.close)
+  const events = [usage(MIDNIGHT_UTC - 1000, 1, 1, 10, 0), usage(MIDNIGHT_UTC + 1000, 1, 2, 20, 1)]
+  await host.install('s', events)
+  await host.aggregation.queryRecords(recordsScope, undefined, 1)
+  compactCachedScope(host); discardReadResidency(host)
+  const entered = deferred(), gate = deferred(), read = host.state.ledgerUnit.readRecord
+  let hold = true, querying
+  host.state.ledgerUnit.readRecord = async sid => {
+    const snapshot = await read(sid)
+    if (hold) { hold = false; entered.resolve(); await gate.promise }
+    return snapshot
+  }
+  try {
+    querying = host.aggregation.queryRecords(recordsScope, undefined, 2)
+    await entered.promise
+    const next = [...events, usage(MIDNIGHT_UTC + 2000, 1, 3, 30, 2)]
+    await host.install('s', next)
+    gate.resolve()
+    const result = await querying
+    assert.equal(result.error, undefined)
+    assert.deepEqual(result.items.map(item => item.values.input), [30, 20])
+    const cursor = JSON.parse(Buffer.from(result.nextCursor, 'base64url').toString())
+    assert.equal(cursor.queryRevision, host.state.dataRevision + ':' + host.state.pricingRevision)
+    assertOracle(host, next)
+  } finally { gate.resolve(); await Promise.allSettled([querying].filter(Boolean)) }
+})
+
+test('missing indexed keys do not silently shorten a cursor page', async t => {
+  const host = makeHost(); t.after(host.close)
+  const events = [usage(MIDNIGHT_UTC - 1000, 1, 1, 10, 0), usage(MIDNIGHT_UTC + 1000, 1, 2, 20, 1)]
+  await host.install('s', events)
+  const first = await host.aggregation.queryRecords(recordsScope, undefined, 1)
+  const index = compactCachedScope(host)
+  const reference = recordPageReferences(index, 1, 1)[0]
+  discardReadResidency(host)
+  host.disk.get('s').usage = host.disk.get('s').usage.filter(item => item.key !== reference.key)
+  const result = await host.aggregation.queryRecords(recordsScope, first.nextCursor, 1)
+  assert.equal(result.error, 'stale-cursor')
+  assert.equal(host.state.ledgerReading.size, 0)
+})
+
+test('a failed index page read releases its borrowed record before propagating the error', async t => {
+  const host = makeHost(); t.after(host.close)
+  await host.install('s', [usage(MIDNIGHT_UTC - 1000, 1, 1, 10, 0), usage(MIDNIGHT_UTC + 1000, 1, 2, 20, 1)])
+  const first = await host.aggregation.queryRecords(recordsScope, undefined, 1)
+  compactCachedScope(host); discardReadResidency(host)
+  const read = host.state.ledgerUnit.readRecord
+  host.state.ledgerUnit.readRecord = async () => { throw new Error('injected page read failure') }
+  await assert.rejects(host.aggregation.queryRecords(recordsScope, first.nextCursor, 1), /injected page read failure/)
+  assert.equal(host.state.ledgerReading.size, 0)
+  host.state.ledgerUnit.readRecord = read
+  const retry = await host.aggregation.queryRecords(recordsScope, first.nextCursor, 1)
+  assert.equal(retry.items.length, 1)
+})
+
+test('an index page keeps selected keys when cache churn recycles their numeric ids during I/O', async t => {
+  const host = makeHost(); t.after(host.close)
+  await host.install('s', [usage(MIDNIGHT_UTC - 1000, 1, 1, 10, 0), usage(MIDNIGHT_UTC + 1000, 1, 2, 20, 1)])
+  const first = await host.aggregation.queryRecords(recordsScope, undefined, 1)
+  compactCachedScope(host); discardReadResidency(host)
+  const entered = deferred(), gate = deferred(), read = host.state.ledgerUnit.readRecord
+  let querying
+  host.state.ledgerUnit.readRecord = async sid => { entered.resolve(); await gate.promise; return read(sid) }
+  try {
+    querying = host.aggregation.queryRecords(recordsScope, first.nextCursor, 1)
+    await entered.promise
+    for (let index = 0; index < 25; index += 1) {
+      const sid = 'other-' + index
+      cacheRecordsResult(host.state.recordsQueryCache, sid, new Array(24001).fill({ item: { sid, key: sid + ':step:0:0' } }))
+    }
+    gate.resolve()
+    const result = await querying
+    assert.equal(result.error, undefined)
+    assert.deepEqual(result.items.map(item => item.values.input), [10])
+    assert.equal(result.hasMore, false)
+    assert.equal(host.state.ledgerReading.size, 0)
+  } finally { gate.resolve(); await Promise.allSettled([querying].filter(Boolean)) }
+})
+
+test('page read failures settle every borrowed session before returning an error', async t => {
+  const host = makeHost(); t.after(host.close)
+  for (const [sid, input] of [['a', 1], ['b', 10]]) await host.install(sid, [usage(MIDNIGHT_UTC - 1000, 1, 1, input, 1, sid), usage(MIDNIGHT_UTC + 1000, 1, 2, input + 1, 2, sid)])
+  const first = await host.aggregation.queryRecords(recordsScope, undefined, 1)
+  compactCachedScope(host); discardReadResidency(host)
+  const entered = deferred(), gate = deferred(), read = host.state.ledgerUnit.readRecord
+  let querying, settled = false
+  host.state.ledgerUnit.readRecord = async sid => {
+    if (sid === 'a') throw new Error('injected parallel read failure')
+    entered.resolve(); await gate.promise; return read(sid)
+  }
+  try {
+    querying = host.aggregation.queryRecords(recordsScope, first.nextCursor, 2)
+    querying.then(() => { settled = true }, () => { settled = true })
+    await entered.promise; await yieldLoop(); await yieldLoop()
+    assert.equal(settled, false, 'the page owns the other outstanding read until it settles')
+    gate.resolve(); await assert.rejects(querying, /injected parallel read failure/)
+    assert.equal(host.state.ledgerReading.size, 0)
+  } finally { gate.resolve(); await Promise.allSettled([querying].filter(Boolean)) }
+})
+
+test('legacy key digests materialize the original row without retaining its payload key in the index', async t => {
+  const host = makeHost(); t.after(host.close)
+  await host.install('s', [usage(MIDNIGHT_UTC - 1000, 1, 1, 10, 0)])
+  const payloadKey = 's:event:' + JSON.stringify({ usage: { inputTokens: 10 }, extra: 'x'.repeat(10000) })
+  host.disk.get('s').usage[0].key = payloadKey
+  discardReadResidency(host)
+  const rows = await host.ledger.readUsageRows([{ sid: 's', keyHash: recordKeyHash(payloadKey) }], true)
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].item.key, payloadKey)
+  assert.equal(rows[0].item.values.input, 10)
+  assert.equal(rows[0].item.wsId, 'w')
+  assert.equal(host.state.ledgerReading.size, 0)
+})
+
+test('compact cold pages preserve workspace, model, provider, local-day and UTC-day filters', async t => {
+  const host = makeHost(); t.after(host.close)
+  host.state.wsMeta.set('w2', { id: 'w2', path: 'C:/other', title: 'Other' })
+  host.state.pricingState = normalizePricingState({ catalogEntries: [...catalog(), ...catalog().map(entry => ({ ...entry, modelId: 'deepseek-v4-pro' }))], sync: { autoEnabled: false } })
+  const groups = [
+    ['a', 'w', 'deepseek-v4-flash', 10],
+    ['b', 'w2', 'deepseek-v4-flash', 100],
+    ['c', 'w2', 'deepseek-v4-pro', 1000],
+  ]
+  const events = []
+  const instants = [MIDNIGHT_CST - 1000, MIDNIGHT_CST + 1000, MIDNIGHT_UTC - 1000, MIDNIGHT_UTC + 1000]
+  for (const [sid, workspaceId, model, input] of groups) {
+    const rows = instants.map((time, index) => {
+      const event = usage(time, 1, index + 1, input + index, index, sid)
+      event.data.message.source.model = model
+      return event
+    })
+    events.push(...rows); await host.install(sid, rows, workspaceId)
+  }
+  assertOracle(host, events)
+  const all = (await host.aggregation.queryRecords(recordsScope, undefined, 100)).items
+  const scopes = [
+    ...[false, true].flatMap(utc => ['2026-10-12', '2026-10-13'].map(date => ({ start: date, end: date, utc }))),
+    { ...recordsScope, workspaceId: 'w2' },
+    { ...recordsScope, modelKey: 'vendor/DEEPSEEK-V4-PRO' },
+    { ...recordsScope, workspaceId: 'w2', provider: 'deepseek', modelKey: all.find(row => row.actualModel === 'deepseek-v4-pro').identityKey },
+  ]
+  const view = item => ({ id: item.id, time: item.time, date: item.date, workspaceId: item.workspaceId, provider: item.provider, model: item.actualModel, values: item.values, cost: item.cost.total })
+  const read = host.state.ledgerUnit.readRecord
+  const range = host.ledger.loadRowsForRange
+  for (const scope of scopes) {
+    host.state.recordsQueryCache.clear()
+    const expected = all.map(item => ({ ...item, date: scope.utc ? new Date(item.time).toISOString().slice(0, 10) : host.aggregation.dayKey(item.time) }))
+      .filter(item => item.date >= scope.start && item.date <= scope.end)
+      .filter(item => scope.workspaceId === undefined || item.workspaceId === scope.workspaceId)
+      .filter(item => scope.modelKey === undefined || item.actualModel === 'deepseek-v4-pro')
+    host.ledger.loadRowsForRange = range
+    const full = await host.aggregation.queryRecords(scope, undefined, 100)
+    assert.deepEqual(full.items.map(view), expected.map(view))
+    compactCachedScope(host); discardReadResidency(host)
+    const reads = new Map()
+    host.state.ledgerUnit.readRecord = async sid => { reads.set(sid, (reads.get(sid) || 0) + 1); return read(sid) }
+    host.ledger.loadRowsForRange = async () => { throw new Error('a compact filtered page must not reload the scope') }
+    const selected = []
+    let cursor
+    do {
+      const page = await host.aggregation.queryRecords(scope, cursor, 2)
+      assert.equal(page.error, undefined)
+      selected.push(...page.items); cursor = page.nextCursor
+    } while (cursor)
+    assert.deepEqual(selected.map(view), expected.map(view))
+    assert.ok([...reads.values()].every(count => count === 1), 'each missing session is read once and reused across its rows/pages')
+    assert.equal(host.state.ledgerReading.size, 0)
+  }
+  host.ledger.loadRowsForRange = range
+  assertOracle(host, events)
+})
+
+test('a missing indexed key on the first page stays visible as stale instead of silently rebuilding a shorter scope', async t => {
+  const host = makeHost(); t.after(host.close)
+  const events = [usage(MIDNIGHT_UTC - 1000, 1, 1, 10, 0), usage(MIDNIGHT_UTC + 1000, 1, 2, 20, 1)]
+  await host.install('s', events)
+  await host.aggregation.queryRecords(recordsScope, undefined, 1)
+  const entry = compactCachedScope(host)
+  const reference = recordPageReferences(entry, 0, 1)[0]
+  discardReadResidency(host)
+  host.disk.get('s').usage = host.disk.get('s').usage.filter(item => item.key !== reference.key)
+  const result = await host.aggregation.queryRecords(recordsScope, undefined, 1)
+  assert.equal(result.error, 'stale-cursor')
+  assert.equal(host.state.ledgerReading.size, 0)
+  assertOracle(host, events)
+})
+
+test('legacy lone-surrogate keys materialize as separate original requests', async t => {
+  const host = makeHost(); t.after(host.close)
+  await host.install('s', [usage(MIDNIGHT_UTC - 1000, 1, 1, 10, 0), usage(MIDNIGHT_UTC + 1000, 1, 2, 20, 1)])
+  const keys = ['s:legacy:\ud800', 's:legacy:\ud801']
+  host.disk.get('s').usage.forEach((row, index) => { row.key = keys[index] })
+  discardReadResidency(host)
+  const rows = await host.ledger.readUsageRows(keys.map(key => ({ sid: 's', keyHash: recordKeyHash(key) })), true)
+  assert.deepEqual(rows.map(row => row.item.key), keys)
+  assert.deepEqual(rows.map(row => row.item.values.input), [10, 20])
+  assert.equal(host.state.ledgerReading.size, 0)
+})
+
+
+
+
+
+
+
+test('page lookup walks a large authoritative array once then reads only selected positions', async t => {
+  const host = makeHost(); t.after(host.close)
+  await host.install('s', [usage(MIDNIGHT_UTC - 1000, 1, 1, 10, 0)])
+  const template = host.disk.get('s').usage[0]
+  const record = { ...host.disk.get('s'), usage: Array.from({ length: 30000 }, (_, index) => ({ ...template, key: 's:step:1:' + index, step: index, values: { ...template.values, input: index } })) }
+  let reads = 0
+  record.usage = new Proxy(record.usage, { get(target, key, receiver) { if (typeof key === 'string' && /^\d+$/.test(key)) reads++; return Reflect.get(target, key, receiver) } })
+  discardReadResidency(host)
+  host.state.ledgerRecords.set('s', record)
+  const row = await host.ledger.readUsageRows([{ sid: 's', key: 's:step:1:29999' }])
+  assert.equal(row[0].item.values.input, 29999)
+  assert.equal(reads, 30001)
+  const start = reads
+  for (let index = 0; index < 20; index += 1) {
+    const page = await host.ledger.readUsageRows([{ sid: 's', key: 's:step:1:' + index }])
+    assert.equal(page[0].item.values.input, index)
+  }
+  assert.equal(reads - start, 20, 'subsequent pages reuse numeric positions without traversing the whole usage array')
+  record.usage.reverse()
+  const reordered = await host.ledger.readUsageRows([{ sid: 's', key: 's:step:1:0' }])
+  assert.equal(reordered[0].item.values.input, 0, 'same-length in-place reordering invalidates selected positions')
+  record.usage.push({ ...template, key: 's:step:1:30000', values: { ...template.values, input: 30000 } })
+  const appended = await host.ledger.readUsageRows([{ sid: 's', key: 's:step:1:30000' }])
+  assert.equal(appended[0].item.values.input, 30000)
+  record.usage = [template]
+  const replaced = await host.ledger.readUsageRows([{ sid: 's', key: template.key }])
+  assert.equal(replaced[0].item.values.input, template.values.input)
+  assert.equal(host.state.ledgerReading.size, 0)
+})
+
+test('compact page reads cap missing sessions at eight and leave residency unchanged', async t => {
+  const host = makeHost(); t.after(host.close)
+  const references = []
+  for (let index = 0; index < 10; index += 1) {
+    const sid = 'session-' + index
+    const record = await host.install(sid, [usage(MIDNIGHT_UTC - 1000, 1, 1, index + 1, 0, sid)])
+    references.push({ sid, key: record.usage[0].key })
+  }
+  discardReadResidency(host)
+  const adopted = host.state.diagCounters?.get('row.adopted') || 0
+  const read = host.state.ledgerUnit.readRecord
+  let active = 0, highest = 0, reads = 0
+  host.state.ledgerUnit.readRecord = async sid => {
+    reads++; active++; highest = Math.max(highest, active)
+    try { await yieldLoop(); return await read(sid) } finally { active-- }
+  }
+  const rows = await host.ledger.readUsageRows(references)
+  assert.deepEqual(rows.map(row => row.item.values.input), Array.from({ length: 10 }, (_, index) => index + 1))
+  assert.equal(reads, 10); assert.equal(highest, 8)
+  assert.equal(host.state.usageByStep.size, 0)
+  assert.equal(host.state.diagCounters?.get('row.adopted') || 0, adopted)
+  assert.equal(host.state.ledgerReading.size, 0)
+  discardReadResidency(host)
+  host.state.ledgerUnit.readRecord = async sid => {
+    if (sid === 'session-8') throw new Error('later batch failure')
+    await yieldLoop(); return read(sid)
+  }
+  await assert.rejects(host.ledger.readUsageRows(references), /later batch failure/)
+  assert.equal(host.state.ledgerReading.size, 0)
+  assert.equal(host.state.usageByStep.size, 0)
+})
+
+test('unstable first-page construction returns stale after exactly three attempts', async t => {
+  const host = makeHost(); t.after(host.close)
+  await host.install('s', [usage(MIDNIGHT_UTC - 1000, 1, 1, 10, 0)])
+  const load = host.ledger.loadRowsForRange
+  let attempts = 0
+  host.ledger.loadRowsForRange = async (...args) => { attempts++; await load(...args); host.markStatsChanged('data') }
+  const result = await host.aggregation.queryRecords(recordsScope, undefined, 1)
+  assert.equal(result.error, 'stale-cursor')
+  assert.equal(attempts, 3)
+  assert.equal(host.state.recordsQueryCache.size, 0)
 })
