@@ -113,6 +113,28 @@ test('a session unwinds from the digest alone, with its rows already gone', () =
   assert.equal(host.state.totals.cost.pricedCalls, 0)
 })
 
+test('removing an evicted digest bucket subtracts its full call and session counts', () => {
+  const host = makeHost()
+  const rows = [
+    row('s1:step:1:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1),
+    row('s1:step:1:2', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.2', 1),
+    row('s2:step:1:1', 's2', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.3', 1),
+  ]
+  for (const sample of rows) host.aggregation.foldUsageRow(sample)
+  host.aggregation.evictColdRows({ rows: 0 })
+  host.aggregation.removeSession('s1')
+  const day = host.state.byDay.get('2026-08-17')
+  const model = Array.from(day.byModel.values())[0]
+  const query = Array.from(day.queryUsage.get('ws-a').values())[0]
+  assert.equal(host.state.perModel.get(model.identityKey).calls, 1)
+  assert.equal(model.calls, 1)
+  assert.equal(query.calls, 1)
+  assert.equal(query.input, 10)
+  assert.equal(query.cost.pricedCalls, 1)
+  assert.deepEqual(Array.from(day.sessionIds), ['s2'])
+  assert.deepEqual(Array.from(query.sessions), ['s2'])
+})
+
 test('settled rows can be dropped and read back without changing a single total', () => {
   const host = makeHost()
   const rows = [
@@ -201,8 +223,128 @@ test('a replayed event older than the newest folded row is ignored', () => {
   assert.equal(totals.pricedCalls, 2)
   // The same history replayed after a restart, renumbered and with its own timestamp.
   const replay = row('s1:step:9:9', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 9)
+  replay.materialization = 'live'
   host.aggregation.upsertUsageSample(host.state.usageByStep, replay)
   assert.deepEqual({ input: host.state.totals.input, pricedCalls: host.state.totals.cost.pricedCalls }, totals, 'the replay was stored but not counted')
+})
+
+test('the per-session digest retains usage turn references for replay and cleanup', () => {
+  const host = makeHost()
+  const sample = row('s1:step:1:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1)
+  host.aggregation.foldUsageRow(sample)
+  const session = host.state.perSession.get('s1')
+  const bucket = Array.from(session.buckets.values())[0]
+  const turnKey = 's1:turn:1'
+  assert.equal(bucket.turns.get(turnKey), 1, 'the digest records the row turn')
+  const queryMap = host.state.byDay.get(sample.date).queryUsage
+  const queryBucket = Array.from(queryMap.get('ws-a').values())[0]
+  assert.equal(queryBucket.turnKeys.has(turnKey), true)
+  queryBucket.input += 5000
+  host.aggregation.queryUsageScope({ start: sample.date, end: sample.date, utc: false })
+  const rebuiltQueryMap = host.state.byDay.get(sample.date).queryUsage
+  const rebuiltBucket = Array.from(rebuiltQueryMap.get('ws-a').values())[0]
+  assert.equal(rebuiltBucket.turnKeys.has(turnKey), true, 'digest rebuild preserves the turn filter index')
+  host.aggregation.evictColdRows({ rows: 0 })
+  host.aggregation.removeSession('s1')
+  assert.equal(rebuiltBucket.turnKeys.has(turnKey), false, 'removing an evicted session clears query turn references')
+})
+
+test('a scoped rebuild retains turn references until every usage row is replaced', () => {
+  const host = makeHost()
+  const first = row('s1:step:1:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1)
+  const second = row('s1:step:1:2', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.2', 1)
+  for (const sample of [first, second]) host.aggregation.foldUsageRow(sample)
+  host.aggregation.addTurn('ws-a', first.time, 's1', 1, first.identity, 'ledger-reuse', 3)
+  const day = host.state.byDay.get(first.date)
+  let bucket = Array.from(day.queryUsage.get('ws-a').values())[0]
+  bucket.input += 5000
+  host.aggregation.queryUsageScope({ start: first.date, end: first.date, utc: false })
+  bucket = Array.from(day.queryUsage.get('ws-a').values())[0]
+  const turnKey = 's1:turn:1'
+  assert.equal(bucket.turnKeyRefs.get(turnKey), 2, 'rebuild counts each row sharing the turn')
+  assert.equal(bucket.calls, 2)
+  const hour = day.queryHours.get(host.aggregation.hourStartOf(first.time, false))
+  assert.equal(Array.from(hour.turns.get('ws-a').values())[0].turns, 1, 'usage reconciliation retains hourly turn/end records')
+  const replacement = { ...first, values: { ...first.values, input: 11 }, turn: 2 }
+  host.aggregation.upsertUsageSample(host.state.usageByStep, replacement)
+  bucket = Array.from(day.queryUsage.get('ws-a').values())[0]
+  assert.equal(bucket.turnKeyRefs.get(turnKey), 1, 'replacing one row keeps the other row indexed')
+  assert.equal(bucket.turnKeys.has(turnKey), true)
+})
+
+test('a live replay of a completed turn is rejected before it enters resident rows', () => {
+  const host = makeHost()
+  const first = row('s1:step:1:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1)
+  host.aggregation.foldUsageRow(first)
+  host.aggregation.addTurn('ws-a', first.time, 's1', 1, first.identity, 'ledger-reuse', 2)
+  const before = { input: host.state.totals.input, pricedCalls: host.state.totals.cost.pricedCalls }
+  host.aggregation.evictColdRows({ rows: 0 })
+  const replay = row('s1:step:9:9', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1)
+  replay.time = first.time
+  replay.seq = 9
+  replay.materialization = 'live'
+  const result = host.aggregation.upsertUsageSample(host.state.usageByStep, replay)
+  assert.equal(result.accepted, false)
+  assert.equal(host.state.usageByStep.has(replay.key), false, 'a rejected replay is never inserted as an unindexed row')
+  assert.deepEqual({ input: host.state.totals.input, pricedCalls: host.state.totals.cost.pricedCalls }, before)
+  assert.equal(host.state.perSession.get('s1').keys.has(replay.key), false)
+})
+
+test('a live event rejected by the time fence does not leave an orphan row', () => {
+  const host = makeHost()
+  const first = row('s1:step:1:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1)
+  host.aggregation.foldUsageRow(first)
+  const later = row('s1:step:2:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.2', 2)
+  later.time = first.time + 3600000
+  host.aggregation.foldUsageRow(later)
+  const replay = row('s1:step:3:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 3)
+  replay.time = first.time
+  replay.materialization = 'live'
+  const result = host.aggregation.upsertUsageSample(host.state.usageByStep, replay)
+  assert.equal(result.accepted, false)
+  assert.equal(host.state.usageByStep.has(replay.key), false)
+  assert.equal(host.state.perSession.get('s1').keys.has(replay.key), false)
+})
+
+test('an older out-of-order ledger event is still folded during a scan', () => {
+  const host = makeHost()
+  const latest = row('s1:step:2:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.2', 2)
+  latest.time += 3600000
+  host.aggregation.foldUsageRow(latest)
+  const lateLedgerRow = row('s1:step:1:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1)
+  lateLedgerRow.time = latest.time - 3600000
+  lateLedgerRow.seq = 9
+  lateLedgerRow.materialization = 'scan'
+  host.aggregation.foldUsageRow(lateLedgerRow)
+  assert.equal(host.state.usageByStep.has(lateLedgerRow.key), true)
+  assert.equal(host.state.totals.input, 20, 'the persistent ledger remains authoritative even when event times are out of order')
+})
+
+test('removing an evicted session unwinds each UTC hour independently', () => {
+  const host = makeHost()
+  const first = row('s1:step:1:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1)
+  const second = row('s1:step:2:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.2', 2)
+  const survivor = row('s2:step:1:1', 's2', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.3', 1)
+  second.time = first.time + 3600000
+  survivor.time = first.time + 2 * 3600000
+  for (const sample of [first, second, survivor]) host.aggregation.foldUsageRow(sample)
+  host.aggregation.evictColdRows({ rows: 0 })
+  host.aggregation.removeSession('s1')
+  const day = host.state.byDayUtc.get('2026-08-17')
+  const inputAt = (hour) => {
+    const value = day.queryHours.get(hour)
+    if (value === undefined) return 0
+    let total = 0
+    for (const models of value.usage.values()) for (const metric of models.values()) total += metric.input
+    return total
+  }
+  const firstHour = Date.parse('2026-08-17T03:00:00Z')
+  const survivorHour = firstHour + 2 * 3600000
+  const hourlyState = Array.from(day.queryHours, ([hour, value]) => [hour, Array.from(value.usage, ([wsId, models]) => [wsId, Array.from(models.values(), (metric) => ({ calls: metric.calls, input: metric.input, sessions: Array.from(metric.sessions) }))])])
+  assert.equal(inputAt(firstHour), 0, 'removed usage leaves no negative contribution in its first hour: ' + JSON.stringify(hourlyState))
+  assert.equal(inputAt(firstHour + 3600000), 0, 'removed usage is removed from its second hour')
+  assert.equal(inputAt(survivorHour), 10, 'the surviving session remains in its original hour')
+  assert.equal(inputAt(firstHour) + inputAt(firstHour + 3600000) + inputAt(survivorHour), day.tokens.input)
 })
 
 test('retargeting a session moves its digest with its rows', () => {
