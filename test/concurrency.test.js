@@ -323,6 +323,143 @@ test('a contiguous new live request with a reversed midnight timestamp is aligne
 })
 
 
+test('cold rows keep per-key workspace ownership during partial retirement', async (t) => {
+  const previousBudget = process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
+  process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = '0'
+  const host = makeHost(); t.after(host.close)
+  const gate = deferred(), entered = deferred()
+  let retiring
+  try {
+    const before = usage(MIDNIGHT_CST - 1000, 1, 1, 10, 0)
+    const after = usage(MIDNIGHT_CST + 1000, 1, 2, 20, 1)
+    await host.install('s', [before])
+    host.state.memberOf.set('s', 'w')
+    const load = host.ledger.loadRowsForSession
+    let blocked = false
+    host.ledger.loadRowsForSession = async sid => {
+      if (sid === 's' && !blocked) { blocked = true; entered.resolve(); await gate.promise }
+      return load(sid)
+    }
+    host.ctx.workspaceRegistry.list = () => []
+    retiring = host.sessionSync.synchronizeWorkspaceRegistry()
+    await entered.promise
+    assert.ok(host.state.retiringWorkspaceIds.has('w'))
+    host.logs.set('s', [before, after])
+    await host.sessionSync.enqueue('s', () => host.sessionSync.processLiveEvent('s', 'w', after))
+    assert.equal(host.state.perWorkspace.get('w').input, 10)
+    assert.equal(host.state.perWorkspace.get('retired:deleted').input, 20)
+    const record = host.ledger.buildLedgerRecord({ id: 's', header: { cwd: 'C:/stress' }, events: [before, after] }, 'w', 'flush', undefined, host.disk.get('s'), true)
+    host.ledger.replaceLedgerRecord(record)
+    await host.ledger.persistLedgerRecord(record)
+    host.aggregation.evictColdRows({ rows: 0 })
+    host.state.ledgerRecords.clear(); host.state.ledgerRecordSizes.clear(); host.state.ledgerRecordBytes = 0
+    const page = await host.aggregation.queryRecords({ utc: true, start: '2026-10-12', end: '2026-10-13' }, undefined, 10)
+    assert.deepEqual(page.items.map(row => [row.values.input, row.workspaceId]).sort((a, b) => a[0] - b[0]), [[10, 'w'], [20, 'retired:deleted']])
+    assert.equal(host.state.perWorkspace.get('w').input, 10)
+    assert.equal(host.state.perWorkspace.get('retired:deleted').input, 20)
+    gate.resolve(); await retiring
+    assert.equal(host.state.perWorkspace.get('w')?.input || 0, 0)
+    assert.equal(host.state.perWorkspace.get('retired:deleted').input, 30)
+    assertOracle(host, [before, after])
+    assert.equal(host.disk.get('s').workspaceId, 'w')
+  } finally {
+    gate.resolve()
+    if (retiring !== undefined) await Promise.allSettled([retiring])
+    if (previousBudget === undefined) delete process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
+    else process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = previousBudget
+  }
+})
+
+test('workspace removal racing a truncated history and cold read never retires deleted usage', async (t) => {
+  const previousBudget = process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
+  process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = '0'
+  const host = makeHost(); t.after(host.close)
+  const gate = deferred(), entered = deferred()
+  let retiring
+  try {
+    const event = usage(MIDNIGHT_CST - 1000, 1, 1, 100, 0)
+    await host.install('s', [event])
+    host.aggregation.evictColdRows({ rows: 0 })
+    // Drop the clean record before the cold workspace scan begins.
+    host.state.ledgerRecords.clear(); host.state.ledgerRecordSizes.clear(); host.state.ledgerRecordBytes = 0
+    const read = host.state.ledgerUnit.readRecord
+    let first = true
+    host.state.ledgerUnit.readRecord = async (sid) => {
+      if (first && sid === 's') { first = false; const old = structuredClone(host.disk.get(sid)); entered.resolve(); await gate.promise; return old }
+      return read(sid)
+    }
+    host.ctx.workspaceRegistry.list = () => []
+    retiring = host.sessionSync.synchronizeWorkspaceRegistry()
+    await entered.promise
+    host.logs.set('s', [])
+    await host.sessionSync.enqueue('s', () => host.sessionSync.syncLiveSession('s', 'w', null, 0))
+    await host.ledger.drainLedgerWrites()
+    host.ledger.replaceLedgerRecord({ ...host.disk.get('s'), sessionId: 'other', updatedAt: Date.now() })
+    gate.resolve(); await retiring
+    assertOracle(host, [])
+    assert.equal(host.state.usageByStep.size, 0)
+    for (const value of host.state.perWorkspace.values()) {
+      for (const key of TOKEN_KEYS) assert.equal(value[key], 0, 'no phantom or negative workspace contribution')
+      assert.equal(fixedMoney(serializeCostAggregate(value.cost).total), 0n)
+    }
+    assert.equal(host.disk.get('s').usage.length, 0)
+    assert.equal(host.state.ledgerReading.size, 0)
+  } finally {
+    gate.resolve()
+    if (retiring !== undefined) await Promise.allSettled([retiring])
+    if (previousBudget === undefined) delete process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
+    else process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = previousBudget
+  }
+})
+
+
+
+test('live appends and cold pages during workspace retirement stay in the retired aggregate', async (t) => {
+  const previousBudget = process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
+  process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = '0'
+  const host = makeHost(); t.after(host.close)
+  const gate = deferred(), entered = deferred()
+  let retiring
+  try {
+    const before = usage(MIDNIGHT_CST - 1000, 1, 1, 10, 0, 'a')
+    await host.install('a', [before])
+    await host.install('b', [])
+    host.state.memberOf.set('a', 'w'); host.state.memberOf.set('b', 'w')
+    host.ctx.workspaceRegistry.list = () => []
+    const load = host.ledger.loadRowsForSession
+    host.ledger.loadRowsForSession = async sid => { if (sid === 'b') { entered.resolve(); await gate.promise }; return load(sid) }
+    retiring = host.sessionSync.synchronizeWorkspaceRegistry()
+    await entered.promise
+    assert.equal(Array.from(host.state.perSession.get('a').buckets.values())[0].wsId, 'retired:deleted')
+    // Its original durable record can be read after the remapped wrapper is evicted.
+    host.aggregation.evictColdRows({ rows: 0 })
+    host.state.ledgerRecords.clear(); host.state.ledgerRecordSizes.clear(); host.state.ledgerRecordBytes = 0
+    const page = await host.aggregation.queryRecords({ utc: true, start:'2026-10-12', end:'2026-10-13' }, undefined, 10)
+    assert.equal(page.items[0].workspaceId, 'retired:deleted', 'cold detail follows the aggregate while metadata retirement is awaiting another session')
+    host.aggregation.evictColdRows({ rows:0 })
+    await host.pricing.updatePricingState({ catalogEntries: catalog(2) }, false, true)
+    assertOracle(host, [before], 2)
+    const after = usage(MIDNIGHT_CST + 1000, 1, 2, 20, 1, 'a')
+    host.logs.set('a', [before, after])
+    const resolvedWs = host.sessionSync.wsForLiveSession({ header: { cwd:'C:/stress' } }, 'a')
+    await host.sessionSync.enqueue('a', () => host.sessionSync.processLiveEvent('a', resolvedWs, after))
+    gate.resolve(); await retiring
+    assertOracle(host, [before, after], 2)
+    assert.equal(host.state.perWorkspace.get('w')?.input || 0, 0, 'late live usage does not recreate the removed workspace bucket')
+    assert.equal(host.state.perWorkspace.get('retired:deleted').input, 30)
+    const finalPage = await host.aggregation.queryRecords({ utc: true, start:'2026-10-12', end:'2026-10-13' }, undefined, 10)
+    assert.ok(finalPage.items.every(row => row.workspaceId === 'retired:deleted'))
+    assert.equal(host.disk.get('a').workspaceId, 'w', 'durable attribution keeps the original workspace')
+  } finally {
+    gate.resolve()
+    if (retiring !== undefined) await Promise.allSettled([retiring])
+    if (previousBudget === undefined) delete process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
+    else process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = previousBudget
+  }
+})
+
+
+
 test('an evicted live correction stays pending when its authoritative read is unavailable', async (t) => {
   const host = makeHost(); t.after(host.close)
   const before = usage(MIDNIGHT_CST - 1000, 1, 1, 10, 0)
