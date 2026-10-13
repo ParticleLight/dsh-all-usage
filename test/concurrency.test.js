@@ -170,6 +170,15 @@ function assertOracle(host, expected, factor = 1) {
   for (const [key, value] of state.diagCounters || []) if (key.startsWith('q.reconciled.')) assert.equal(value, 0, 'the stress oracle must not depend on query self-healing')
 }
 
+test('authoritative live history accepts sequenced usage across a reversed midnight timestamp', async (t) => {
+  const events = [usage(MIDNIGHT_CST + 1000, 1, 1, 10, 0), usage(MIDNIGHT_CST - 1000, 1, 2, 20, 1)]
+  const host = makeHost(new Map(), new Map([['s', events]])); t.after(host.close)
+  await host.sessionSync.enqueue('s', () => host.sessionSync.syncLiveSession('s', 'w', events[1], 0))
+  await host.ledger.drainLedgerWrites()
+  assertOracle(host, events)
+  assert.equal(host.disk.get('s').usage.length, 2)
+})
+
 test('an active ledger write survives cache pressure, cold reads and repricing', async (t) => {
   const previousBudget = process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
   process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = '0'
@@ -289,3 +298,153 @@ test('a live flush cannot replace the record borrowed by concurrent repricing', 
     await Promise.allSettled([repricing, flushing].filter(Boolean))
   }
 })
+
+test('a higher-sequence live correction to an evicted logical request replaces its original contribution', async (t) => {
+  const host = makeHost(); t.after(host.close)
+  const before = usage(MIDNIGHT_CST - 1000, 1, 1, 10, 0)
+  const after = usage(MIDNIGHT_CST + 1000, 1, 1, 20, 1)
+  await host.install('s', [before])
+  host.aggregation.evictColdRows({ rows: 0 })
+  assert.equal(host.state.usageByStep.size, 0)
+  host.logs.set('s', [before, after])
+  await host.sessionSync.enqueue('s', () => host.sessionSync.processLiveEvent('s', 'w', after))
+  assertOracle(host, [after])
+})
+
+
+test('a contiguous new live request with a reversed midnight timestamp is aligned instead of dropped', async (t) => {
+  const host = makeHost(); t.after(host.close)
+  const before = usage(MIDNIGHT_CST + 1000, 1, 1, 10, 0)
+  const after = usage(MIDNIGHT_CST - 1000, 1, 2, 20, 1)
+  await host.install('s', [before])
+  host.logs.set('s', [before, after])
+  await host.sessionSync.enqueue('s', () => host.sessionSync.processLiveEvent('s', 'w', after))
+  assertOracle(host, [before, after])
+})
+
+
+test('an evicted live correction stays pending when its authoritative read is unavailable', async (t) => {
+  const host = makeHost(); t.after(host.close)
+  const before = usage(MIDNIGHT_CST - 1000, 1, 1, 10, 0)
+  const after = usage(MIDNIGHT_CST + 1000, 1, 1, 20, 1)
+  await host.install('s', [before]); host.aggregation.evictColdRows({ rows:0 })
+  host.logs.set('s', [before, after])
+  const read = host.ctx.sessionQuery.readSession
+  host.ctx.sessionQuery.readSession = async () => { throw new Error('temporarily unavailable session log') }
+  await host.sessionSync.enqueue('s', () => host.sessionSync.processLiveEvent('s', 'w', after))
+  const page = await host.aggregation.queryRecords({ utc:true, start:'2026-10-12', end:'2026-10-13' }, undefined, 10)
+  assert.equal(page.items[0].values.input, 10, 'until resync succeeds, detail remains consistent with the last settled contribution')
+  assertOracle(host, [before])
+  host.ctx.sessionQuery.readSession = read
+  await host.sessionSync.enqueue('s', () => host.sessionSync.resyncLiveSession('s', 'w', 0))
+  assertOracle(host, [after])
+  assert.equal(host.state.liveResyncPending.size, 0)
+})
+
+test('a stale retry retains late usage rejected as a completed-turn replay', async (t) => {
+  const host = makeHost(); t.after(host.close)
+  const first = usage(MIDNIGHT_CST + 1000, 1, 1, 30, 0)
+  const turnEnd = { seq: 1, time: MIDNIGHT_CST + 2000, type: 'turn/end', data: { turn: 1 } }
+  const late = usage(MIDNIGHT_CST - 1000, 1, 2, 10, 2)
+  await host.install('s', [first, turnEnd])
+  const read = host.ctx.sessionQuery.readSession
+  host.ctx.sessionQuery.readSession = async () => { throw new Error('temporarily unavailable session log') }
+  await host.sessionSync.enqueue('s', () => host.sessionSync.processLiveEvent('s', 'w', late))
+  host.ctx.sessionQuery.readSession = read
+  assert.ok(host.state.liveResyncTriggers.has('s'))
+  assertOracle(host, [first])
+  await host.sessionSync.enqueue('s', () => host.sessionSync.resyncLiveSession('s', 'w', 0))
+  assert.ok(host.state.liveResyncPending.has('s'), 'the old complete snapshot must not discard an unconfirmed late append')
+  assertOracle(host, [first])
+  host.logs.set('s', [first, turnEnd, late])
+  await host.sessionSync.enqueue('s', () => host.sessionSync.resyncLiveSession('s', 'w', 0))
+  await host.ledger.drainLedgerWrites()
+  assert.equal(host.state.liveResyncPending.size, 0)
+  assert.equal(host.state.liveResyncTriggers.size, 0)
+  assertOracle(host, [first, late])
+  assert.equal(host.disk.get('s').usage.reduce((sum, row) => sum + row.values.input, 0), 40)
+})
+
+test('a sequence-damaged retry cannot acknowledge an evicted correction', async (t) => {
+  const host = makeHost(); t.after(host.close)
+  const first = usage(MIDNIGHT_CST - 2000, 1, 1, 10, 0)
+  const second = usage(MIDNIGHT_CST - 1000, 1, 2, 30, 1)
+  const corrected = usage(MIDNIGHT_CST + 1000, 1, 1, 20, 2)
+  await host.install('s', [first, second]); host.aggregation.evictColdRows({ rows: 0 })
+  const read = host.ctx.sessionQuery.readSession
+  host.ctx.sessionQuery.readSession = async () => { throw new Error('temporarily unavailable session log') }
+  await host.sessionSync.enqueue('s', () => host.sessionSync.processLiveEvent('s', 'w', corrected))
+  host.ctx.sessionQuery.readSession = read
+  const unrelated = { seq: 2, time: MIDNIGHT_CST, type: 'request/header', data: { provider: 'deepseek', model: 'deepseek-v4-flash' } }
+  host.logs.set('s', [corrected, unrelated, second])
+  await host.sessionSync.enqueue('s', () => host.sessionSync.resyncLiveSession('s', 'w', 0))
+  assert.ok(host.state.liveResyncPending.has('s'), 'a non-monotonic snapshot cannot complete correction recovery')
+  assert.ok(host.state.liveResyncTriggers.has('s'))
+  assertOracle(host, [first, second])
+  host.logs.set('s', [first, second, corrected])
+  await host.sessionSync.enqueue('s', () => host.sessionSync.resyncLiveSession('s', 'w', 0))
+  await host.ledger.drainLedgerWrites()
+  assert.equal(host.state.liveResyncPending.size, 0)
+  assert.equal(host.state.liveResyncTriggers.size, 0)
+  assertOracle(host, [corrected, second])
+  assert.equal(host.disk.get('s').usage.reduce((sum, row) => sum + row.values.input, 0), 50)
+})
+
+test('failed live corrections survive stale retry snapshots until every trigger is present', async (t) => {
+  const host = makeHost(); t.after(host.close)
+  const first = usage(MIDNIGHT_CST - 2000, 1, 1, 10, 0)
+  const second = usage(MIDNIGHT_CST - 1000, 1, 2, 30, 1)
+  const correctedFirst = usage(MIDNIGHT_CST + 1000, 1, 1, 20, 2)
+  const correctedSecond = usage(MIDNIGHT_CST + 2000, 1, 2, 40, 3)
+  await host.install('s', [first, second]); host.aggregation.evictColdRows({ rows: 0 })
+  const read = host.ctx.sessionQuery.readSession
+  host.ctx.sessionQuery.readSession = async () => { throw new Error('temporarily unavailable session log') }
+  await host.sessionSync.enqueue('s', () => host.sessionSync.processLiveEvent('s', 'w', correctedFirst))
+  await host.sessionSync.enqueue('s', () => host.sessionSync.processLiveEvent('s', 'w', correctedSecond))
+  host.ctx.sessionQuery.readSession = read
+  const generation = host.aggregation.resetAggregationState()
+  host.state.wsMeta.set('w', { id: 'w', path: 'C:/stress', title: 'Stress' })
+  await host.sessionSync.runBaseline(generation)
+  assert.ok(host.state.liveResyncPending.has('s'), 'a baseline scan cannot acknowledge corrections missing from its old snapshot')
+  assert.ok(host.state.liveResyncTriggers.has('s'), 'full state reset retains unconfirmed correction evidence')
+  assertOracle(host, [first, second])
+  host.logs.set('s', [first, second, correctedSecond])
+  await host.sessionSync.enqueue('s', () => host.sessionSync.resyncLiveSession('s', 'w', generation))
+  assert.ok(host.state.liveResyncPending.has('s'), 'seeing the latest trigger cannot drop an earlier missing trigger')
+  host.logs.set('s', [first, second, correctedFirst, correctedSecond])
+  await host.sessionSync.enqueue('s', () => host.sessionSync.resyncLiveSession('s', 'w', generation))
+  await host.ledger.drainLedgerWrites()
+  assertOracle(host, [correctedFirst, correctedSecond])
+  assert.equal(host.state.liveResyncPending.size, 0)
+  const page = await host.aggregation.queryRecords({ utc: true, start: '2026-10-12', end: '2026-10-13' }, undefined, 10)
+  assert.equal(page.items.reduce((sum, row) => sum + row.values.input, 0), 60)
+  assert.equal(host.disk.get('s').usage.reduce((sum, row) => sum + row.values.input, 0), 60)
+})
+
+function canonical(events) {
+  const rows = new Map()
+  for (const event of events) rows.set(event.data.message.id, event)
+  return Array.from(rows.values())
+}
+function assertDurableOracle(host, source) {
+  const expected = []
+  const prices = new Map()
+  for (const [sid, events] of source) {
+    const rows = canonical(events)
+    const diskRows = host.disk.get(sid).usage
+    assert.equal(diskRows.length, rows.length, 'durable row count for ' + sid)
+    for (const event of rows) {
+      const item = diskRows.find(r => r.turn === event.data.turn && r.step === event.data.step)
+      assert.ok(item, 'missing durable logical row')
+      const value = valuesOf(event)
+      for (const k of TOKEN_KEYS) assert.equal(item.values[k], value[k], 'disk ' + sid + ':' + k)
+      const factor = Number(item.cost.rates.input)
+      assert.ok([1, 2, 3].includes(factor))
+      assert.equal(fixedMoney(item.cost.total), expectedMoney(value, factor), 'independent durable cost')
+      prices.set(event.data.message.id, factor)
+      expected.push(event)
+    }
+  }
+  assertOracle(host, expected, row => prices.get(row.data.message.id))
+  assert.equal(host.state.ledgerReading.size, 0, 'all cold-read pins released')
+}
