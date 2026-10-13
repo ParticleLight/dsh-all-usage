@@ -179,6 +179,42 @@ test('authoritative live history accepts sequenced usage across a reversed midni
   assert.equal(host.disk.get('s').usage.length, 2)
 })
 
+test('cold range reads concurrent with live events and repricing preserve both midnight calendars', async (t) => {
+  const host = makeHost(); t.after(host.close)
+  const source = new Map()
+  for (let i = 0; i < 12; i++) {
+    const sid = 's' + i
+    const base = i % 2 ? MIDNIGHT_CST : MIDNIGHT_UTC
+    const events = [usage(base - 1000, 1, 1, 10 + i, 0, sid), usage(base + 1000, 1, 2, 20 + i, 1, sid)]
+    source.set(sid, events); await host.install(sid, events)
+  }
+  const all = () => Array.from(source.values()).flat()
+  assertOracle(host, all())
+  host.aggregation.evictColdRows({ rows: 0 })
+  await Promise.all([
+    host.ledger.loadRowsForRange(true, '2026-10-12', '2026-10-13'),
+    host.pricing.updatePricingState({ catalogEntries: catalog(2) }, false, true),
+    ...Array.from(source, async ([sid, list], i) => {
+      const next = usage(list[1].time + 1000, 2, 1, 30 + i, 2, sid)
+      list.push(next); host.logs.set(sid, structuredClone(list))
+      await host.sessionSync.enqueue(sid, () => host.sessionSync.processLiveEvent(sid, 'w', next))
+      const record = host.ledger.buildLedgerRecord({ id: sid, events: list }, 'w', 'flush', undefined, host.state.ledgerRecords.get(sid))
+      host.ledger.storeLedgerRecord(record); await host.ledger.persistLedgerRecord(record)
+    }),
+  ])
+  await host.pricing.updatePricingState({ catalogEntries: catalog(2) }, false, true)
+  await host.ledger.drainLedgerWrites()
+  assertOracle(host, all(), 2)
+  host.aggregation.evictColdRows({ rows: 0 })
+  const resumed = makeHost(host.disk, host.logs); t.after(resumed.close)
+  resumed.state.pricingState = normalizePricingState({ catalogEntries: catalog(2), sync: { autoEnabled: false } })
+  for (const [sid, raw] of host.disk) {
+    const record = resumed.ledger.normalizeLedgerRecord(raw, sid)
+    resumed.ledger.replaceLedgerRecord(record); resumed.ledger.applyLedgerRecord(record, 'ledger-reuse')
+  }
+  assertOracle(resumed, all(), 2)
+})
+
 test('an active ledger write survives cache pressure, cold reads and repricing', async (t) => {
   const previousBudget = process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
   process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = '0'
@@ -298,6 +334,62 @@ test('a live flush cannot replace the record borrowed by concurrent repricing', 
     await Promise.allSettled([repricing, flushing].filter(Boolean))
   }
 })
+
+test('a cold records page created during repricing uses the same revision as its cursor', async (t) => {
+  const host = makeHost(); t.after(host.close)
+  const events = [usage(MIDNIGHT_UTC - 1000, 1, 1, 10, 0), usage(MIDNIGHT_UTC + 1000, 1, 2, 20, 1)]
+  await host.install('s', events)
+  host.aggregation.evictColdRows({ rows: 0 })
+  const entered = deferred(), gate = deferred()
+  const load = host.ledger.loadRowsForRange
+  host.ledger.loadRowsForRange = async (...args) => { entered.resolve(); await gate.promise; return load(...args) }
+  const scope = { start: '2026-10-12', end: '2026-10-13', utc: true }
+  let query
+  try {
+    query = host.aggregation.queryRecords(scope, undefined, 1)
+    await entered.promise
+    await host.pricing.updatePricingState({ catalogEntries: catalog(2) }, false, true)
+    gate.resolve()
+    const first = await query
+    assert.ok(first.nextCursor)
+    const cursor = JSON.parse(Buffer.from(first.nextCursor, 'base64url').toString('utf8'))
+    assert.equal(cursor.queryRevision, first.queryRevision, 'a returned page must not advertise an already-stale cursor')
+    const second = await host.aggregation.queryRecords(scope, first.nextCursor, 1)
+    assert.equal(second.error, undefined)
+    assert.equal(new Set(first.items.concat(second.items).map(r => r.id)).size, 2)
+    assert.equal(first.items.concat(second.items).reduce((n, r) => n + fixedMoney(r.cost.total), 0n), expectedMoney({ input: 30, output: 4, cacheRead: 8, cacheWrite: 2 }, 2))
+    assertOracle(host, events, 2)
+  } finally {
+    gate.resolve()
+    if (query !== undefined) await Promise.allSettled([query])
+  }
+})
+
+test('overlapping pricing updates serialize durable costs to the final table exactly once', async (t) => {
+  const host = makeHost(); t.after(host.close)
+  const events = [usage(MIDNIGHT_CST - 1000, 1, 1, 10, 0), usage(MIDNIGHT_CST + 1000, 1, 2, 20, 1)]
+  await host.install('s', events)
+  host.aggregation.evictColdRows({ rows: 0 })
+  const gate = deferred(), entered = deferred()
+  const write = host.state.ledgerUnit.putRecord
+  let blocked = false
+  host.state.ledgerUnit.putRecord = async (...args) => { if (!blocked) { blocked = true; entered.resolve(); await gate.promise }; return write(...args) }
+  let first, second
+  try {
+    first = host.pricing.updatePricingState({ catalogEntries: catalog(2) }, false, true)
+    await entered.promise
+    second = host.pricing.updatePricingState({ catalogEntries: catalog(3) }, false, true)
+    gate.resolve()
+    await Promise.all([first, second])
+    assertOracle(host, events, 3)
+    for (const item of host.disk.get('s').usage) assert.equal(item.cost.rates.input, '3')
+  } finally {
+    gate.resolve()
+    await Promise.allSettled([first, second].filter(Boolean))
+  }
+})
+
+
 
 test('a higher-sequence live correction to an evicted logical request replaces its original contribution', async (t) => {
   const host = makeHost(); t.after(host.close)
@@ -585,3 +677,83 @@ function assertDurableOracle(host, source) {
   assertOracle(host, expected, row => prices.get(row.data.message.id))
   assert.equal(host.state.ledgerReading.size, 0, 'all cold-read pins released')
 }
+
+test('seeded mixed live, history rewrite, cold paging, repricing, and recovery sequences conserve accounting', async () => {
+  const rounds = Number(process.env.DSH_ALL_USAGE_STRESS_ROUNDS || 8)
+  const seeds = String(process.env.DSH_ALL_USAGE_STRESS_SEEDS || '7').split(',').map(Number)
+  assert.ok(Number.isInteger(rounds) && rounds > 0 && rounds <= 10000)
+  const previousBudget = process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
+  process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = '0'
+  const result = []
+  try {
+    for (const seed of seeds) {
+      let entropy = seed >>> 0
+      const next = () => { entropy = (Math.imul(entropy, 1664525) + 1013904223) >>> 0; return entropy }
+      let host = makeHost()
+      const source = new Map()
+      let factor = 1, writes = 0, queries = 0, recoveries = 0
+      try {
+        for (let i = 0; i < 16; i++) {
+          const sid = 's' + i, base = i % 2 ? MIDNIGHT_CST : MIDNIGHT_UTC
+          const events = [usage(base - 1000, 1, 1, 10 + i, 0, sid), usage(base + 1000, 1, 2, 20 + i, 1, sid)]
+          source.set(sid, events); await host.install(sid, events)
+        }
+        assertDurableOracle(host, source)
+        for (let round = 0; round < rounds; round++) {
+          host.aggregation.evictColdRows({ rows: 0 })
+          const selected = new Set()
+          while (selected.size < 4) selected.add('s' + (next() % 16))
+          const tasks = []
+          for (const sid of selected) {
+            let events = source.get(sid).slice()
+            const choice = next() % 3
+            if (choice === 0 && events.length > 1) {
+              events = events.slice(0, 1 + (next() % (events.length - 1))).map((event, seq) => ({ ...event, seq }))
+            } else {
+              const seq = events.length
+              const old = events[next() % events.length]
+              const turn = choice === 1 ? old.data.turn : round + 2
+              const step = choice === 1 ? old.data.step : 1
+              const time = (next() % 2 ? MIDNIGHT_CST : MIDNIGHT_UTC) + (next() % 5 - 2) * 3600000 + round * 100
+              events.push(usage(time, turn, step, 1 + (next() % 1000), seq, sid))
+            }
+            source.set(sid, events); host.logs.set(sid, structuredClone(events))
+            tasks.push(host.sessionSync.enqueue(sid, () => host.sessionSync.syncLiveSession(sid, 'w', null, 0)))
+            writes++
+          }
+          for (const utc of [false, true]) {
+            queries++
+            tasks.push(host.aggregation.queryRecords({ utc, start: '2026-10-11', end: '2026-10-14' }, undefined, 7).then(page => {
+              if (page.error) { assert.equal(page.error, 'stale-cursor'); return }
+              if (page.nextCursor) assert.equal(JSON.parse(Buffer.from(page.nextCursor, 'base64url')).queryRevision, page.queryRevision)
+            }))
+          }
+          if (round % 4 === 0) {
+            factor = 1 + next() % 3
+            tasks.push(host.pricing.updatePricingState({ catalogEntries: catalog(factor) }, false, true))
+          }
+          await Promise.all(tasks)
+          await host.ledger.drainLedgerWrites()
+          assertDurableOracle(host, source)
+          if (round % 8 === 7) {
+            const disk = host.disk, logs = host.logs
+            await host.close()
+            host = makeHost(disk, logs)
+            host.state.pricingState = normalizePricingState({ catalogEntries: catalog(factor), sync: { autoEnabled: false } })
+            for (const [sid, raw] of disk) {
+              const record = host.ledger.normalizeLedgerRecord(raw, sid)
+              host.ledger.replaceLedgerRecord(record); host.ledger.applyLedgerRecord(record, 'ledger-reuse')
+            }
+            recoveries++
+            assertDurableOracle(host, source)
+          }
+        }
+        result.push({ seed, rounds, writes, queries, recoveries, remainingRows: Array.from(source.values()).reduce((n, e) => n + canonical(e).length, 0) })
+      } finally { await host.close() }
+    }
+  } finally {
+    if (previousBudget === undefined) delete process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
+    else process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = previousBudget
+  }
+  console.log('CONCURRENCY_STRESS ' + JSON.stringify(result))
+})
