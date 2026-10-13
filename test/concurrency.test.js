@@ -171,6 +171,37 @@ function assertOracle(host, expected, factor = 1) {
   for (const [key, value] of state.diagCounters || []) if (key.startsWith('q.reconciled.')) assert.equal(value, 0, 'the stress oracle must not depend on query self-healing')
 }
 
+for (const evict of [false, true]) {
+  test((evict ? 'mixed resident-evicted' : 'resident') + ' baseline reprices backfill and temporal costs in one session visit', async (t) => {
+    const host = makeHost(); t.after(host.close)
+    const first = usage(MIDNIGHT_UTC - 1000, 1, 1, 10, 0, 'pricing-a')
+    const second = usage(MIDNIGHT_UTC + 1000, 1, 1, 20, 0, 'pricing-b')
+    const pricingState = host.state.pricingState
+    host.state.pricingState = normalizePricingState({ sync: { autoEnabled: false } })
+    host.state.pricingResolutionCache.clear()
+    await host.install('pricing-a', [first])
+    host.state.pricingState = pricingState
+    host.state.pricingResolutionCache.clear()
+    await host.install('pricing-b', [second])
+    if (evict) {
+      host.aggregation.evictColdRows({ rows: 0 })
+      assert.equal(host.state.usageByStep.size, 1)
+      assert.ok(host.state.usageByStep.has('pricing-a:step:1:1'), 'the unpriced request stays resident')
+      assert.equal(host.state.usageByStep.has('pricing-b:step:1:1'), false, 'the priced request is evicted')
+    }
+
+    const calls = new Map()
+    const recordFor = host.ledger.recordFor.bind(host.ledger)
+    host.ledger.recordFor = async (sid) => { calls.set(sid, (calls.get(sid) || 0) + 1); return recordFor(sid) }
+    const reconciliation = await host.pricing.reconcileUsageCosts({ backfill: true, force: true })
+    assert.equal(reconciliation.backfill.priced, 1)
+    assert.ok(reconciliation.temporal.considered > 0)
+    assert.deepEqual(Array.from(calls), [['pricing-a', 1], ['pricing-b', 1]])
+    assert.equal(host.disk.get('pricing-a').usage[0].cost.status, 'priced')
+    assertOracle(host, [first, second])
+  })
+}
+
 test('authoritative live history accepts sequenced usage across a reversed midnight timestamp', async (t) => {
   const events = [usage(MIDNIGHT_CST + 1000, 1, 1, 10, 0), usage(MIDNIGHT_CST - 1000, 1, 2, 20, 1)]
   const host = makeHost(new Map(), new Map([['s', events]])); t.after(host.close)
