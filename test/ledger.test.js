@@ -108,6 +108,54 @@ test('coalesces pending ledger records and drains the latest value', async () =>
   assert.deepEqual(writes[0].value.usage, latest.usage)
 })
 
+test('a delayed disk read cannot replace a newer resident record or drop its write', async () => {
+  const { host, ledger } = makeLedger()
+  let resolveRead
+  const diskRead = new Promise((resolve) => { resolveRead = resolve })
+  const writes = []
+  host.state.ledgerKeys = new Set(['s-race'])
+  host.state.ledgerUnit = {
+    async readRecord() { return diskRead },
+    async putRecord(table, key, value) { writes.push({ table, key, value }) },
+  }
+  const oldRaw = { version: 3, sessionId: 's-race', workspaceId: 'w', lastSeq: 1, source: 'scan', updatedAt: 1, turns: [], usage: [] }
+  const read = ledger.recordFor('s-race')
+  const newer = { version: 3, sessionId: 's-race', workspaceId: 'w', lastSeq: 2, source: 'flush', updatedAt: 2, turns: [], usage: [] }
+  ledger.storeLedgerRecord(newer)
+  const write = ledger.persistLedgerRecord(newer)
+  resolveRead(oldRaw)
+  const resolved = await read
+  await ledger.drainLedgerWrites()
+  await write
+  assert.strictEqual(resolved, newer, 'recordFor returns the newer concurrent cache entry')
+  assert.strictEqual(host.state.ledgerRecords.get('s-race'), newer)
+  assert.equal(writes.length, 1)
+  assert.equal(writes[0].value.lastSeq, 2, 'the latest record reaches storage')
+})
+
+test('a delayed old read cannot undo an authoritative history truncation', async () => {
+  const { host, ledger } = makeLedger()
+  let resolveRead
+  const diskRead = new Promise((resolve) => { resolveRead = resolve })
+  const writes = []
+  host.state.ledgerKeys = new Set(['s-truncated'])
+  host.state.ledgerUnit = {
+    async readRecord() { return diskRead },
+    async putRecord(table, key, value) { writes.push(value) },
+  }
+  const old = { version: 3, sessionId: 's-truncated', workspaceId: 'w', lastSeq: 9, source: 'scan', updatedAt: 1, turns: [], usage: [] }
+  const reading = ledger.recordFor('s-truncated')
+  const authoritative = { ...old, lastSeq: 2, source: 'resync', updatedAt: 2 }
+  ledger.replaceLedgerRecord(authoritative)
+  const writing = ledger.persistLedgerRecord(authoritative)
+  resolveRead(old)
+  assert.strictEqual(await reading, authoritative)
+  await ledger.drainLedgerWrites()
+  await writing
+  assert.equal(writes.length, 1)
+  assert.equal(writes[0].lastSeq, 2)
+})
+
 test('pools the identity of usage rows and expands them unchanged', () => {
   const { ledger, identity } = makeLedger()
   const other = { identityKey: 'other', provider: 'p2', requestedModel: 'm2', actualModel: 'm2', label: 'p2 / m2', legacy: false }
