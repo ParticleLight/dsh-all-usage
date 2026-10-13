@@ -156,6 +156,90 @@ test('a delayed old read cannot undo an authoritative history truncation', async
   assert.equal(writes[0].lastSeq, 2)
 })
 
+test('a delayed old read cannot resurrect a rewritten record after cache pressure', async () => {
+  const previousBudget = process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
+  process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = '0'
+  const { host, ledger } = makeLedger()
+  let resolveRead
+  const diskRead = new Promise((resolve) => { resolveRead = resolve })
+  const old = { version: 3, sessionId: 's-rewritten', workspaceId: 'w', lastSeq: 9, source: 'scan', updatedAt: 1, turns: [], usage: [] }
+  const disk = new Map([['s-rewritten', old]])
+  let reads = 0
+  host.state.ledgerKeys = new Set(['s-rewritten'])
+  host.state.ledgerRecordSizes = new Map()
+  host.state.ledgerRecordBytes = 0
+  host.state.ledgerUnit = {
+    async readRecord(sid) { return reads++ === 0 ? diskRead : structuredClone(disk.get(sid)) },
+    async putRecord(table, sid, record) { disk.set(sid, structuredClone(record)) },
+  }
+  try {
+    const reading = ledger.recordFor('s-rewritten')
+    const authoritative = { ...old, lastSeq: 2, source: 'resync', updatedAt: 2 }
+    ledger.replaceLedgerRecord(authoritative)
+    const writing = ledger.persistLedgerRecord(authoritative)
+    await ledger.drainLedgerWrites()
+    await writing
+    ledger.replaceLedgerRecord({ ...old, sessionId: 'other', updatedAt: 3 })
+    resolveRead(old)
+    const resolved = await reading
+    assert.equal(resolved.lastSeq, 2, 'a stale read cannot restore pre-rewrite history after LRU pressure')
+    assert.equal(disk.get('s-rewritten').lastSeq, 2)
+  } finally {
+    resolveRead(old)
+    if (previousBudget === undefined) delete process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
+    else process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = previousBudget
+  }
+})
+
+
+
+test('cold-read pins survive overlapping reads and release after a failed disk read', async () => {
+  const previousBudget = process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
+  process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = '0'
+  const { host, ledger } = makeLedger()
+  const old = { version: 3, sessionId: 's', workspaceId: 'w', lastSeq: 9, source: 'scan', updatedAt: 1, turns: [], usage: [] }
+  let firstResolve, secondResolve, reads = 0
+  const firstGate = new Promise(resolve => { firstResolve = resolve })
+  const secondGate = new Promise(resolve => { secondResolve = resolve })
+  host.state.ledgerKeys = new Set(['s', 'broken'])
+  host.state.ledgerRecordSizes = new Map(); host.state.ledgerRecordBytes = 0
+  host.state.ledgerUnit = { async readRecord(sid) { if (sid === 'broken') throw new Error('simulated read failure'); return reads++ === 0 ? firstGate : secondGate } }
+  try {
+    const first = ledger.recordFor('s'), second = ledger.recordFor('s')
+    assert.equal(host.state.ledgerReading.get('s'), 2)
+    const authoritative = { ...old, lastSeq: 2, updatedAt: 2 }
+    ledger.replaceLedgerRecord(authoritative)
+    ledger.replaceLedgerRecord({ ...old, sessionId: 'other' })
+    firstResolve(old)
+    assert.strictEqual(await first, authoritative)
+    assert.equal(host.state.ledgerReading.get('s'), 1)
+    ledger.replaceLedgerRecord({ ...old, sessionId: 'pressure' })
+    secondResolve(old)
+    assert.strictEqual(await second, authoritative)
+    assert.equal(host.state.ledgerReading.size, 0)
+    await assert.rejects(ledger.recordFor('broken'), /simulated read failure/)
+    assert.equal(host.state.ledgerReading.size, 0, 'failed reads do not permanently pin cache entries')
+  } finally {
+    firstResolve(old); secondResolve(old)
+    if (previousBudget === undefined) delete process.env.DSH_ALL_USAGE_RECORD_CACHE_MB
+    else process.env.DSH_ALL_USAGE_RECORD_CACHE_MB = previousBudget
+  }
+})
+
+test('a failed old disk read returns a concurrently installed authoritative record', async () => {
+  const { host, ledger } = makeLedger()
+  let rejectRead
+  const diskRead = new Promise((resolve, reject) => { rejectRead = reject })
+  host.state.ledgerKeys = new Set(['s-failed'])
+  host.state.ledgerUnit = { async readRecord() { return diskRead } }
+  const reading = ledger.recordFor('s-failed')
+  const authoritative = { version: 3, sessionId: 's-failed', workspaceId: 'w', lastSeq: 2, source: 'resync', updatedAt: 2, turns: [], usage: [] }
+  ledger.replaceLedgerRecord(authoritative)
+  rejectRead(new Error('superseded disk read failed'))
+  assert.strictEqual(await reading, authoritative)
+  assert.equal(host.state.ledgerReading.size, 0)
+})
+
 test('pools the identity of usage rows and expands them unchanged', () => {
   const { ledger, identity } = makeLedger()
   const other = { identityKey: 'other', provider: 'p2', requestedModel: 'm2', actualModel: 'm2', label: 'p2 / m2', legacy: false }
@@ -198,6 +282,8 @@ test('keeps the in-memory ledger when an async write fails', async () => {
   assert.equal(writes.length, 1)
   assert.strictEqual(host.state.ledgerRecords.get('s-failure'), record)
   assert.equal(host.state.ledgerPending.size, 0)
+  assert.equal(host.state.ledgerWriting.size, 0, 'a failed write releases its active-write pin')
+  assert.equal(host.state.ledgerDirtySessions.has('s-failure'), true, 'failed writes stay resident for a later retry')
 })
 
 test('builds an appended ledger tail from the previous record', () => {
