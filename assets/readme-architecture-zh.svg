@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1050" viewBox="0 0 1600 1050" role="img" aria-labelledby="title desc">
+<title id="title">用量看板 · 系统架构</title>
+<desc id="desc">从 DSH 会话与账本到受保护的 HTTP API 和 Dashboard Client</desc>
+<defs>
+<pattern id="dots" width="32" height="32" patternUnits="userSpaceOnUse">
+<circle cx="2" cy="2" r="1.5" fill="#dce2e9"/></pattern>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+<path d="M 0 0 L 10 5 L 0 10 z" fill="#6c7a8d"/></marker></defs>
+<rect width="100%" height="100%" fill="#fbfcfe"/>
+<rect width="100%" height="100%" fill="url(#dots)"/>
+<circle cx="72" cy="74" r="15" fill="#2c99ad" opacity=".18"/>
+<circle cx="72" cy="74" r="7" fill="#2c99ad"/>
+<text x="102" y="81" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="34" font-weight="700" fill="#1b2638">用量看板 · 系统架构</text>
+<text x="102" y="119" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="17" fill="#637083">从 DSH 会话与账本到受保护的 HTTP API 和 Dashboard Client</text>
+<g>
+<rect x="55" y="180" width="320" height="825" rx="22" fill="#f8fafc" stroke="#738195" stroke-width="2"/>
+<text x="77" y="216" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="17" font-weight="650" fill="#586578">DSH 输入</text></g>
+<g>
+<rect x="410" y="180" width="680" height="825" rx="22" fill="#f4fbf7" stroke="#299572" stroke-width="2"/>
+<text x="432" y="216" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="17" font-weight="650" fill="#586578">Host 服务</text></g>
+<g>
+<rect x="1125" y="180" width="420" height="825" rx="22" fill="#faf8fd" stroke="#885bd0" stroke-width="2"/>
+<text x="1147" y="216" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="17" font-weight="650" fill="#586578">持久化、API 与界面</text></g>
+<path d="M350 420 H400 V390 H475" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<g>
+<rect x="362.5" y="367" width="85" height="30" rx="15" fill="#fff" stroke="#d7dde5" stroke-width="1.4"/>
+<text x="405" y="387" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="13" fill="#5e6b7d">事件与日志</text></g>
+<path d="M720 390 H790" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<g>
+<rect x="712.5" y="355" width="85" height="30" rx="15" fill="#fff" stroke="#d7dde5" stroke-width="1.4"/>
+<text x="755" y="375" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="13" fill="#5e6b7d">usage</text></g>
+<path d="M1035 390 H1170" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<g>
+<rect x="1064" y="350" width="76" height="30" rx="15" fill="#fff" stroke="#d7dde5" stroke-width="1.4"/>
+<text x="1102" y="370" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="13" fill="#5e6b7d">写入记录</text></g>
+<path d="M912 465 V660" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<g>
+<rect x="914" y="545" width="76" height="30" rx="15" fill="#fff" stroke="#d7dde5" stroke-width="1.4"/>
+<text x="952" y="565" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="13" fill="#5e6b7d">聚合查询</text></g>
+<path d="M350 790 H475" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<g>
+<rect x="374" y="750" width="76" height="30" rx="15" fill="#fff" stroke="#d7dde5" stroke-width="1.4"/>
+<text x="412" y="770" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="13" fill="#5e6b7d">费率</text></g>
+<path d="M720 735 H790" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<g>
+<rect x="717" y="697" width="76" height="30" rx="15" fill="#fff" stroke="#d7dde5" stroke-width="1.4"/>
+<text x="755" y="717" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="13" fill="#5e6b7d">费率</text></g>
+<path d="M1035 735 H1100 V575 H1170" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<g>
+<rect x="1057" y="635" width="76" height="30" rx="15" fill="#fff" stroke="#d7dde5" stroke-width="1.4"/>
+<text x="1095" y="655" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="13" fill="#5e6b7d">聚合查询</text></g>
+<path d="M1340 425 V510" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<g>
+<rect x="1359" y="451" width="76" height="30" rx="15" fill="#fff" stroke="#d7dde5" stroke-width="1.4"/>
+<text x="1397" y="471" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="13" fill="#5e6b7d">分页明细</text></g>
+<path d="M1340 640 V740" fill="none" stroke="#6c7a8d" stroke-width="2.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<g>
+<rect x="1360" y="674" width="150" height="30" rx="15" fill="#fff" stroke="#d7dde5"/>
+<text x="1435" y="694" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="13" fill="#5e6b7d">请求 / 结果</text></g>
+<g>
+<rect x="85" y="305" width="260" height="230" rx="18" fill="#e9edf2" stroke="#738195" stroke-width="2.5"/>
+<rect x="99" y="319" width="5" height="202" rx="2.5" fill="#738195" opacity=".42"/>
+<text x="215" y="392" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="215">会话数据</tspan><tspan x="215" dy="25" font-size="14" font-weight="450" fill="#596579">持久化历史日志</tspan><tspan x="215" dy="22" font-size="14" font-weight="450" fill="#596579">实时 session/event</tspan><tspan x="215" dy="22" font-size="14" font-weight="450" fill="#596579">注册工作区 registry</tspan></text></g>
+<g>
+<rect x="85" y="715" width="260" height="150" rx="18" fill="#e9edf2" stroke="#738195" stroke-width="2.5"/>
+<rect x="99" y="729" width="5" height="122" rx="2.5" fill="#738195" opacity=".42"/>
+<text x="215" y="773.5" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="215">定价与密钥</tspan><tspan x="215" dy="25" font-size="14" font-weight="450" fill="#596579">四桶成本估算</tspan><tspan x="215" dy="22" font-size="14" font-weight="450" fill="#596579">账户余额查询</tspan></text></g>
+<g>
+<rect x="475" y="315" width="245" height="150" rx="18" fill="#dcf4e8" stroke="#299572" stroke-width="2.5"/>
+<rect x="489" y="329" width="5" height="122" rx="2.5" fill="#299572" opacity=".42"/>
+<text x="597.5" y="373.5" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="597.5">历史 / 实时同步</tspan><tspan x="597.5" dy="25" font-size="14" font-weight="450" fill="#596579">扫描变化会话</tspan><tspan x="597.5" dy="22" font-size="14" font-weight="450" fill="#596579">折叠实时事件</tspan></text></g>
+<g>
+<rect x="790" y="315" width="245" height="150" rx="18" fill="#dcf4e8" stroke="#299572" stroke-width="2.5"/>
+<rect x="804" y="329" width="5" height="122" rx="2.5" fill="#299572" opacity=".42"/>
+<text x="912.5" y="373.5" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="912.5">用量归一化</tspan><tspan x="912.5" dy="25" font-size="14" font-weight="450" fill="#596579">turn/step 去重与替换</tspan><tspan x="912.5" dy="22" font-size="14" font-weight="450" fill="#596579">解析模型身份与 Token 桶</tspan></text></g>
+<g>
+<rect x="475" y="660" width="245" height="150" rx="18" fill="#dcf4e8" stroke="#299572" stroke-width="2.5"/>
+<rect x="489" y="674" width="5" height="122" rx="2.5" fill="#299572" opacity=".42"/>
+<text x="597.5" y="718.5" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="597.5">定价 / 余额</tspan><tspan x="597.5" dy="25" font-size="14" font-weight="450" fill="#596579">四桶成本估算</tspan><tspan x="597.5" dy="22" font-size="14" font-weight="450" fill="#596579">账户余额查询</tspan></text></g>
+<g>
+<rect x="790" y="660" width="245" height="150" rx="18" fill="#dcf4e8" stroke="#299572" stroke-width="2.5"/>
+<rect x="804" y="674" width="5" height="122" rx="2.5" fill="#299572" opacity=".42"/>
+<text x="912.5" y="718.5" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="912.5">范围聚合</tspan><tspan x="912.5" dy="25" font-size="14" font-weight="450" fill="#596579">summary · trend · heatmap</tspan><tspan x="912.5" dy="22" font-size="14" font-weight="450" fill="#596579">daily/hourly · 分页明细</tspan></text></g>
+<g>
+<rect x="1170" y="275" width="340" height="150" rx="18" fill="#eee5fc" stroke="#885bd0" stroke-width="2.5"/>
+<rect x="1184" y="289" width="5" height="122" rx="2.5" fill="#885bd0" opacity=".42"/>
+<text x="1340" y="333.5" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="1340">逐会话账本</tspan><tspan x="1340" dy="25" font-size="14" font-weight="450" fill="#596579">每个 session 独立文档</tspan><tspan x="1340" dy="22" font-size="14" font-weight="450" fill="#596579">请求明细按需分页读取</tspan></text></g>
+<g>
+<rect x="1170" y="510" width="340" height="130" rx="18" fill="#ffe9dc" stroke="#df7446" stroke-width="2.5"/>
+<rect x="1184" y="524" width="5" height="102" rx="2.5" fill="#df7446" opacity=".42"/>
+<text x="1340" y="558.5" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="1340">Host HTTP API</tspan><tspan x="1340" dy="25" font-size="14" font-weight="450" fill="#596579">loopback + scope query</tspan><tspan x="1340" dy="22" font-size="14" font-weight="450" fill="#596579">写入使用进程令牌</tspan></text></g>
+<g>
+<rect x="1170" y="740" width="340" height="145" rx="18" fill="#def2f7" stroke="#298da8" stroke-width="2.5"/>
+<rect x="1184" y="754" width="5" height="117" rx="2.5" fill="#298da8" opacity=".42"/>
+<text x="1340" y="796" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="1340">Dashboard Client</tspan><tspan x="1340" dy="25" font-size="14" font-weight="450" fill="#596579">筛选 · 图表 · 请求日志</tspan><tspan x="1340" dy="22" font-size="14" font-weight="450" fill="#596579">CSV 导出</tspan></text></g>
+<rect x="480" y="943" width="22" height="18" rx="5" fill="#e9edf2" stroke="#738195" stroke-width="2"/>
+<text x="512" y="958" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="14" fill="#536174">外部输入</text>
+<rect x="690" y="943" width="22" height="18" rx="5" fill="#dcf4e8" stroke="#299572" stroke-width="2"/>
+<text x="722" y="958" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="14" fill="#536174">Host 处理</text>
+<rect x="930" y="943" width="22" height="18" rx="5" fill="#eee5fc" stroke="#885bd0" stroke-width="2"/>
+<text x="962" y="958" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="14" fill="#536174">持久化</text>
+<rect x="1150" y="943" width="22" height="18" rx="5" fill="#ffe9dc" stroke="#df7446" stroke-width="2"/>
+<text x="1182" y="958" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="14" fill="#536174">API / 界面</text></svg>

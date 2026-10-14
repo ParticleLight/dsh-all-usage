@@ -47,6 +47,12 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - **Host 端**（入口 `lib/index.js`，组装 `lib/plugin.js`）：按职责拆分为 `aggregation.js`（聚合与查询）、`ledger.js`（持久账本）、`session-sync.js`（历史/实时同步）、`pricing-runtime.js`（运行时定价）、`balance.js`（余额）、`http.js`（安全路由）；扫描 `turn/end`、`assistant/chunk` usage 和最终 `assistant/message.usage`，监听 `session/event` 实时折叠，并通过 `webServer` 服务注册数据路由。
 - **Client 端**：可读源码位于 `src/client.js`，`npm run build:client` 使用固定版本 Terser 生成 `window.__ModuleLoader__` 工厂格式的 `lib/client.js` 浏览器 bundle，并注册侧边栏「用量统计」入口（`sidebar.footer.action` 槽位）。所有 API 仅接受本机 loopback 请求并拒绝显式跨域请求；余额读取与别名写入还要求插件启动时生成、仅在当前进程有效的令牌（余额 GET 兼容浏览器省略 Origin）。英文模式的日期分桶、范围筛选、连续使用、热力图和导出时间统一按 UTC；中文模式按本地时区。
 
+![用量看板系统架构图](assets/readme-architecture-zh.svg)
+
+### 历史与实时数据流
+
+![历史 revision 复用与实时会话账本写入流程图](assets/readme-sync-zh.svg)
+
 ### 存储与性能
 
 - **一个会话一条记录**：账本把每个会话写成独立文档（按 session ID 稳定 hash 到 32 个目录），一次更新只发布一个文件。实测同一份数据下，单次更新的落盘成本从「重写整个 13.27 MB 分片 / 273 ms」降到「写一条记录 / 中位 4.6 ms」。

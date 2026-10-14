@@ -47,6 +47,12 @@ The installation command assembles the bundle. Usually, refreshing the browser p
 - **Host** (entry `lib/index.js`, assembled by `lib/plugin.js`): split by responsibility across `aggregation.js` (aggregation/query), `ledger.js` (durable ledger), `session-sync.js` (history/live sync), `pricing-runtime.js` (runtime pricing), `balance.js` (balance), and `http.js` (protected routes); aggregates `turn/end`, `assistant/chunk` usage, and final `assistant/message.usage`, folds live `session/event` updates, and exposes data routes through `webServer`.
 - **Client**: readable source lives in `src/client.js`; `npm run build:client` uses the pinned Terser version to generate the `window.__ModuleLoader__` bundle at `lib/client.js`, which registers the “Usage statistics” sidebar entry through the `sidebar.footer.action` slot. All API routes accept loopback requests and reject an explicit cross-origin Origin; balance reads and alias writes also require a process-scoped token generated when the plugin starts (the balance GET tolerates browsers omitting Origin). **Writes are authorized by that token, not by an Origin**: the DSH desktop shell runs the UI on its own scheme and forwards requests through Electron, which strips `Origin` (with `Host`/`Cookie`/`Sec-Fetch-*`), so requiring one made every desktop save fail with 403. A present `Origin` must still be loopback or the shell's own scheme, and `Host` must still be loopback (DNS-rebinding guard).
 
+![All Usage system architecture diagram](assets/readme-architecture-en.svg)
+
+### History and Live Data Flow
+
+![History revision reuse and live per-session ledger write flow](assets/readme-sync-en.svg)
+
 ### Storage and Performance
 
 - **One record per session**: the ledger writes each session as its own document (stable-hashed into 32 directories), so an update publishes one file. Measured on the same data: a single update went from rewriting a 13.27 MB shard (273 ms) to writing one record (a 4.6 ms median).
