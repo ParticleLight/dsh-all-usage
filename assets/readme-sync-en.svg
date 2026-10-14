@@ -1,13 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100" role="img" aria-labelledby="title desc">
-<title id="title">History and Live Data Flow</title>
-<desc id="desc">Reuse unchanged sessions; refold changed logs only, and coalesce live writes per session</desc>
+<svg xmlns="http://www.w3.org/2000/svg" lang="en" width="1600" height="1100" viewBox="0 0 1600 1100" role="img" aria-labelledby="sync-en-title sync-en-desc">
+<title id="sync-en-title">History and Live Data Flow</title>
+<desc id="sync-en-desc">Reuse unchanged sessions; refold changed logs only, and coalesce live writes per session</desc>
 <defs>
-<pattern id="dots" width="32" height="32" patternUnits="userSpaceOnUse">
+<pattern id="sync-en-dots" width="32" height="32" patternUnits="userSpaceOnUse">
 <circle cx="2" cy="2" r="1.5" fill="#dce2e9"/></pattern>
-<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+<marker id="sync-en-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
 <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c7a8d"/></marker></defs>
 <rect width="100%" height="100%" fill="#fbfcfe"/>
-<rect width="100%" height="100%" fill="url(#dots)"/>
+<rect width="100%" height="100%" fill="url(#sync-en-dots)"/>
 <circle cx="72" cy="74" r="15" fill="#2c99ad" opacity=".18"/>
 <circle cx="72" cy="74" r="7" fill="#2c99ad"/>
 <text x="102" y="81" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="34" font-weight="700" fill="#1b2638">History and Live Data Flow</text>
@@ -18,20 +18,20 @@
 <g>
 <rect x="55" y="640" width="1490" height="320" rx="22" fill="#f4fbf7" stroke="#299572" stroke-width="2"/>
 <text x="77" y="676" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="17" font-weight="650" fill="#586578">Live events · coalesced async persistence</text></g>
-<path d="M330 365 H420" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
-<path d="M670 365 H760" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
-<path d="M980 350 H1030 V285 H1090" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M330 365 H420" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#sync-en-arrow)"/>
+<path d="M670 365 H760" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#sync-en-arrow)"/>
+<path d="M980 350 H1030 V285 H1090" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#sync-en-arrow)"/>
 <g>
-<rect x="1002" y="270" width="76" height="30" rx="15" fill="#fff" stroke="#d7dde5" stroke-width="1.4"/>
-<text x="1040" y="290" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="13" fill="#5e6b7d">No</text></g>
-<path d="M980 405 H1030 V470 H1090" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<rect x="996" y="241" width="64" height="30" rx="15" fill="#fff" stroke="#d7dde5" stroke-width="1.4"/>
+<text x="1028" y="261" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="13" fill="#5e6b7d">No</text></g>
+<path d="M980 405 H1030 V470 H1090" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#sync-en-arrow)"/>
 <g>
-<rect x="1002" y="455" width="76" height="30" rx="15" fill="#fff" stroke="#d7dde5" stroke-width="1.4"/>
-<text x="1040" y="475" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="13" fill="#5e6b7d">Yes</text></g>
-<path d="M1360 470 H1380" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
-<path d="M350 800 H435" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
-<path d="M725 800 H800" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
-<path d="M1090 800 H1170" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<rect x="996" y="426" width="64" height="30" rx="15" fill="#fff" stroke="#d7dde5" stroke-width="1.4"/>
+<text x="1028" y="446" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="13" fill="#5e6b7d">Yes</text></g>
+<path d="M1340 470 H1360" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#sync-en-arrow)"/>
+<path d="M350 800 H435" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#sync-en-arrow)"/>
+<path d="M725 800 H800" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#sync-en-arrow)"/>
+<path d="M1090 800 H1170" fill="none" stroke="#6c7a8d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#sync-en-arrow)"/>
 <g>
 <rect x="100" y="300" width="230" height="130" rx="18" fill="#e9edf2" stroke="#738195" stroke-width="2.5"/>
 <rect x="114" y="314" width="5" height="102" rx="2.5" fill="#738195" opacity=".42"/>
@@ -43,30 +43,30 @@
 <g>
 <rect x="760" y="300" width="220" height="130" rx="18" fill="#dcf4e8" stroke="#299572" stroke-width="2.5"/>
 <rect x="774" y="314" width="5" height="102" rx="2.5" fill="#299572" opacity=".42"/>
-<text x="870" y="360" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="870">Check for changes</tspan><tspan x="870" dy="25" font-size="14" font-weight="450" fill="#596579">Does this log need a reread?</tspan></text></g>
+<text x="870" y="360" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="870">Check for changes</tspan><tspan x="870" dy="25" font-size="14" font-weight="450" fill="#596579">Reread this log?</tspan></text></g>
 <g>
 <rect x="1090" y="220" width="270" height="130" rx="18" fill="#eee5fc" stroke="#885bd0" stroke-width="2.5"/>
 <rect x="1104" y="234" width="5" height="102" rx="2.5" fill="#885bd0" opacity=".42"/>
 <text x="1225" y="268.5" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="1225">Reuse existing record</tspan><tspan x="1225" dy="25" font-size="14" font-weight="450" fill="#596579">Revision unchanged</tspan><tspan x="1225" dy="22" font-size="14" font-weight="450" fill="#596579">Skip the session log read</tspan></text></g>
 <g>
-<rect x="1090" y="405" width="270" height="130" rx="18" fill="#dcf4e8" stroke="#299572" stroke-width="2.5"/>
+<rect x="1090" y="405" width="250" height="130" rx="18" fill="#dcf4e8" stroke="#299572" stroke-width="2.5"/>
 <rect x="1104" y="419" width="5" height="102" rx="2.5" fill="#299572" opacity=".42"/>
-<text x="1225" y="453.5" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="1225">Read and fold changed log</tspan><tspan x="1225" dy="25" font-size="14" font-weight="450" fill="#596579">Normalize usage</tspan><tspan x="1225" dy="22" font-size="14" font-weight="450" fill="#596579">Replace by turn/step</tspan></text></g>
+<text x="1215" y="453.5" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="1215">Read and fold changes</tspan><tspan x="1215" dy="25" font-size="14" font-weight="450" fill="#596579">Normalize usage</tspan><tspan x="1215" dy="22" font-size="14" font-weight="450" fill="#596579">Replace by turn/step</tspan></text></g>
 <g>
-<rect x="1380" y="405" width="150" height="130" rx="18" fill="#eee5fc" stroke="#885bd0" stroke-width="2.5"/>
-<rect x="1394" y="419" width="5" height="102" rx="2.5" fill="#885bd0" opacity=".42"/>
-<text x="1455" y="465" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="1455">Write session</tspan><tspan x="1455" dy="25" font-size="14" font-weight="450" fill="#596579">This session only</tspan></text></g>
+<rect x="1360" y="405" width="172" height="130" rx="18" fill="#eee5fc" stroke="#885bd0" stroke-width="2.5"/>
+<rect x="1374" y="419" width="5" height="102" rx="2.5" fill="#885bd0" opacity=".42"/>
+<text x="1446" y="465" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="1446">Session record</tspan><tspan x="1446" dy="25" font-size="14" font-weight="450" fill="#596579">This session only</tspan></text></g>
 <g>
 <rect x="100" y="735" width="250" height="130" rx="18" fill="#e9edf2" stroke="#738195" stroke-width="2.5"/>
 <rect x="114" y="749" width="5" height="102" rx="2.5" fill="#738195" opacity=".42"/>
-<text x="225" y="783.5" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="225">DSH usage events</tspan><tspan x="225" dy="25" font-size="14" font-weight="450" fill="#596579">assistant/chunk</tspan><tspan x="225" dy="22" font-size="14" font-weight="450" fill="#596579">Final message.usage</tspan></text></g>
+<text x="225" y="783.5" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="225">DSH usage events</tspan><tspan x="225" dy="25" font-size="14" font-weight="450" fill="#596579">assistant/chunk · turn/end</tspan><tspan x="225" dy="22" font-size="14" font-weight="450" fill="#596579">Final message.usage</tspan></text></g>
 <g>
 <rect x="435" y="735" width="290" height="130" rx="18" fill="#dcf4e8" stroke="#299572" stroke-width="2.5"/>
 <rect x="449" y="749" width="5" height="102" rx="2.5" fill="#299572" opacity=".42"/>
 <text x="580" y="783.5" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="580">Fold by session · turn/step</tspan><tspan x="580" dy="25" font-size="14" font-weight="450" fill="#596579">Keep latest valid usage</tspan><tspan x="580" dy="22" font-size="14" font-weight="450" fill="#596579">Update session aggregate</tspan></text></g>
 <g>
-<rect x="800" y="735" width="290" height="130" rx="18" fill="#ffe9dc" stroke="#df7446" stroke-width="2.5"/>
-<rect x="814" y="749" width="5" height="102" rx="2.5" fill="#df7446" opacity=".42"/>
+<rect x="800" y="735" width="290" height="130" rx="18" fill="#dcf4e8" stroke="#299572" stroke-width="2.5"/>
+<rect x="814" y="749" width="5" height="102" rx="2.5" fill="#299572" opacity=".42"/>
 <text x="945" y="795" text-anchor="middle" font-family="Inter,system-ui,'Microsoft YaHei',sans-serif" font-size="18" font-weight="700" fill="#1e293b"><tspan x="945">Coalesce pending writes</tspan><tspan x="945" dy="25" font-size="14" font-weight="450" fill="#596579">Keep latest record per session</tspan></text></g>
 <g>
 <rect x="1170" y="735" width="300" height="130" rx="18" fill="#eee5fc" stroke="#885bd0" stroke-width="2.5"/>
