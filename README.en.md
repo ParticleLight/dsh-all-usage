@@ -36,13 +36,17 @@ The installation command assembles the bundle. Usually, refreshing the browser p
 
 ## Screenshots
 
-![Dashboard overview](assets/screenshot-1.png)
+![Dashboard overview](assets/screenshots/en/01-overview.png)
 
-![Cost statistics settings](assets/screenshot-2.png)
+![Usage heatmap](assets/screenshots/en/02-heatmap.png)
 
-![Request logs and audit](assets/screenshot-3.png)
+![Model usage](assets/screenshots/en/03-model-usage.png)
 
-The three screenshots above are from v1.1.18; they document the panel layout and may differ from later versions.
+![Request logs and audit](assets/screenshots/en/04-request-logs.png)
+
+![Cost settings](assets/screenshots/en/05-cost-settings.png)
+
+The five screenshots above were captured on 2026-10-14 from the v1.2.0 client UI; the host plugin shown is v1.1.18. The live usage and workspace data belong to that capture environment, and the version-mismatch warning in Cost settings is intentionally preserved.
 
 ## Technology Stack and Architecture
 

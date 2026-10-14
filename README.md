@@ -36,13 +36,17 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 ## 截图
 
-![dsh-all-usage 看板总览](assets/screenshot-1.png)
+![dsh-all-usage 看板总览](assets/screenshots/zh/01-overview.png)
 
-![dsh-all-usage 成本统计设置](assets/screenshot-2.png)
+![dsh-all-usage 使用热力图](assets/screenshots/zh/02-heatmap.png)
 
-![dsh-all-usage 请求日志与审计](assets/screenshot-3.png)
+![dsh-all-usage 模型用量](assets/screenshots/zh/03-model-usage.png)
 
-以上三张截图取自 v1.1.18，用于说明面板布局；界面细节可能随后续版本变化。
+![dsh-all-usage 请求日志与审计](assets/screenshots/zh/04-request-logs.png)
+
+![dsh-all-usage 成本设置](assets/screenshots/zh/05-cost-settings.png)
+
+以上五张截图于 2026-10-14 从 v1.2.0 客户端界面截取，图中宿主插件版本为 v1.1.18；其中的实际用量与工作区数据属于该截图环境；成本设置中的版本不一致警告为有意保留。
 
 ## 技术栈与架构
 
