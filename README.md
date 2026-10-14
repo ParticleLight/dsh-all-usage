@@ -7,7 +7,7 @@
 [![stars](https://img.shields.io/github/stars/ParticleLight/dsh-all-usage?label=stars&logo=github)](https://github.com/ParticleLight/dsh-all-usage/stargazers)
 [![license](https://img.shields.io/github/license/ParticleLight/dsh-all-usage?label=license&color=green)](LICENSE)
 [![CI](https://github.com/ParticleLight/dsh-all-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/ParticleLight/dsh-all-usage/actions/workflows/ci.yml)
-[![DSH](https://img.shields.io/badge/DSH-0.1.1--0.2.0-4D6BFE)](#兼容性与已知限制)
+[![DSH runtime compatibility](https://img.shields.io/badge/DSH%20runtime-7%20verified-4D6BFE)](#兼容性与已知限制)
 [![status](https://img.shields.io/badge/status-stable-brightgreen)](https://github.com/ParticleLight/dsh-all-usage/releases)
 
 [中文](README.md) · [English](README.en.md)
@@ -42,6 +42,8 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 ![dsh-all-usage 请求日志与审计](assets/screenshot-3.png)
 
+以上三张截图取自 v1.1.18，用于说明面板布局；界面细节可能随后续版本变化。
+
 ## 技术栈与架构
 
 - **Host 端**（入口 `lib/index.js`，组装 `lib/plugin.js`）：按职责拆分为 `aggregation.js`（聚合与查询）、`ledger.js`（持久账本）、`session-sync.js`（历史/实时同步）、`pricing-runtime.js`（运行时定价）、`balance.js`（余额）、`http.js`（安全路由）；扫描 `turn/end`、`assistant/chunk` usage 和最终 `assistant/message.usage`，监听 `session/event` 实时折叠，并通过 `webServer` 服务注册数据路由。
@@ -69,14 +71,15 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 ### 兼容性与已知限制
 
 - **运行环境**：需要 Node.js `>=22 <25`；CI 会在 Node 22 和 Node 24 上运行测试、语法检查和 npm 包内容检查。
-- **DSH 兼容**：`package.json` 声明 DSH runtime `>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0 || >=0.1.7-rc.2 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0`，已使用 `0.2.0-rc.2`、`0.1.7-rc.2`、`0.1.5-rc.2`、`0.1.5-rc.1`、`0.1.1-rc.2` 和 `0.1.1-rc.1` 的真实 Cordis 服务链验证，且全部纳入 CI smoke 矩阵（Node 22/24 双档）；`0.1.2-rc.1` 已通过实际使用验证兼容，但未纳入 CI smoke 矩阵。声明按元组拆成四段而非写成单一区间，是因为 node-semver 只有在范围里存在与目标版本同 `major.minor.patch` 且自身带预发布标签的比较符时，才会放行该预发布版本 —— 例如必须写成 `>=0.2.0-rc.2` 才能让 `0.2.0-rc.2` 进入范围。
-- **桌面客户端（Electron，Windows）**：本插件在 DSH 桌面客户端上实测运行正常（实测 `@deepseek-ai/dsh-desktop` `0.1.7-rc.2`）。桌面客户端会在窗口顶部为自身的最小化 / 最大化 / 关闭按钮保留一条 40px 顶栏，并在文档上标记 `data-windows-titlebar` 与 `--dsh-windows-titlebar-height`；面板据此从该条**下方**开始绘制，所以桌面端自己的关闭按钮永远不会被面板盖住。浏览器端没有该标记，不留白。顶栏高度优先取宿主声明，其次取 Window Controls Overlay 矩形，最后退回 UA；需要微调时可在 DevTools 执行 `localStorage.setItem('dsh-all-usage:topInset', '48')` 后刷新（`0` 表示不留白），无需重新构建。桌面客户端自带运行时，其运行时 `0.1.7-rc.2` 已纳入声明区间与 CI smoke 矩阵（见下表）。
+- **DSH 兼容**：`package.json` 声明 DSH runtime `>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0 || >=0.1.7-rc.2 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || 0.2.1-alpha.2`，已使用 `0.2.0-rc.2`、`0.1.7-rc.2`、`0.1.5-rc.2`、`0.1.5-rc.1`、`0.1.1-rc.2` 和 `0.1.1-rc.1` 的真实 Cordis 服务链验证，且全部纳入 CI smoke 矩阵（Node 22/24 双档）；`0.1.2-rc.1` 已通过实际使用验证兼容，但未纳入 CI smoke 矩阵。声明按元组拆成四段而非写成单一区间，是因为 node-semver 只有在范围里存在与目标版本同 `major.minor.patch` 且自身带预发布标签的比较符时，才会放行该预发布版本 —— 例如必须写成 `>=0.2.0-rc.2` 才能让 `0.2.0-rc.2` 进入范围。
+- **桌面客户端（Electron，Windows）**：本插件在 DSH 桌面客户端上实测运行正常（实测 `@deepseek-ai/dsh-desktop` `0.1.7-rc.2`）。桌面客户端会在窗口顶部为自身的最小化 / 最大化 / 关闭按钮保留一条 40px 顶栏，并在文档上标记 `data-windows-titlebar` 与 `--dsh-windows-titlebar-height`；面板据此从该条**下方**开始绘制，所以桌面端自己的关闭按钮永远不会被面板盖住。浏览器端没有该标记，不留白。顶栏高度优先取宿主声明，其次取 Window Controls Overlay 矩形，最后退回 UA；需要微调时可在 DevTools 执行 `localStorage.setItem('dsh-all-usage:topInset', '48')` 后刷新（`0` 表示不留白），无需重新构建。桌面客户端自带运行时，实测版本 `0.1.7-rc.2` 已纳入声明区间与 CI smoke 矩阵（见下表）。
 - **Web 服务依赖**：Host 将 `webServer` 声明为必需依赖，确保服务晚挂载时由 DSH 等待后再执行插件；该包面向 DSH Web profile，不提供无 WebServer 的 headless 路由。HTTP 守卫还会检查真实 socket peer，反向代理只有在连接本身来自 loopback 时才会被接受。写接口（价格保存、立即同步、节假日抓取、别名）以**进程令牌**为授权凭据，不强制要求 `Origin`：DSH 桌面端把 UI 跑在自定义协议上、请求由 Electron 主进程转发，转发时会删掉 `Origin`（连同 `Host`/`Cookie`/`Sec-Fetch-*`），强制 Origin 会让桌面端所有写入 403；而 `Origin` 若存在仍必须是 loopback 或桌面端自身 scheme，`Host` 仍必须是 loopback（防 DNS rebinding）。
 
 | DSH runtime | Node.js 支持 | 真实 Cordis smoke | 结论 |
 | --- | --- | --- | --- |
-| `0.2.0-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证（DSH 官方 `next` 线；本机 web profile 即运行于此版本） |
-| `0.1.7-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证（DSH 桌面客户端即运行于此版本） |
+| `0.2.1-alpha.2` | `>=22 <25` | 通过（本机 Node 24 严格真实 Cordis smoke；CI 已配置 Node 22/24，待执行） | 已声明、已验证（仅此精确版本，不代表其他 alpha 版本） |
+| `0.2.0-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证（历史验证结果，CI 覆盖 Node 22/24） |
+| `0.1.7-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证（历史验证结果，CI 覆盖 Node 22/24） |
 | `0.1.5-rc.2` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证 |
 | `0.1.5-rc.1` | `>=22 <25`，CI 覆盖 22/24 | 通过（真实 Cordis 服务链，CI 覆盖 Node 22/24） | 已声明、已验证 |
 | `0.1.2-rc.1` | `>=22 <25` | 通过（实际使用验证，未纳入 CI） | 已实际验证兼容 |
@@ -173,7 +176,7 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 - 同一会话的同一 `turn / step` 只保留一份最终 usage；重试或替换消息会替换旧贡献，不重复累计
 - 输入 Token 按「未含缓存命中」计（缓存命中 / 写入独立成桶）；全 0 用量的重放事件不会覆盖已记录的真实用量，纯缓存命中的请求仍会计入
 - 版本检查会向 `registry.npmjs.org` 发一次只读 GET（仅读取 `dsh-all-usage` 的版本号，无请求体、无 Cookie；由 Host 发起并缓存 6 小时，页面自身不联网），失败时降级为「未知」而非猜测
-- 轻量状态接口只公开 Host 实例、统计 revision、扫描进度、同步计数与最近一次客户端环境报告（UA、视口、预留顶栏值及其来源、面板矩形——由本机客户端上报且只存内存），不公开会话 ID、工作区路径、提示词或回复正文；完整快照仅在状态变化或手动刷新时获取
+- 轻量状态接口公开 Host 实例、统计 revision、扫描进度、同步计数、`memory` 常驻计数、`counters` 诊断操作计数、`accounting` 当日聚合一致性、`mismatch` 首个桶增量不一致样本（无则为 null），以及最近一次客户端环境报告（UA、视口、预留顶栏值及其来源、面板矩形——由本机客户端上报且只存内存）；`mismatch` 样本含内部用量 key 与工作区 ID（用量 key 由会话 ID 派生，可指向某一会话），但不含提示词或回复正文，也不含工作区路径或凭据；完整快照仅在状态变化或手动刷新时获取
 - scope query 将回合（turns）、模型调用（calls）和去重会话（sessions）分开统计；Provider/模型筛选缺少路由信息时明确归为 Unknown，不从展示字符串猜测
 - records 接口只返回短 hash、时间、工作区 ID、结构化模型身份、turn/step、Token buckets 和当前物化来源，不返回原始 session ID、路径、提示词、回复或凭据
 - 看板中的总处理量 = 输入 + 输出 + 缓存读写 + 推理；缓存命中表示复用的上下文 Token，不等于新生成 Token 或实际费用
@@ -196,6 +199,8 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 | 范围与明细偏好 | 浏览器本地存储 | 当前看板范围与明细视图保存在本地。 |
 | Electron 顶栏留白 | 浏览器 `localStorage` 键 `dsh-all-usage:topInset` | 可用像素数微调；`0` 表示不留白，修改后刷新即可。 |
 | 保留旧账本分片 | Host 环境变量 `DSH_ALL_USAGE_KEEP_LEGACY=1` | 默认在逐会话记录树确认写入后清理旧整体分片；设为 `1` 可保留。 |
+| 常驻用量明细行预算 | Host 环境变量 `DSH_ALL_USAGE_RESIDENT_ROWS` | 单位为「行」，默认 12000；有限数字向下取整（`Math.floor`）。负数表示全部明细行常驻内存；设为 0 时在扫描结束后交还所有可交还的行；非数字值回退默认。这是软预算：定价未定稿的行，以及正在写入 / 读取 / 重同步 / 预取的会话的行不会被交还。 |
+| 会话记录缓存上限 | Host 环境变量 `DSH_ALL_USAGE_RECORD_CACHE_MB` | 单位为 MiB，默认 16。只接受 ≥ 0 的有限数字，负数或非数字一律回退 16；设为 0 时只逐出**可逐出的干净记录**、至少保留最近一条，所以受保护的记录可以让实际常驻超过预算。这是软预算：脏 / 待写 / 写入中 / 重同步 / 预取 / 读取中的记录不会被逐出；账本存储不支持单条读回时一条都不逐出，记录全部常驻。占用由用量行数估算（不是实测分配），见 status 的 `recordCacheMB`。 |
 
 ## API 与 CLI
 
@@ -206,7 +211,7 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 ### HTTP API
 
 - `GET /api/all-usage` — 兼容统计快照
-- `GET /api/all-usage/status` — 轻量 revision 与同步健康状态，并附带最近一次客户端环境报告（`clientEnv`）、运行中插件的版本号（`pluginVersion`）与写入令牌的派生 ID（`capabilityId`，令牌轮换时变化，用于让页面察觉宿主被重新加载；令牌本身只在完整快照里下发）
+- `GET /api/all-usage/status` — 轻量 revision 与同步健康状态，并附带最近一次客户端环境报告（`clientEnv`）、运行中插件的版本号（`pluginVersion`）与写入令牌的派生 ID（`capabilityId`，令牌轮换时变化，用于让页面察觉宿主被重新加载；令牌本身只在完整快照里下发），以及 `memory` 常驻计数：`residentRows`（常驻用量明细行数）、`residentRecords`（常驻会话记录数）、`recordCacheMB`（会话记录缓存占用估算，MiB，一位小数；由用量行数推算，不是实测分配）、`sessions`（会话聚合数）、`recordsCache`（记录查询缓存统计）与 `heapUsedMB` / `rssMB`（均为整个 Host 进程的堆与 RSS，不是插件单独占用）；同一响应还带 `counters`（诊断操作计数）、`accounting`（当日聚合一致性）与 `mismatch`（首个桶增量不一致样本，无则为 null）
 - `GET /api/all-usage/query` — 按 scope 返回聚合、daily/hourly 趋势和 heatmap 数据；单日 scope 填充 `hourly`，跨日 scope 的 `hourly` 为空
 - `GET /api/all-usage/records` — 按 scope 分页返回脱敏 canonical usage rows
 - `GET /api/all-usage/icon?key=<品牌 key>` — 按需返回一个品牌图标（SVG，长缓存 + ETag）；客户端 bundle 只携带解析元数据，图标本身由宿主按需发送，所以新增品牌不再增加 bundle 体积

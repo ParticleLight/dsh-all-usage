@@ -27,6 +27,8 @@ const RUNTIME_PROFILES = {
   '0.1.7-rc.2': { cordis: '4.0.4', loader: '1.0.5', timer: '1.1.6', settings: null },
   // 0.2.0 keeps the 0.1.7 Cordis line and the abstract settings seam.
   '0.2.0-rc.2': { cordis: '4.0.4', loader: '1.0.5', timer: '1.1.6', settings: null },
+  // 0.2.1-alpha.2 moves the Cordis/loader/timer line and keeps the abstract settings seam.
+  '0.2.1-alpha.2': { cordis: '4.0.5-alpha.1', loader: '1.0.6-alpha.1', timer: '1.1.7-alpha.1', settings: null },
 }
 
 async function findPackage(packageName, version) {
