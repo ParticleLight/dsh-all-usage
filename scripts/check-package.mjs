@@ -20,18 +20,15 @@ for (const version of dshCompatibility.verified) {
   if (!workflow.includes("'" + version + "'")) throw new Error('the CI smoke matrix does not cover the verified runtime ' + version)
   if (!smokeTest.includes("'" + version + "':")) throw new Error('test/dsh-runtime.test.js has no profile for the verified runtime ' + version)
 }
-// The README quotes the declared range and lists the verified runtimes in both
-// language sections. That drifted once already — v1.1.6 and v1.1.7 shipped a
-// README still claiming `<0.1.2` while package.json had moved on — so the gate
-// compares the documentation against the declaration it mirrors.
-const readme = readFileSync(join(root, 'README.md'), 'utf8')
-const quotedRanges = [...readme.matchAll(/DSH runtime `([^`]+)`/g)].map((match) => match[1])
-if (quotedRanges.length < 2) throw new Error('README.md must quote the declared DSH runtime range in both the Chinese and the English section')
-for (const range of quotedRanges) {
-  if (range !== dshCompatibility.runtime) throw new Error(`README.md quotes DSH runtime "${range}" but package.json declares "${dshCompatibility.runtime}"`)
+// Keep the language-specific compatibility declarations aligned with package.json.
+for (const [path, language] of [['README.md', 'Chinese'], ['README.en.md', 'English']]) {
+  const readme = readFileSync(join(root, path), 'utf8')
+  const quotedRanges = [...readme.matchAll(/DSH runtime `([^`]+)`/g)].map((match) => match[1])
+  if (quotedRanges.length !== 1) throw new Error(`${path} must quote the declared DSH runtime range exactly once`)
+  if (quotedRanges[0] !== dshCompatibility.runtime) throw new Error(`${path} quotes DSH runtime "${quotedRanges[0]}" but package.json declares "${dshCompatibility.runtime}"`)
+  const undocumented = dshCompatibility.verified.filter((version) => !readme.includes(version))
+  if (undocumented.length > 0) throw new Error(`${path} (${language}) does not mention the verified DSH runtime(s): ${undocumented.join(', ')}`)
 }
-const undocumented = dshCompatibility.verified.filter((version) => !readme.includes(version))
-if (undocumented.length > 0) throw new Error(`README.md does not mention the verified DSH runtime(s): ${undocumented.join(', ')}`)
 const packPath = process.argv[2]
 const raw = packPath === undefined
   ? execFileSync(process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : 'npm', process.platform === 'win32' ? ['/d', '/s', '/c', 'npm.cmd pack --dry-run --json'] : ['pack', '--dry-run', '--json'], { cwd: root, encoding: 'utf8' })
@@ -52,6 +49,7 @@ const expected = [
   'CHANGELOG.md',
   'LICENSE',
   'README.md',
+  'README.en.md',
   ...iconFiles,
   'assets/screenshot-1.png',
   'assets/screenshot-2.png',

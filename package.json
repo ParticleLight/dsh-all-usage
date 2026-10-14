@@ -62,6 +62,8 @@
     "lib/version-check.js",
     "lib/icons.js",
     "CHANGELOG.md",
+    "README.md",
+    "README.en.md",
     "cordis.patch.yml",
     "screenshots.json",
     "fixtures/usage-events.json",
