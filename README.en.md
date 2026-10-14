@@ -12,30 +12,53 @@
 
 [中文](README.md) · [English](README.en.md)
 
-## Overview
+## Introduction
 
 A full usage dashboard for DeepSeek Harness. Analyze tokens, cache behavior, estimated cost, account balance, and activity by model, provider, workspace, and time range.
 
-### Features
+For DSH users who need to inspect token usage, model costs, and workspace activity from local session data.
 
-- **Heatmap**: an activity heatmap with a switchable span (**last 30 days / 90 days / 12 months**; shorter spans get larger cells), workspace filters and daily turn/token details
-- **Model analytics**: mixed view, model-merged view, and provider summary with calls, token categories, and cache hit rate; model rows and the model filter dropdown render vendor brand SVG icons (**43 brands**, including Mistral, Cohere, NVIDIA, Amazon Nova, Phi, Perplexity, ERNIE, Hunyuan, StepFun, SenseNova, InternLM, LongCat, **Xiaomi MiMo**, AI21, Granite, Solar, LFM, OLMo, BGE, Voyage, ByteDance Seed, Kling, Skywork, **Aion, Nous Research, TII Falcon, Aleph Alpha, Yandex, Snowflake and iFlytek Spark**); gateway and cloud envelopes (`openai-gpt-5.5`, `databricks-claude-*`, `google.gemma-3-12b-it`, `eu.anthropic.claude-*`) resolve back to the real brand, while unknown or gateway-private ids stay neutral
-- **Summary and workspaces**: processed tokens, cache hits, estimated cost, account balance, usage streaks, workspace distribution, and details
-- **Cost statistics / price table**: sync model prices from models.dev, calculate four cost buckets, persist price snapshots, and distinguish priced, free, ambiguous, and unpriced calls. Cost Settings is one editable price table: each row is a ledger model, its price boxes write that model's manual price, the official-model column switches the row to the catalog price, and every row can carry context rate bands and time-of-day (UTC peak/off-peak) rules, including an optional "Chinese statutory holidays price as off-peak all day" switch whose explicit date list lives in that model's peak plan (China Standard Time calendar days, 2026-10-01..2026-10-07 ranges supported, and one click loads the year's arrangement from a public calendar before it is frozen into the policy); rows that exist only in the saved configuration stay visible, editable, and removable
-- **CSV export**: export data using the selected time range and aggregation mode
-- **Time ranges**: today, **last 7 days**, last 30 days, last 90 days, all time, or a custom start/end date across all available historical daily data; the heatmap span switches independently (30 days / 90 days / 12 months)
-- **Workspace aliases**: manage aliases from the sidebar dashboard; values persist in the $DSH_HOME/storages KV cell `all_usage_aliases`
-- **Interface language**: switch between Chinese and English from the dashboard header; your choice persists locally in the browser
-- **Full history & incremental rebuild**: the baseline scans every readable historical session; the durable usage ledger doubles as a per-session cursor, so unchanged sessions are reused straight from the ledger and only newly appended events are folded — long histories restart without a full rebuild
-- **Restart with no re-read**: the persisted log revision (a header-line + stat via `sessionPersistence.listSnapshots()`) acts as a per-session change signal — sessions whose log is unchanged are applied from the ledger on restart without reading their events at all; only changed/new sessions are read incrementally
-- **Workspace registry sync**: follows DSH's `domain/changed` event so the workspace registry stays fresh automatically — any durable registry write (create/delete/rename/reorder/archive/membership) triggers a reread of `workspaceRegistry.list()`, with only added/removed workspaces reprocessed incrementally while unchanged workspaces reuse their computed aggregates and ledger (zero rescan). Usage is strictly limited to registered workspaces: unregistered cwds, including existing directories absent from the registry, are ignored.
-- **Data health and on-demand refresh**: after a scan completes, the browser polls only a lightweight status revision and fetches full history only after usage, alias, or sync state changes; it shows the latest full-data update, historical scan health, revision skips, rereads, ledger recovery, and failures while preserving last-good data on network errors
-- **Performance**: Host maintains ingest-time local/UTC day, workspace, model-identity cubes and single-day hour buckets; scope queries merge buckets, exact costs use BigInt decimal accumulators, and the 53-week heatmap emits only the fields it consumes, while revision-scoped snapshot/records caches and recyclable live-event queues remain in place. Client isolates the heatmap, tooltip, trend, donuts, request records, and pricing dialog behind memoized boundaries; pointer coordinates update through refs plus requestAnimationFrame instead of rerendering the page, and the browser entry is deterministically minified before packing
-- **Trend line chart**: show input, cache read/write, output, reasoning, and total processed tokens for the active range, timezone, workspace, provider, and model scope; use hourly buckets for a single-day scope, daily buckets for cross-day scopes, and **an automatically coarser stride above 180 days** (three days first, then a week / 10 days / 2-3 weeks / month / quarter / year as needed, capped at 180 points; the panel names the stride and a multi-day point skips the single-day drilldown); smooth monotone curves, staged entrance animation, hover for exact values, and click a point to inspect that day
-- **Version indicator**: the header shows the running version next to the title — “Up to date” in small text when it matches the newest release on npm, “Latest vX.Y.Z” highlighted when it is behind, and a click opens the GitHub repository; the host caches the check (6 hours by default) and only the refresh button forces a new one
-- **Unified filters and audit**: workspace, provider, model, and date filters apply to the summary, heatmap, trend, tables, and CSV; workspace, provider, and model filters remain independent and can be combined freely, while workspace, provider, and model options are limited to values used in the selected date range and stale selections clear automatically; request logs stay visible as a compact paginated table with grouped Token details for the selected row
-- **Token accounting semantics**: input tokens are fresh (exclude cache hits/writes, which sit in separate buckets along with reasoning); all-zero usage replays never overwrite recorded usage, while cache-only requests still count
-- **Cost semantics**: prices come from the models.dev USD per 1M token catalog; DSH-normalized fresh input and the four cost buckets are snapshotted at calculation time, the multiplier applies only to final total, and existing positive historical costs are not recalculated; matching uses the model's official vendor entry and ignores the DSH provider, while missing official prices stay unpriced
+## Quick Start
+
+~~~bash
+dsh plugin --profile web add github:ParticleLight/dsh-all-usage
+~~~
+
+The installation command assembles the bundle. Usually, refreshing the browser page loads the client; no manual profile edits are required. If your DSH version does not dynamically assemble newly installed packages, use its supported package reload or restart, then refresh the page and open the dashboard from the DSH sidebar.
+
+## Core Features
+
+- **Explore usage across dimensions**: inspect summaries, trends, heatmaps, and paginated request logs; combine date, workspace, provider, and model filters, then export the current view to CSV.
+- **Understand models and workspaces**: compare mixed-model, merged-model, and provider views, with streaks, workspace distributions, and daily turn details; 43 brand marks are built in and unknown model identities stay neutral.
+- **Configure costs and balances**: estimate costs across four token buckets, map official models or set manual prices, configure context tiers and peak windows, and query account balance; see Configuration below.
+- **Sync complete history incrementally**: scan readable sessions, reuse unchanged per-session ledger data using persisted revisions, read only changed logs, and follow DSH workspace-registry changes.
+- **Audit routine operation**: inspect scan health, reads, ledger restores, and failures; switch interface language, manage workspace aliases, and check the running plugin version.
+
+## Screenshots
+
+![Dashboard overview](assets/screenshot-1.png)
+
+![Cost statistics settings](assets/screenshot-2.png)
+
+![Request logs and audit](assets/screenshot-3.png)
+
+## Technology Stack and Architecture
+
+- **Host** (entry `lib/index.js`, assembled by `lib/plugin.js`): split by responsibility across `aggregation.js` (aggregation/query), `ledger.js` (durable ledger), `session-sync.js` (history/live sync), `pricing-runtime.js` (runtime pricing), `balance.js` (balance), and `http.js` (protected routes); aggregates `turn/end`, `assistant/chunk` usage, and final `assistant/message.usage`, folds live `session/event` updates, and exposes data routes through `webServer`.
+- **Client**: readable source lives in `src/client.js`; `npm run build:client` uses the pinned Terser version to generate the `window.__ModuleLoader__` bundle at `lib/client.js`, which registers the “Usage statistics” sidebar entry through the `sidebar.footer.action` slot. All API routes accept loopback requests and reject an explicit cross-origin Origin; balance reads and alias writes also require a process-scoped token generated when the plugin starts (the balance GET tolerates browsers omitting Origin). **Writes are authorized by that token, not by an Origin**: the DSH desktop shell runs the UI on its own scheme and forwards requests through Electron, which strips `Origin` (with `Host`/`Cookie`/`Sec-Fetch-*`), so requiring one made every desktop save fail with 403. A present `Origin` must still be loopback or the shell's own scheme, and `Host` must still be loopback (DNS-rebinding guard).
+
+### Storage and Performance
+
+- **One record per session**: the ledger writes each session as its own document (stable-hashed into 32 directories), so an update publishes one file. Measured on the same data: a single update went from rewriting a 13.27 MB shard (273 ms) to writing one record (a 4.6 ms median).
+- **One identity per route**: usage items reference the route identity and its price definition instead of repeating them, so 1059 records shrank from **91.3 to 74.7 MB (-18%)**
+- **The snapshot pays for one timezone only**: `GET /api/all-usage?utc=0|1` returns a single calendar (both copies used to split the payload in half), and a day keeps its session-id detail for the last **180 days** while older days keep counts and aggregates
+- **The trend chart is capped at 180 points**: past half a year it drops to three days per point and widens to week / month / quarter / year, so the chart cannot grow with history
+- **Budgets live in the code**: 20 query and 20 records cache entries, 5000 pricing resolutions, 512 context entries per session, 500 price rows, 32 shards, 180 trend points and a 180-day session-id window - guarded by `test/perf-budgets.test.js`, so relaxing one means editing that table
+- **Reproducible benchmarks**: `node bench/ledger.mjs` (ledger size and per-update rewrite cost), `node bench/ledger-layout.mjs` (the two storage layouts, on copies of real shards) `node bench/endpoints.mjs` (median latency and payload of five read endpoints) and `node scripts/dead-code.mjs` (exports nothing references, client helpers nobody calls, stylesheet classes no markup can render)
+
+## Installation
+
+This is a standard DSH community plugin package with a `dsh.bundle` manifest and Web Client. It reads persisted session logs and a separate usage ledger, then backfills history on activation.
 
 ### Compatibility and Known Limitations
 
@@ -61,6 +84,32 @@ An unlisted DSH version is not necessarily incompatible. Include the DSH, Node.j
 - **Estimated cost**: cost is an estimate based on models.dev rates and DSH usage buckets, not a provider invoice. Unavailable catalogs and unmatched models remain unpriced instead of receiving guessed rates. Cache reads, cache writes, and reasoning follow the buckets reported by the upstream DSH event.
 - **Tiered prices**: models.dev context-tiered entries select the applicable rate from the request input context (fresh input plus cache read/write tokens); malformed schedules remain unsupported.
 - **Workspace boundary**: only sessions whose cwd maps to a DSH-registered workspace are included. Unregistered cwds, including existing directories absent from the registry, are ignored. The registry is kept fresh by a `domain/changed` probe: any durable workspace-domain write triggers a reread, and only added/removed workspaces are reprocessed incrementally — unchanged workspaces reuse their computed aggregates and ledger. Data deleted or corrupted before a successful session flush cannot be recovered from the separate ledger.
+
+### Manual Local Registration
+
+1. Place this directory anywhere and create a symlink to it under $DSH_HOME/profiles/node_modules/ (use a junction on Windows):
+
+   ~~~powershell
+   New-Item -ItemType Junction -Path (Join-Path $env:DSH_HOME 'profiles/node_modules/dsh-all-usage') -Target '<absolute plugin path>'
+   ~~~
+
+2. Add this entry to $DSH_HOME/profiles/web/cordis.patch.yml:
+
+   ~~~yaml
+   - insert:
+       - id: all-usage
+         name: dsh-all-usage
+   ~~~
+
+The profile patch layer hot-reloads; save the file and refresh the page.
+
+## Usage Examples
+
+### Common Scenarios
+
+- Choose today, the last 7/30/90 days, all history, or a custom date range. Combine workspace, provider, and model filters, use trends and heatmaps to find changes, inspect individual request rows, and export CSV.
+- To review cost estimates, check model mappings and price status first, then inspect input, output, cache-read, and cache-write buckets. Unmatched or unverifiable prices are shown as unpriced.
+- For failed or incomplete requests, use the redacted event examples below. A local record means DSH observed usage; it does not prove the provider charged for the request.
 
 ### Local Statistics vs Official Billing
 
@@ -110,72 +159,7 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 
 The command loads the real plugin Host, calls its compatible APIs, checks the documented token/record totals, and prints a non-sensitive summary.
 
-### Report An Issue
-
-- [Data inconsistency](.github/ISSUE_TEMPLATE/data-inconsistency.md)
-- [Plugin startup failure](.github/ISSUE_TEMPLATE/startup-failure.md)
-- [Cost calculation issue](.github/ISSUE_TEMPLATE/cost-calculation.md)
-
-### Latest Update
-
-**v1.1.18**
-
-- **A new “Last 7 Days” range**: the presets are now Today / **Last 7 Days** / Last 30 Days / Last 90 Days / All Time / Custom; it covers seven calendar days including today and applies to the summary, trend, model tables, request log, filters and CSV export, with the choice remembered in the browser.
-- **A switchable heatmap span (30 days / 90 days / 12 months)**: the column count follows the span (5 / 13 / 53 columns); each column is a week and the cells keep a 1:1 aspect ratio, so a shorter span also gets larger cells (18×18px at twelve months, 34×34px at 30/90 days, capped so a few columns cannot stretch into huge tiles). Twelve months stays the default and the span is independent of the time range above.
-- **A version indicator next to the title**: it shows the running version, “Up to date” in small text when it matches the newest release on npm, a highlighted “Latest vX.Y.Z” when it is behind, and a click opens the GitHub repository. The host performs the check (one read-only request to the npm registry, cached for six hours, at most one every 30 seconds per process) and degrades to “unknown” rather than guessing.
-
-See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
-
-### Installation
-
-This is a standard DSH community bundle. It declares a `dsh.bundle` manifest and a web client, and backfills its data from persisted session logs and the durable usage ledger after installation.
-
-#### Official plugin command (recommended)
-
-~~~bash
-dsh plugin --profile web add github:ParticleLight/dsh-all-usage
-~~~
-
-The installation command assembles the bundle. Refresh the browser page to load the client; no manual profile edits are required. If your DSH version does not dynamically assemble newly installed packages, use its supported package reload or restart the process.
-
-#### Manual local registration
-
-1. Place this directory anywhere and create a symlink to it under $DSH_HOME/profiles/node_modules/ (use a junction on Windows):
-
-   ~~~powershell
-   New-Item -ItemType Junction -Path (Join-Path $env:DSH_HOME 'profiles/node_modules/dsh-all-usage') -Target '<absolute plugin path>'
-   ~~~
-
-2. Add this entry to $DSH_HOME/profiles/web/cordis.patch.yml:
-
-   ~~~yaml
-   - insert:
-       - id: all-usage
-         name: dsh-all-usage
-   ~~~
-
-The profile patch layer hot-reloads; save the file and refresh the page.
-
-### Architecture
-
-- **Host** (entry `lib/index.js`, assembled by `lib/plugin.js`): split by responsibility across `aggregation.js` (aggregation/query), `ledger.js` (durable ledger), `session-sync.js` (history/live sync), `pricing-runtime.js` (runtime pricing), `balance.js` (balance), and `http.js` (protected routes); aggregates `turn/end`, `assistant/chunk` usage, and final `assistant/message.usage`, folds live `session/event` updates, and exposes data routes through `webServer`:
-  - `GET /api/all-usage` — compatible usage snapshot
-  - `GET /api/all-usage/status` — lightweight revision and sync health, plus the last client environment report (`clientEnv`), the running plugin version (`pluginVersion`) and a derived id of the write capability (`capabilityId`, changes when the capability rotates so the page can notice a plugin reload; the capability itself is only ever sent in the full snapshot)
-  - `GET /api/all-usage/query` — scoped aggregate, daily/hourly trend, and heatmap data; single-day scopes populate `hourly`, while cross-day scopes return an empty `hourly` array
-  - `GET /api/all-usage/records` — paginated privacy-safe canonical usage rows
-  - `GET /api/all-usage/icon?key=<brand key>` — serves one brand mark on demand (SVG with a long cache and an ETag); the client bundle carries only the resolution metadata, so adding a brand no longer grows it
-  - `GET /api/all-usage/version?force=1` — version check: the running version, the newest published version, the verdict (`latest` / `outdated` / `unknown`), when it was checked and where it came from; cached on the host for 6 hours with at most one upstream request every 30 seconds per process (the floor applies to `force=1` too), `force=1` comes from the refresh button
-  - `GET /api/all-usage/balance?force=1` — account balance using the configured `llm-deepseek` API key
-  - `POST /api/all-usage/alias` — update workspace aliases
-  - `GET /api/all-usage/pricing` — read the full editable price table: per-row effective rates and status, mappings, manual prices, peak plans (with their built-in/explicit origin and full rules), and rows that exist only in the configuration
-  - `GET /api/all-usage/pricing/models?q=...` — search official model IDs and display names, including preview rates, tiered-pricing flags, and whether a built-in peak table exists
-  - `POST /api/all-usage/pricing` — save sync, mappings, manual prices, context rate bands, and peak-window rules (request shape unchanged)
-  - `POST /api/all-usage/pricing/sync` — sync models.dev and backfill unpriced calls
-  - `POST /api/all-usage/pricing/holidays` — fetch one year of the Chinese holiday arrangement (the holiday-cn dataset, jsDelivr first with a GitHub raw fallback, cached host-side for 24 hours) and return only the off-day list plus its source; **nothing is written to the configuration** — the client freezes the dates into a peak plan
-  - `GET /api/all-usage/client-env` — client environment report (user agent, window-controls overlay height, the reserved strip **and its source**, viewport, panel rectangles); the client reports it at load and whenever the sheet opens, kept in memory only
-- **Client**: readable source lives in `src/client.js`; `npm run build:client` uses the pinned Terser version to generate the `window.__ModuleLoader__` bundle at `lib/client.js`, which registers the “Usage statistics” sidebar entry through the `sidebar.footer.action` slot. All API routes accept loopback requests and reject an explicit cross-origin Origin; balance reads and alias writes also require a process-scoped token generated when the plugin starts (the balance GET tolerates browsers omitting Origin). **Writes are authorized by that token, not by an Origin**: the DSH desktop shell runs the UI on its own scheme and forwards requests through Electron, which strips `Origin` (with `Host`/`Cookie`/`Sec-Fetch-*`), so requiring one made every desktop save fail with 403. A present `Origin` must still be loopback or the shell's own scheme, and `Host` must still be loopback (DNS-rebinding guard).
-
-### Data semantics
+### Data Semantics, Privacy, and Limits
 
 - Calls and tokens come from DSH session logs; `session/flush` rebuilds and queues the derived ledger only when related events are dirty, coalescing the latest pending record per session and draining on plugin disposal. Readable logs and ledger history are backfilled when the plugin activates, so successfully persisted data survives reloads or session deletion; deleting a workspace likewise keeps its history, summed into one "Deleted" row together with usage that had not reached the ledger yet
 - Day-level range data retains every readable historical session date with tracked usage; the heatmap is a switchable-span view (last 30 days / 90 days / 12 months, 12 months by default), not a fixed latest-53-week view
@@ -198,21 +182,73 @@ The profile patch layer hot-reloads; save the file and refresh the page.
 - The ledger assigns each session ID to one of 32 stable-hash directories and keeps **one record document per session**, so a flush publishes that one file instead of rewriting a shard; the old whole-unit files (including the original `all_usage_ledger.json`) are removed once the record tree provably holds the data, and `DSH_ALL_USAGE_KEEP_LEGACY=1` keeps them. An async write failure or an unflushed shutdown does not lose in-memory statistics; the next startup simply scans that session again
 - Only sessions that can be mapped to a registered workspace by their working directory are included
 
+## Configuration
 
-### Storage and performance
+| Setting | Where | Description |
+| --- | --- | --- |
+| Model pricing and rules | Dashboard “Cost settings” | models.dev sync is off by default; map official models, set manual prices, configure context tiers, UTC peak windows, and China statutory-holiday off-peak rules. See Data Semantics for formulas and boundaries. |
+| Workspace aliases | DSH sidebar; KV unit `all_usage_aliases` under `$DSH_HOME/storages` | Replaces workspace names in the display. |
+| Range and detail preferences | Browser-local storage | The selected dashboard range and detail view are saved locally. |
+| Electron top inset | Browser `localStorage` key `dsh-all-usage:topInset` | Set a pixel value to adjust the reserved strip; `0` disables it. Refresh to apply. |
+| Keep legacy ledger shards | Host environment variable `DSH_ALL_USAGE_KEEP_LEGACY=1` | Legacy whole-shard files are removed after the per-session record tree is confirmed; set to `1` to keep them. |
 
-- **One record per session**: the ledger writes each session as its own document (stable-hashed into 32 directories), so an update publishes one file. Measured on the same data: a single update went from rewriting a 13.27 MB shard (273 ms) to writing one record (a 4.6 ms median)
-- **One identity per route**: usage items reference the route identity and its price definition instead of repeating them, so 1059 records shrank from **91.3 to 74.7 MB (-18%)**
-- **The snapshot pays for one timezone only**: `GET /api/all-usage?utc=0|1` returns a single calendar (both copies used to split the payload in half), and a day keeps its session-id detail for the last **180 days** while older days keep counts and aggregates
-- **The trend chart is capped at 180 points**: past half a year it drops to three days per point and widens to week / month / quarter / year, so the chart cannot grow with history
-- **Budgets live in the code**: 20 query and 20 records cache entries, 5000 pricing resolutions, 512 context entries per session, 500 price rows, 32 shards, 180 trend points and a 180-day session-id window - guarded by `test/perf-budgets.test.js`, so relaxing one means editing that table
-- **Reproducible benchmarks**: `node bench/ledger.mjs` (ledger size and per-update rewrite cost), `node bench/ledger-layout.mjs` (the two storage layouts, on copies of real shards) `node bench/endpoints.mjs` (median latency and payload of five read endpoints) and `node scripts/dead-code.mjs` (exports nothing references, client helpers nobody calls, stylesheet classes no markup can render)
+## API and CLI
 
-### Development
+### CLI
+
+The plugin has no separate runtime CLI. The official install command is in Quick Start; development and test commands are listed below.
+
+### HTTP API
+
+- `GET /api/all-usage` — compatible usage snapshot
+- `GET /api/all-usage/status` — lightweight revision and sync health, plus the last client environment report (`clientEnv`), the running plugin version (`pluginVersion`) and a derived id of the write capability (`capabilityId`, changes when the capability rotates so the page can notice a plugin reload; the capability itself is only ever sent in the full snapshot)
+- `GET /api/all-usage/query` — scoped aggregate, daily/hourly trend, and heatmap data; single-day scopes populate `hourly`, while cross-day scopes return an empty `hourly` array
+- `GET /api/all-usage/records` — paginated privacy-safe canonical usage rows
+- `GET /api/all-usage/icon?key=<brand key>` — serves one brand mark on demand (SVG with a long cache and an ETag); the client bundle carries only the resolution metadata, so adding a brand no longer grows it
+- `GET /api/all-usage/version?force=1` — version check: the running version, the newest published version, the verdict (`latest` / `outdated` / `unknown`), when it was checked and where it came from; cached on the host for 6 hours with at most one upstream request every 30 seconds per process (the floor applies to `force=1` too), `force=1` comes from the refresh button
+- `GET /api/all-usage/balance?force=1` — account balance using the configured `llm-deepseek` API key
+- `POST /api/all-usage/alias` — update workspace aliases
+- `GET /api/all-usage/pricing` — read the full editable price table: per-row effective rates and status, mappings, manual prices, peak plans (with their built-in/explicit origin and full rules), and rows that exist only in the configuration
+- `GET /api/all-usage/pricing/models?q=...` — search official model IDs and display names, including preview rates, tiered-pricing flags, and whether a built-in peak table exists
+- `POST /api/all-usage/pricing` — save sync, mappings, manual prices, context rate bands, and peak-window rules (request shape unchanged)
+- `POST /api/all-usage/pricing/sync` — sync models.dev and backfill unpriced calls
+- `POST /api/all-usage/pricing/holidays` — fetch one year of the Chinese holiday arrangement (the holiday-cn dataset, jsDelivr first with a GitHub raw fallback, cached host-side for 24 hours) and return only the off-day list plus its source; **nothing is written to the configuration** — the client freezes the dates into a peak plan
+- `GET /api/all-usage/client-env` — client environment report (user agent, window-controls overlay height, the reserved strip **and its source**, viewport, panel rectangles); the client reports it at load and whenever the sheet opens, kept in memory only
+
+## Development and Testing
 
 - After editing `src/client.js`, run `npm run build:client`, reload the DSH client module, and refresh the page; `lib/client.js` is generated and should not be edited directly. After editing `lib/plugin.js` or another Host module, reload the package through DSH or restart the process
 - The plugin has no third-party runtime dependencies: the Host uses Cordis services and the Client uses the runtime-provided React module; pinned Terser is only a development dependency for generating the browser artifact
 - Manual npm recovery publishes require a target `v<package.version>` tag and full commit SHA; GitHub Actions checks both against the checked-out tag and package version. Release events perform the same commit check.
+
+### Local Checks
+
+~~~bash
+npm test
+npm run fixture:check
+npm run build:client
+npm run check:pack
+~~~
+
+## Status and Updates
+
+The latest published release is `v1.1.18`; `v1.2.0` remains in development and has not been released. See [CHANGELOG.md](CHANGELOG.md) for the complete development and release history.
+
+### Latest published: v1.1.18
+
+- **A new “Last 7 Days” range**: the presets are now Today / **Last 7 Days** / Last 30 Days / Last 90 Days / All Time / Custom; it covers seven calendar days including today and applies to the summary, trend, model tables, request log, filters and CSV export, with the choice remembered in the browser.
+- **A switchable heatmap span (30 days / 90 days / 12 months)**: the column count follows the span (5 / 13 / 53 columns); each column is a week and the cells keep a 1:1 aspect ratio, so a shorter span also gets larger cells (18×18px at twelve months, 34×34px at 30/90 days, capped so a few columns cannot stretch into huge tiles). Twelve months stays the default and the span is independent of the time range above.
+- **A version indicator next to the title**: it shows the running version, “Up to date” in small text when it matches the newest release on npm, a highlighted “Latest vX.Y.Z” when it is behind, and a click opens the GitHub repository. The host performs the check (one read-only request to the npm registry, cached for six hours, at most one every 30 seconds per process) and degrades to “unknown” rather than guessing.
+
+See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
+
+## Contributing and Contact
+
+Use the templates below for bug reports. For general questions or feature discussion, visit the [project repository](https://github.com/ParticleLight/dsh-all-usage). Pull requests are welcome; bug reports should include the DSH, Node.js, and plugin versions.
+
+- [Data inconsistency](.github/ISSUE_TEMPLATE/data-inconsistency.md)
+- [Plugin startup failure](.github/ISSUE_TEMPLATE/startup-failure.md)
+- [Cost calculation issue](.github/ISSUE_TEMPLATE/cost-calculation.md)
 
 ## License
 
