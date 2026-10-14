@@ -4,11 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       target_tag:
-        description: Release tag to verify, for example v1.1.3
+        description: Existing immutable release tag to publish, for example v1.2.0
         required: true
         type: string
       target_sha:
-        description: Full commit SHA referenced by target_tag
+        description: Full 40-hex commit SHA that the remote target_tag must resolve to
+        required: true
+        type: string
+      asset_sha256:
+        description: Lowercase 64-hex SHA-256 of the dsh-all-usage-<version>.tgz asset on that Release, proven independently by the operator
         required: true
         type: string
   release:
@@ -24,64 +28,240 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The reusable CI gate always runs on today's source. A manual dispatch runs it
+  # on the dispatch ref (main): the release tag is immutable and still points at
+  # the already-reviewed source commit, so the old tree is not the gate for a
+  # recovery publish. A release event keeps verifying the release tag exactly as
+  # before.
   verify:
     uses: ./.github/workflows/ci.yml
     with:
-      checkout_ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.target_tag }}
+      checkout_ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
 
   publish:
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - name: Check out the release tag
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.target_tag }}
           fetch-depth: 0
-      - uses: actions/setup-node@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - name: Install development dependencies
-        run: npm ci --ignore-scripts
-      - name: Validate release identity
+      # No dependency install runs here: the bytes pushed to npm are the verified
+      # Release asset, never a workspace build.
+      - name: Resolve and validate release identity, asset, and digest
+        id: release-asset
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_REF: ${{ github.ref }}
           RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.target_tag }}
           TARGET_SHA: ${{ github.event_name == 'release' && github.sha || inputs.target_sha }}
+          INPUT_ASSET_SHA256: ${{ github.event_name == 'workflow_dispatch' && inputs.asset_sha256 || '' }}
+        run: |
+          set -euo pipefail
+
+          # A manual dispatch must come from the default branch (main): the
+          # release tag is immutable and points at an already-reviewed older
+          # commit, so the CI gate above deliberately verifies today's main while
+          # the published bytes come from the existing Release asset.
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DISPATCH_REF" != "refs/heads/main" ]; then
+            echo "::error::workflow_dispatch must run on refs/heads/main (got $DISPATCH_REF); refusing to publish"
+            exit 1
+          fi
+
+          test -n "$RELEASE_TAG"
+          printf '%s' "$TARGET_SHA" | grep -Eq '^[0-9a-f]{40}$' || { echo "::error::target_sha must be a full 40-hex commit SHA"; exit 1; }
+
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+
+          # The checked-out tag must carry exactly the version its name claims.
+          test "$RELEASE_TAG" = "v$version" || { echo "::error::package.json version $version does not match tag $RELEASE_TAG"; exit 1; }
+
+          actual_sha="$(git rev-parse HEAD)"
+          test "$actual_sha" = "$TARGET_SHA" || { echo "::error::checked-out $actual_sha is not target_sha $TARGET_SHA"; exit 1; }
+
+          # Resolve the tag from the remote, independently of the local checkout:
+          # the tag must already exist upstream and is never created or moved here.
+          remote_refs="$(git ls-remote --tags origin)"
+          remote_tag_sha="$(echo "$remote_refs" | awk -v ref="refs/tags/$RELEASE_TAG" '$2 == ref { print $1 }')"
+          remote_peeled_sha="$(echo "$remote_refs" | awk -v ref="refs/tags/$RELEASE_TAG^{}" '$2 == ref { print $1 }')"
+          test -n "$remote_tag_sha" || { echo "::error::remote tag $RELEASE_TAG does not exist"; exit 1; }
+          remote_commit_sha="${remote_peeled_sha:-$remote_tag_sha}"
+          test "$remote_commit_sha" = "$TARGET_SHA" || { echo "::error::remote $RELEASE_TAG resolves to $remote_commit_sha, not target_sha $TARGET_SHA"; exit 1; }
+          test "$actual_sha" = "$remote_commit_sha"
+
+          # The Release must already be public: not a draft, not a prerelease.
+          release_json="$RUNNER_TEMP/dsh-release.json"
+          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" > "$release_json"
+
+          asset_name="dsh-all-usage-$version.tgz"
+          asset_id="$(node -e '
+          const fs = require("node:fs");
+          const [jsonPath, tag, assetName] = process.argv.slice(1);
+          const release = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+          if (release.tag_name !== tag) throw new Error("release tag_name " + release.tag_name + " does not match " + tag);
+          if (release.draft) throw new Error("release is still a draft; refusing to publish");
+          if (release.prerelease) throw new Error("release is marked prerelease; refusing to publish");
+          if (!release.published_at) throw new Error("release has no published_at timestamp; refusing to publish");
+          const matches = (release.assets || []).filter((a) => a.name === assetName);
+          if (matches.length !== 1) throw new Error("expected exactly one release asset named " + assetName + ", found " + matches.length);
+          process.stdout.write(String(matches[0].id));
+          ' "$release_json" "$RELEASE_TAG" "$asset_name")"
+
+          # Expected asset digest. A release event trusts only the digest GitHub
+          # computed for the asset. A manual dispatch uses the required
+          # operator-supplied input, cross-checked against the metadata whenever
+          # the metadata exposes one.
+          if [ "$EVENT_NAME" = "release" ]; then
+            expected_sha256="$(node -e '
+          const fs = require("node:fs");
+          const [jsonPath, assetName] = process.argv.slice(1);
+          const release = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+          const asset = (release.assets || []).find((a) => a.name === assetName) || {};
+          const digest = String(asset.digest || "");
+          if (!digest.startsWith("sha256:") || !new RegExp("^[0-9a-f]{64}$").test(digest.slice(7))) {
+            throw new Error("release asset " + assetName + " metadata exposes no sha256 digest; refusing to publish without a verifiable expected digest (use workflow_dispatch with asset_sha256)");
+          }
+          process.stdout.write(digest.slice(7));
+          ' "$release_json" "$asset_name")"
+          else
+            expected_sha256="$(printf '%s' "$INPUT_ASSET_SHA256" | tr '[:upper:]' '[:lower:]')"
+            metadata_sha256="$(node -e '
+          const fs = require("node:fs");
+          const [jsonPath, assetName] = process.argv.slice(1);
+          const release = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+          const asset = (release.assets || []).find((a) => a.name === assetName) || {};
+          const digest = String(asset.digest || "");
+          if (digest.startsWith("sha256:") && new RegExp("^[0-9a-f]{64}$").test(digest.slice(7))) process.stdout.write(digest.slice(7));
+          ' "$release_json" "$asset_name")"
+            if [ -n "$metadata_sha256" ] && [ "$metadata_sha256" != "$expected_sha256" ]; then
+              echo "::error::asset_sha256 input does not match the Release asset metadata digest"
+              exit 1
+            fi
+          fi
+          printf '%s' "$expected_sha256" | grep -Eq '^[0-9a-f]{64}$' || { echo "::error::expected asset sha256 must be 64 lowercase hex characters"; exit 1; }
+
+          # Download the exact asset from that Release, then verify it byte for
+          # byte. Nothing is ever built or repacked from the workspace.
+          asset_dir="$RUNNER_TEMP/dsh-release-asset"
+          mkdir -p "$asset_dir"
+          asset_path="$asset_dir/$asset_name"
+          gh release download "$RELEASE_TAG" --repo "$REPOSITORY" --pattern "$asset_name" --dir "$asset_dir"
+          test -s "$asset_path" || { echo "::error::downloaded release asset is empty"; exit 1; }
+          actual_sha256="$(sha256sum "$asset_path" | awk '{print $1}')"
+          if [ "$actual_sha256" != "$expected_sha256" ]; then
+            echo "::error::release asset $asset_name sha256=$actual_sha256 does not match the expected $expected_sha256"
+            exit 1
+          fi
+
+          # The published bytes must declare the version the tag claims.
+          tar -xzOf "$asset_path" package/package.json > "$RUNNER_TEMP/dsh-asset-package.json"
+          node -e '
+          const fs = require("node:fs");
+          const [manifestPath, expectedName, expectedVersion] = process.argv.slice(1);
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+          if (manifest.name !== expectedName) throw new Error("asset package name " + manifest.name + " does not match " + expectedName);
+          if (manifest.version !== expectedVersion) throw new Error("asset package version " + manifest.version + " does not match tag version " + expectedVersion);
+          if (manifest.private) throw new Error("asset package.json is marked private");
+          ' "$RUNNER_TEMP/dsh-asset-package.json" "$name" "$version"
+
+          {
+            echo "ASSET_NAME=$asset_name"
+            echo "ASSET_PATH=$asset_path"
+            echo "ASSET_SHA256=$actual_sha256"
+          } >> "$GITHUB_ENV"
+          {
+            echo "### Release asset verified (it is the source of the published bytes)"
+            echo ""
+            echo "- Release: $RELEASE_TAG (published, not draft, not prerelease)"
+            echo "- Remote tag commit: $remote_commit_sha (= target_sha)"
+            echo "- Asset: $asset_name (id $asset_id)"
+            echo "- SHA-256: $actual_sha256"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Verified $asset_name (sha256 $actual_sha256) from release $RELEASE_TAG"
+      - name: Publish the verified release tarball
         run: |
           set -euo pipefail
           name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
-          test -n "$RELEASE_TAG"
-          test -n "$TARGET_SHA"
-          test "$RELEASE_TAG" = "v$version"
-          actual_sha="$(git rev-parse HEAD)"
-          tag_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
-          test "$actual_sha" = "$tag_sha"
-          test "$actual_sha" = "$TARGET_SHA"
-          echo "Release tag $RELEASE_TAG at $actual_sha matches $name@$version"
+          test "$ASSET_NAME" = "dsh-all-usage-$version.tgz"
+          test "$(sha256sum "$ASSET_PATH" | awk '{print $1}')" = "$ASSET_SHA256" || { echo "::error::the verified asset changed on disk before publication"; exit 1; }
 
-      - name: Publish npm package
-        run: |
-          name="$(node -p "require('./package.json').name")"
-          version="$(node -p "require('./package.json').version")"
-          if npm view "${name}@${version}" version --json >/dev/null 2>&1; then
-            echo "::notice::${name}@${version} is already published; skipping duplicate publication."
-            exit 0
+          # Compares the registry copy of this version against the verified asset.
+          compare_digest() {
+            node -e '
+          const crypto = require("node:crypto");
+          const fs = require("node:fs");
+          const [distJson, tarballPath] = process.argv.slice(1);
+          const payload = JSON.parse(distJson);
+          const dist = payload.dist || payload;
+          const buf = fs.readFileSync(tarballPath);
+          const sha512 = "sha512-" + crypto.createHash("sha512").update(buf).digest("base64");
+          const sha1 = crypto.createHash("sha1").update(buf).digest("hex");
+          const publishedSha512 = String(dist.integrity || "").split(" ").filter(Boolean).find((value) => value.startsWith("sha512-")) || "";
+          const publishedSha1 = String(dist.shasum || "").trim();
+          if (!publishedSha512 && !publishedSha1) {
+            throw new Error("registry metadata exposes neither sha512 integrity nor a shasum for this version; refusing to treat the published bytes as identical");
+          }
+          if (publishedSha512 && publishedSha512 !== sha512) {
+            throw new Error("registry sha512 " + publishedSha512 + " does not match the verified asset " + sha512);
+          }
+          if (publishedSha1 && publishedSha1 !== sha1) {
+            throw new Error("registry shasum " + publishedSha1 + " does not match the verified asset " + sha1);
+          }
+          ' "$1" "$ASSET_PATH"
+          }
+
+          # npm itself refuses to publish over an existing version, so a repeated
+          # dispatch must be idempotent. Skipping is allowed only when the
+          # registry already holds the exact bytes of the verified asset; any
+          # other difference fails closed and publishes nothing.
+          if registry_payload="$(npm view "$name@$version" dist --json 2>/dev/null)"; then
+            if compare_digest "$registry_payload"; then
+              echo "::notice::$name@$version is already published with the exact bytes of $ASSET_NAME; skipping duplicate publication."
+              exit 0
+            fi
+            echo "::error::$name@$version is already published but its bytes differ from the verified Release asset; refusing to skip."
+            exit 1
           fi
-          npm publish --access public --provenance
 
-      - name: Verify npm publication
+          # Publishing the downloaded tarball is what makes the bytes
+          # trustworthy: npm only runs prepack/publish scripts for directory
+          # specs, so this pushes exactly the verified asset and never a
+          # workspace rebuild. Provenance binds that exact tarball digest.
+          npm publish "$ASSET_PATH" --access public --provenance
+
+      - name: Verify npm serves the verified bytes
         run: |
           set -euo pipefail
           name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
           for attempt in 1 2 3 4 5 6; do
-            if published="$(npm view "${name}@${version}" version --json 2>/dev/null)"; then
-              node -e 'const expected = process.argv[1]; const actual = JSON.parse(process.argv[2]); if (actual !== expected) throw new Error(`npm returned ${actual}, expected ${expected}`)' "$version" "$published"
+            if published_payload="$(npm view "$name@$version" version dist --json 2>/dev/null)"; then
+              node -e '
+          const crypto = require("node:crypto");
+          const fs = require("node:fs");
+          const [payloadJson, expectedVersion, tarballPath] = process.argv.slice(1);
+          const payload = JSON.parse(payloadJson);
+          if (payload.version !== expectedVersion) throw new Error("npm returned version " + payload.version + ", expected " + expectedVersion);
+          const buf = fs.readFileSync(tarballPath);
+          const sha512 = "sha512-" + crypto.createHash("sha512").update(buf).digest("base64");
+          const publishedSha512 = String((payload.dist || {}).integrity || "").split(" ").filter(Boolean).find((value) => value.startsWith("sha512-")) || "";
+          if (publishedSha512 !== sha512) throw new Error("registry sha512 " + publishedSha512 + " does not match the verified asset " + sha512);
+          ' "$published_payload" "$version" "$ASSET_PATH"
+              echo "npm registry now serves $name@$version from the bytes of $ASSET_NAME"
               exit 0
             fi
-            echo "npm registry has not exposed ${name}@${version} yet (attempt ${attempt}/6)" >&2
+            echo "npm registry has not exposed $name@$version yet (attempt $attempt/6)" >&2
             sleep $((attempt * 5))
           done
-          echo "npm registry did not expose ${name}@${version} after retries" >&2
+          echo "npm registry did not expose $name@$version after retries" >&2
           exit 1

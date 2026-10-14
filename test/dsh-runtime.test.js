@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { request } from 'node:http'
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import test from 'node:test'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,15 +20,26 @@ const REQUIRE_RUNTIME_SMOKE = process.env.DSH_REQUIRE_RUNTIME_SMOKE === '1'
 // service as optional, and the smoke asserts exactly that.
 const FILE_SETTINGS = { package: '@deepseek-ai/dsh-settings-file', provider: 'FileSettingsProvider' }
 const RUNTIME_PROFILES = {
-  '0.1.1-rc.1': { cordis: '4.0.1', loader: '1.0.2', timer: '1.1.3', settings: FILE_SETTINGS },
-  '0.1.1-rc.2': { cordis: '4.0.1', loader: '1.0.2', timer: '1.1.3', settings: FILE_SETTINGS },
-  '0.1.5-rc.1': { cordis: '4.0.2', loader: '1.0.3', timer: '1.1.4', settings: FILE_SETTINGS },
-  '0.1.5-rc.2': { cordis: '4.0.2', loader: '1.0.3', timer: '1.1.4', settings: FILE_SETTINGS },
-  '0.1.7-rc.2': { cordis: '4.0.4', loader: '1.0.5', timer: '1.1.6', settings: null },
+  '0.1.1-rc.1': { cordis: '4.0.1', loader: '1.0.2', timer: '1.1.3', settings: FILE_SETTINGS, ledgerLayout: 'whole-unit' },
+  '0.1.1-rc.2': { cordis: '4.0.1', loader: '1.0.2', timer: '1.1.3', settings: FILE_SETTINGS, ledgerLayout: 'whole-unit' },
+  '0.1.5-rc.1': { cordis: '4.0.2', loader: '1.0.3', timer: '1.1.4', settings: FILE_SETTINGS, ledgerLayout: 'per-record' },
+  '0.1.5-rc.2': { cordis: '4.0.2', loader: '1.0.3', timer: '1.1.4', settings: FILE_SETTINGS, ledgerLayout: 'per-record' },
+  '0.1.7-rc.2': { cordis: '4.0.4', loader: '1.0.5', timer: '1.1.6', settings: null, ledgerLayout: 'per-record' },
   // 0.2.0 keeps the 0.1.7 Cordis line and the abstract settings seam.
-  '0.2.0-rc.2': { cordis: '4.0.4', loader: '1.0.5', timer: '1.1.6', settings: null },
+  '0.2.0-rc.2': { cordis: '4.0.4', loader: '1.0.5', timer: '1.1.6', settings: null, ledgerLayout: 'per-record' },
   // 0.2.1-alpha.2 moves the Cordis/loader/timer line and keeps the abstract settings seam.
-  '0.2.1-alpha.2': { cordis: '4.0.5-alpha.1', loader: '1.0.6-alpha.1', timer: '1.1.7-alpha.1', settings: null },
+  '0.2.1-alpha.2': { cordis: '4.0.5-alpha.1', loader: '1.0.6-alpha.1', timer: '1.1.7-alpha.1', settings: null, ledgerLayout: 'per-record' },
+}
+// DSH 0.1.5 replaced the whole-unit JSON store with a per-record one: a legacy
+// runtime keeps one document per shard table (<storages>/all_usage_ledger_NN.json,
+// its sessions keyed by session id), while 0.1.5+ keeps one document per session
+// under a shard directory (<storages>/all_usage_ledger_NN/sessions/<session>.json).
+// A version outside the table follows the current layout.
+const PER_RECORD_LAYOUT = 'per-record'
+const WHOLE_UNIT_LAYOUT = 'whole-unit'
+function ledgerLayoutOf(version) {
+  const profile = RUNTIME_PROFILES[version]
+  return profile !== undefined && profile.ledgerLayout !== undefined ? profile.ledgerLayout : PER_RECORD_LAYOUT
 }
 
 async function findPackage(packageName, version) {
@@ -96,23 +107,33 @@ function readSessionEvents(session) {
   return []
 }
 
-// The ledger write is debounced and asynchronous, so poll the shards until the
-// flushed session row lands instead of racing the writer.
-// The ledger keeps one document per session under its shard directory, so a
-// record is read from <storages>/all_usage_ledger_NN/sessions/<id>.json and the
-// document envelope carries it in `record`.
-async function waitForLedgerRecord(scratch, sessionId) {
+// The ledger write is debounced and asynchronous, so poll the shard files until
+// the flushed session row lands instead of racing the writer. The layout follows
+// the runtime: 0.1.1 keeps one whole-unit document per shard table
+// (<storages>/all_usage_ledger_NN.json, its sessions keyed by session id), while
+// 0.1.5+ keeps one document per session under its shard directory
+// (<storages>/all_usage_ledger_NN/sessions/<id>.json, wrapped in `record`).
+async function waitForLedgerRecord(scratch, sessionId, ledgerLayout, attempts = 80) {
   const dir = join(scratch, 'storages')
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     let units = []
     try { units = await readdir(dir) } catch (error) { units = [] }
     for (const unit of units) {
-      if (!/^all_usage_ledger_\d{2}$/.test(unit)) continue
-      try {
-        const text = await readFile(join(dir, unit, 'sessions', sessionId + '.json'), 'utf8')
-        const document = JSON.parse(text)
-        if (document !== null && typeof document === "object" && document.record !== undefined) return document.record
-      } catch (error) { /* record not written yet */ }
+      if (ledgerLayout === WHOLE_UNIT_LAYOUT) {
+        if (!/^all_usage_ledger_\d{2}\.json$/.test(unit)) continue
+        try {
+          const document = JSON.parse(await readFile(join(dir, unit), 'utf8'))
+          const row = document && document.tables && document.tables.sessions && document.tables.sessions[sessionId]
+          if (row !== undefined && row !== null) return row
+        } catch (error) { /* whole-unit shard still being written */ }
+      } else {
+        if (!/^all_usage_ledger_\d{2}$/.test(unit)) continue
+        try {
+          const text = await readFile(join(dir, unit, 'sessions', sessionId + '.json'), 'utf8')
+          const document = JSON.parse(text)
+          if (document !== null && typeof document === "object" && document.record !== undefined) return document.record
+        } catch (error) { /* record not written yet */ }
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
@@ -269,13 +290,21 @@ async function runRuntimeSmoke(runtime) {
     assert.equal(measured.body.perModel.length, 1)
     assert.equal(measured.body.perModel[0].actualModel, 'deepseek-chat')
     const storageEntries = await readdir(join(scratch, 'storages'), { withFileTypes: true })
+    // The retired monolith is never recreated, whichever layout the runtime writes.
     assert.equal(storageEntries.some((entry) => entry.name === 'all_usage_ledger.json'), false, 'the monolith must never be recreated')
-    assert.equal(storageEntries.some((entry) => /^all_usage_ledger_\d{2}\.json$/.test(entry.name)), false, 'shards are directories now, not whole-unit files')
-    const shards = storageEntries.filter((entry) => entry.isDirectory() && /^all_usage_ledger_\d{2}$/.test(entry.name))
-    assert.ok(shards.length > 0, 'the ledger must open its shard directories')
+    const ledgerLayout = ledgerLayoutOf(runtime.version)
+    const wholeUnitFiles = storageEntries.filter((entry) => entry.isFile() && /^all_usage_ledger_\d{2}\.json$/.test(entry.name))
+    const shardDirs = storageEntries.filter((entry) => entry.isDirectory() && /^all_usage_ledger_\d{2}$/.test(entry.name))
+    if (ledgerLayout === WHOLE_UNIT_LAYOUT) {
+      assert.ok(wholeUnitFiles.length > 0, 'a legacy runtime must open its whole-unit ledger files')
+      assert.equal(shardDirs.length, 0, 'a legacy runtime must not write per-record shard directories')
+    } else {
+      assert.ok(shardDirs.length > 0, 'the ledger must open its shard directories')
+      assert.equal(wholeUnitFiles.length, 0, 'shards are directories now, not whole-unit files')
+    }
     // A runtime that stops exposing the live event log must not persist an
     // empty record: the flushed session has to keep its sequence and usage.
-    const ledgerRow = await waitForLedgerRecord(scratch, 'runtime-smoke-session')
+    const ledgerRow = await waitForLedgerRecord(scratch, 'runtime-smoke-session', ledgerLayout)
     assert.ok(ledgerRow, 'the persisted ledger must contain the flushed session')
     assert.equal(ledgerRow.lastSeq, 3)
     assert.ok(Array.isArray(ledgerRow.usage) && ledgerRow.usage.length > 0, 'the persisted ledger must keep the flushed usage')
@@ -306,6 +335,41 @@ async function runRuntimeSmoke(runtime) {
     await rm(scratch, { recursive: true, force: true })
   }
 }
+
+// The runtime matrix spans two on-disk ledger layouts; pin the boundary here so a
+// profile edit cannot silently judge a legacy runtime by the new shape.
+test('each runtime profile declares its ledger layout', () => {
+  assert.equal(ledgerLayoutOf('0.1.1-rc.1'), WHOLE_UNIT_LAYOUT)
+  assert.equal(ledgerLayoutOf('0.1.1-rc.2'), WHOLE_UNIT_LAYOUT)
+  assert.equal(ledgerLayoutOf('0.1.5-rc.1'), PER_RECORD_LAYOUT)
+  assert.equal(ledgerLayoutOf('0.1.5-rc.2'), PER_RECORD_LAYOUT)
+  assert.equal(ledgerLayoutOf('0.1.7-rc.2'), PER_RECORD_LAYOUT)
+  assert.equal(ledgerLayoutOf('0.2.0-rc.2'), PER_RECORD_LAYOUT)
+  assert.equal(ledgerLayoutOf('0.2.1-alpha.2'), PER_RECORD_LAYOUT)
+  // A version outside the profile table follows the current layout.
+  assert.equal(ledgerLayoutOf('9.9.9-rc.1'), PER_RECORD_LAYOUT)
+})
+
+// Both on-disk layouts must be readable: the legacy whole-unit document keys its
+// sessions table by session id, while the per-record store wraps one session in a
+// `record` document. The smoke proves the runtime writes the layout its profile
+// declares; this pins the reader half without a legacy runtime installed.
+test('the ledger reader follows the runtime layout', async () => {
+  const scratch = await mkdtemp(join(tmpdir(), 'dsh-all-usage-ledger-read-'))
+  try {
+    await mkdir(join(scratch, 'storages', 'all_usage_ledger_09', 'sessions'), { recursive: true })
+    await writeFile(join(scratch, 'storages', 'all_usage_ledger_07.json'), JSON.stringify({ tables: { sessions: { 'legacy-session': { version: 3, lastSeq: 3, usage: [{ key: 'usage-step' }] } } } }), 'utf8')
+    await writeFile(join(scratch, 'storages', 'all_usage_ledger_09', 'sessions', 'record-session.json'), JSON.stringify({ version: 0, record: { version: 3, lastSeq: 1, usage: [{ key: 'usage-step' }] } }), 'utf8')
+    const legacy = await waitForLedgerRecord(scratch, 'legacy-session', WHOLE_UNIT_LAYOUT)
+    assert.equal(legacy && legacy.lastSeq, 3)
+    const perRecord = await waitForLedgerRecord(scratch, 'record-session', PER_RECORD_LAYOUT)
+    assert.equal(perRecord && perRecord.lastSeq, 1)
+    // The layout selects the files it reads, so the other shape is never parsed.
+    assert.equal(await waitForLedgerRecord(scratch, 'legacy-session', PER_RECORD_LAYOUT, 1), null)
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
+})
 
 for (const version of RUNTIME_VERSIONS) {
   const runtime = await locateRuntime(version)

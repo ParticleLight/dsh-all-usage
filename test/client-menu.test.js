@@ -1,20 +1,54 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import test from 'node:test'
 
-// A render smoke test for the filter menu: it drives the component through a fake
-// hooks dispatcher (React itself is not installed here, only in the web profile)
-// and asserts the option rows it builds. The memoisation that stops a polling
+// A render smoke test for the filter menu. The real React package lives in a
+// local DSH web profile, which a GitHub runner does not have, so the component is
+// driven through a tiny in-file React stub instead. The stub covers exactly what
+// the component and this test touch: the ReactCurrentDispatcher internals slot
+// the hooks read, createElement, and memo. The memoisation that stops a polling
 // render from rebuilding those rows is asserted at the source level in
 // client-refresh.test.js, where the page's useMemo-built option lists are checked.
-const require = createRequire(import.meta.url)
 const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
 
+// createElement keeps config on props and collects the variadic children the same
+// way React does: a lone child stays unwrapped, several become an array.
+function createElement(type, config = null, ...children) {
+  const props = {}
+  if (config !== null && config !== undefined) {
+    for (const [name, value] of Object.entries(config)) { if (name !== 'key') props[name] = value }
+  }
+  if (children.length === 1) props.children = children[0]
+  else if (children.length > 1) props.children = children
+  return { type, props }
+}
+
+// React.memo yields an element type whose `.type` is the wrapped component; the
+// test invokes that component directly, which is how it bypasses memo's bail-out.
+function memo(component, compare) {
+  return { $$typeof: Symbol.for('react.memo'), type: component, compare }
+}
+
+const ReactCurrentDispatcher = { current: null }
+function activeDispatcher() {
+  const current = ReactCurrentDispatcher.current
+  if (current === null || current === undefined) throw new Error('a hook ran without a dispatcher')
+  return current
+}
+// The hooks route through ReactCurrentDispatcher exactly like React's own do, so
+// the dispatcher the test installs is the one the component actually consumes.
+const react = {
+  __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED: { ReactCurrentDispatcher },
+  createElement,
+  memo,
+  useState: (...args) => activeDispatcher().useState(...args),
+  useRef: (...args) => activeDispatcher().useRef(...args),
+  useEffect: (...args) => activeDispatcher().useEffect(...args),
+  useMemo: (...args) => activeDispatcher().useMemo(...args),
+  useCallback: (...args) => activeDispatcher().useCallback(...args),
+}
+
 function verifyFilterMenu({ callTwice }) {
-  const react = require(join(homedir(), '.dsh', 'profiles', 'web', 'node_modules', 'react'))
   const from = source.indexOf('    function UsageFilterMenu(props) {')
   const to = source.indexOf('    const MemoUsageFilterMenu')
   assert.notEqual(from, -1, 'UsageFilterMenu must exist')
