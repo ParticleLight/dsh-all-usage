@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.2.0（未发布）
+## v1.2.0（2026-10-15）
 ### 新功能
 - **支持 DSH 0.2.1-alpha.2** —— 声明区间追加精确版本 `0.2.1-alpha.2`；本机 Node 24 严格真实 Cordis smoke 通过（Cordis `4.0.5-alpha.1` / loader `1.0.6-alpha.1` / timer `1.1.7-alpha.1`），CI 已配置 Node 22/24、待执行；仅此精确版本，不代表其他 alpha 版本。
 - **模型图标扩到 43 个品牌** —— 从 lobe-icons 固定 revision 取 32 个新商标；9 个 `currentColor` 烘成固定中性色。manifest 继续钉住上游 commit 与逐文件归属，MIT 许可与商标说明随包发布。
