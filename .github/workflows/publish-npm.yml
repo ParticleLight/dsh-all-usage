@@ -41,6 +41,7 @@ jobs:
   publish:
     needs: verify
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Check out the release tag
         uses: actions/checkout@v5
@@ -195,43 +196,75 @@ jobs:
           test "$ASSET_NAME" = "dsh-all-usage-$version.tgz"
           test "$(sha256sum "$ASSET_PATH" | awk '{print $1}')" = "$ASSET_SHA256" || { echo "::error::the verified asset changed on disk before publication"; exit 1; }
 
-          # Compares the registry copy of this version against the verified asset.
-          compare_digest() {
+          # Extracts only a safe npm error code out of npm's --json error output.
+          # The raw payload (which can carry registry URLs and, on an auth
+          # failure, credentials) never reaches the log; an unrecognized shape
+          # collapses to one fixed sentinel.
+          npm_error_code() {
+            node -e '
+          const fs = require("node:fs");
+          const [jsonPath] = process.argv.slice(1);
+          let payload;
+          try {
+            payload = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+          } catch {
+            process.stdout.write("UNPARSEABLE_ERROR_OUTPUT\n");
+            process.exit(0);
+          }
+          const code = payload && payload.error && payload.error.code;
+          const safe = /^[A-Z][A-Z0-9_]{1,31}$/.test(String(code || "")) ? String(code) : "UNPARSEABLE_ERROR_OUTPUT";
+          process.stdout.write(safe + "\n");
+          ' "$1"
+          }
+
+          # Fails closed on a malformed or mismatched successful payload: the
+          # version must match exactly, and the published sha512 must be the
+          # sha512 of the verified asset (a present sha1 must agree as well).
+          verify_published_payload() {
             node -e '
           const crypto = require("node:crypto");
           const fs = require("node:fs");
-          const [distJson, tarballPath] = process.argv.slice(1);
-          const payload = JSON.parse(distJson);
-          const dist = payload.dist || payload;
+          const [jsonPath, expectedVersion, tarballPath] = process.argv.slice(1);
+          let payload;
+          try {
+            payload = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+          } catch (error) {
+            throw new Error("successful npm view payload is not valid JSON: " + error.message);
+          }
+          if (!payload || typeof payload !== "object" || payload.error) throw new Error("successful npm view payload exposes no version metadata");
+          if (payload.version !== expectedVersion) throw new Error("registry returned version " + String(payload.version) + ", expected " + expectedVersion);
+          const dist = payload.dist;
+          if (!dist || typeof dist !== "object") throw new Error("registry payload for " + expectedVersion + " exposes no dist metadata");
           const buf = fs.readFileSync(tarballPath);
           const sha512 = "sha512-" + crypto.createHash("sha512").update(buf).digest("base64");
           const sha1 = crypto.createHash("sha1").update(buf).digest("hex");
           const publishedSha512 = String(dist.integrity || "").split(" ").filter(Boolean).find((value) => value.startsWith("sha512-")) || "";
+          if (!publishedSha512) throw new Error("registry metadata exposes no sha512 integrity for " + expectedVersion + "; refusing to treat the published bytes as identical");
+          if (publishedSha512 !== sha512) throw new Error("registry sha512 " + publishedSha512 + " does not match the verified asset " + sha512);
           const publishedSha1 = String(dist.shasum || "").trim();
-          if (!publishedSha512 && !publishedSha1) {
-            throw new Error("registry metadata exposes neither sha512 integrity nor a shasum for this version; refusing to treat the published bytes as identical");
-          }
-          if (publishedSha512 && publishedSha512 !== sha512) {
-            throw new Error("registry sha512 " + publishedSha512 + " does not match the verified asset " + sha512);
-          }
-          if (publishedSha1 && publishedSha1 !== sha1) {
-            throw new Error("registry shasum " + publishedSha1 + " does not match the verified asset " + sha1);
-          }
-          ' "$1" "$ASSET_PATH"
+          if (publishedSha1 && publishedSha1 !== sha1) throw new Error("registry shasum " + publishedSha1 + " does not match the verified asset " + sha1);
+          ' "$1" "$2" "$ASSET_PATH"
           }
 
           # npm itself refuses to publish over an existing version, so a repeated
           # dispatch must be idempotent. Skipping is allowed only when the
           # registry already holds the exact bytes of the verified asset; any
-          # other difference fails closed and publishes nothing.
-          if registry_payload="$(npm view "$name@$version" dist --json 2>/dev/null)"; then
-            if compare_digest "$registry_payload"; then
-              echo "::notice::$name@$version is already published with the exact bytes of $ASSET_NAME; skipping duplicate publication."
-              exit 0
-            fi
-            echo "::error::$name@$version is already published but its bytes differ from the verified Release asset; refusing to skip."
+          # other difference fails closed and publishes nothing. A registry
+          # failure is never read as "absent": publication proceeds only on an
+          # explicit parsed E404, every other failure aborts with a safe code,
+          # and an unknown registry state is never published over.
+          registry_view="$RUNNER_TEMP/npm-registry-view.json"
+          if npm view "$name@$version" version dist --json --prefer-online > "$registry_view" 2>"$RUNNER_TEMP/npm-registry-view.stderr"; then
+            verify_published_payload "$registry_view" "$version"
+            echo "::notice::$name@$version is already published with the exact bytes of $ASSET_NAME; skipping duplicate publication."
+            exit 0
+          fi
+          registry_code="$(npm_error_code "$registry_view")"
+          if [ "$registry_code" != "E404" ]; then
+            echo "::error::could not establish whether $name@$version already exists: npm view failed with safe code $registry_code; refusing to publish (structured output kept at $registry_view)"
             exit 1
           fi
+          echo "$name@$version is not published yet (npm view: E404); publishing the verified asset"
 
           # Publishing the downloaded tarball is what makes the bytes
           # trustworthy: npm only runs prepack/publish scripts for directory
@@ -244,24 +277,82 @@ jobs:
           set -euo pipefail
           name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
-          for attempt in 1 2 3 4 5 6; do
-            if published_payload="$(npm view "$name@$version" version dist --json 2>/dev/null)"; then
-              node -e '
+
+          # Only a safe structured error code is ever surfaced; the raw npm
+          # output stays under RUNNER_TEMP so anything sensitive inside an auth
+          # failure can never reach the log.
+          npm_error_code() {
+            node -e '
+          const fs = require("node:fs");
+          const [jsonPath] = process.argv.slice(1);
+          let payload;
+          try {
+            payload = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+          } catch {
+            process.stdout.write("UNPARSEABLE_ERROR_OUTPUT\n");
+            process.exit(0);
+          }
+          const code = payload && payload.error && payload.error.code;
+          const safe = /^[A-Z][A-Z0-9_]{1,31}$/.test(String(code || "")) ? String(code) : "UNPARSEABLE_ERROR_OUTPUT";
+          process.stdout.write(safe + "\n");
+          ' "$1"
+          }
+
+          # A successful payload is verified once and never retried; a malformed
+          # or mismatched one fails the step immediately.
+          verify_published_payload() {
+            node -e '
           const crypto = require("node:crypto");
           const fs = require("node:fs");
-          const [payloadJson, expectedVersion, tarballPath] = process.argv.slice(1);
-          const payload = JSON.parse(payloadJson);
-          if (payload.version !== expectedVersion) throw new Error("npm returned version " + payload.version + ", expected " + expectedVersion);
+          const [jsonPath, expectedVersion, tarballPath] = process.argv.slice(1);
+          let payload;
+          try {
+            payload = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+          } catch (error) {
+            throw new Error("successful npm view payload is not valid JSON: " + error.message);
+          }
+          if (!payload || typeof payload !== "object" || payload.error) throw new Error("successful npm view payload exposes no version metadata");
+          if (payload.version !== expectedVersion) throw new Error("registry returned version " + String(payload.version) + ", expected " + expectedVersion);
+          const dist = payload.dist;
+          if (!dist || typeof dist !== "object") throw new Error("registry payload for " + expectedVersion + " exposes no dist metadata");
           const buf = fs.readFileSync(tarballPath);
           const sha512 = "sha512-" + crypto.createHash("sha512").update(buf).digest("base64");
-          const publishedSha512 = String((payload.dist || {}).integrity || "").split(" ").filter(Boolean).find((value) => value.startsWith("sha512-")) || "";
+          const publishedSha512 = String(dist.integrity || "").split(" ").filter(Boolean).find((value) => value.startsWith("sha512-")) || "";
+          if (!publishedSha512) throw new Error("registry metadata exposes no sha512 integrity for " + expectedVersion + "; refusing to treat the published bytes as identical");
           if (publishedSha512 !== sha512) throw new Error("registry sha512 " + publishedSha512 + " does not match the verified asset " + sha512);
-          ' "$published_payload" "$version" "$ASSET_PATH"
+          ' "$1" "$2" "$ASSET_PATH"
+          }
+
+          # Availability lags the publish response; poll 12 times, 15 s apart
+          # (165 s of query span), and never sleep after the final attempt.
+          # Missing (E404), transient network, and 5xx codes are retried; every
+          # other failure stops at once with its safe code.
+          attempts=12
+          interval=15
+          view_dir="$RUNNER_TEMP/npm-postpublish"
+          mkdir -p "$view_dir"
+          last_code=""
+          attempt=0
+          while [ "$attempt" -lt "$attempts" ]; do
+            attempt=$((attempt + 1))
+            view_json="$view_dir/attempt-$attempt.json"
+            if npm view "$name@$version" version dist --json --prefer-online > "$view_json" 2>"$view_dir/attempt-$attempt.stderr"; then
+              verify_published_payload "$view_json" "$version"
               echo "npm registry now serves $name@$version from the bytes of $ASSET_NAME"
               exit 0
             fi
-            echo "npm registry has not exposed $name@$version yet (attempt $attempt/6)" >&2
-            sleep $((attempt * 5))
+            last_code="$(npm_error_code "$view_json")"
+            case "$last_code" in
+              E404|E500|E502|E503|E504|ECONNREFUSED|ECONNRESET|ECONNABORTED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EHOSTUNREACH|ENETUNREACH|EPIPE|ERR_SOCKET_TIMEOUT|UNPARSEABLE_ERROR_OUTPUT) ;;
+              *)
+                echo "::error::npm view failed with non-retryable safe code $last_code while verifying $name@$version; structured output kept at $view_json"
+                exit 1
+                ;;
+            esac
+            echo "npm registry has not exposed $name@$version yet (attempt $attempt/$attempts, safe code $last_code)" >&2
+            if [ "$attempt" -lt "$attempts" ]; then
+              sleep "$interval"
+            fi
           done
-          echo "npm registry did not expose $name@$version after retries" >&2
+          echo "::error::npm registry did not expose $name@$version after $attempts attempts ($interval s apart, $(( (attempts - 1) * interval )) s query span); last safe npm error code: $last_code; structured outputs kept under $view_dir"
           exit 1

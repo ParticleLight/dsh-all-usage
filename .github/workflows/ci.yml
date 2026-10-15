@@ -159,19 +159,39 @@ jobs:
             expected_missing="@deepseek-ai/dsh-invariants@${RUNTIME_VERSION}"
             if [ "$RUNTIME_VERSION" = "0.2.1-alpha.2" ] \
               && [ "$missing" = "$expected_missing" ] \
-              && grep -q 'npm error code ETARGET' "$install_log" \
-              && ! npm view "$expected_missing" version >/dev/null 2>&1; then
-              echo "smoke_skipped=true" >> "$GITHUB_OUTPUT"
-              echo "::warning title=DSH $RUNTIME_VERSION Cordis smoke skipped::Upstream @deepseek-ai/dsh-invariants@$RUNTIME_VERSION is absent from the npm registry, so this matrix line could not install its Cordis runtime and its smoke test was SKIPPED, not passed."
-              {
-                echo "### DSH $RUNTIME_VERSION (Node $(node --version)): Cordis smoke skipped"
-                echo ""
-                echo "- Upstream dependency @deepseek-ai/dsh-invariants@$RUNTIME_VERSION is absent from the npm registry (npm error code ETARGET), so the exact-runtime install could not complete."
-                echo "- npm run test:runtime was SKIPPED for this matrix line. This is not a pass and says nothing about plugin behaviour on $RUNTIME_VERSION."
-                echo "- The allowance covers only this one dependency at this one version; all other runtime lines remain hard gates."
-                echo "- Once upstream publishes the package this install succeeds and the full smoke test runs automatically."
-              } >> "$GITHUB_STEP_SUMMARY"
-              exit 0
+              && grep -q 'npm error code ETARGET' "$install_log"; then
+              # Absence must be proven by the registry itself, never inferred from
+              # "some npm command failed": a network outage, an auth failure or a
+              # 5xx would otherwise look exactly like a missing package. Query the
+              # registry explicitly, keep npm's JSON envelope, and accept only the
+              # registry's own E404 absence code on a non-zero exit. A successful
+              # query (the package now exists) or any other error stays a hard gate.
+              probe_json="$RUNNER_TEMP/dsh-registry-probe.json"
+              probe_stderr="$RUNNER_TEMP/dsh-registry-probe.stderr"
+              probe_status=0
+              set +e
+              npm view "$expected_missing" version --json >"$probe_json" 2>"$probe_stderr"
+              probe_status=$?
+              set -e
+              probe_code="$(node -e 'const fs=require("node:fs");let c="unparsed";try{const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));c=(p&&p.error&&typeof p.error.code==="string")?p.error.code:"resolved";}catch{c="unparsed";}process.stdout.write(c);' "$probe_json" 2>/dev/null || true)"
+              probe_code="${probe_code:-unparsed}"
+              if [ "$probe_status" -eq 0 ] || [ "$probe_code" != "E404" ]; then
+                # Not a proven upstream gap: the hard gate stands.
+                echo "registry probe for $expected_missing returned exit=$probe_status code=$probe_code; expected a non-zero exit carrying error.code E404" >&2
+              else
+                echo "registry probe for $expected_missing confirmed absence (npm view error.code E404, exit=$probe_status)"
+                echo "smoke_skipped=true" >> "$GITHUB_OUTPUT"
+                echo "::warning title=DSH $RUNTIME_VERSION Cordis smoke skipped::Upstream @deepseek-ai/dsh-invariants@$RUNTIME_VERSION is absent from the npm registry, so this matrix line could not install its Cordis runtime and its smoke test was SKIPPED, not passed."
+                {
+                  echo "### DSH $RUNTIME_VERSION (Node $(node --version)): Cordis smoke skipped"
+                  echo ""
+                  echo "- Upstream dependency @deepseek-ai/dsh-invariants@$RUNTIME_VERSION is absent from the npm registry (npm error code ETARGET), so the exact-runtime install could not complete."
+                  echo "- npm run test:runtime was SKIPPED for this matrix line. This is not a pass and says nothing about plugin behaviour on $RUNTIME_VERSION."
+                  echo "- The allowance covers only this one dependency at this one version; all other runtime lines remain hard gates."
+                  echo "- Once upstream publishes the package this install succeeds and the full smoke test runs automatically."
+                } >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
             fi
             echo "DSH runtime installation failed after 3 attempts" >&2
             exit 1
