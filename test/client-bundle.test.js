@@ -19,10 +19,18 @@ test('ships a minified client bundle with the expected module contract', () => {
   assert.equal(typeof registration.factory, 'function')
 
   const React = { memo: (component) => component, Component: class {} }
+  // The bundle may require react-dom for the usage sheet's portal (issue #4) and
+  // nothing else. A host without react-dom still has to load the plugin, so that
+  // module is required defensively — and every id the factory asks for is
+  // recorded here, so an accidental extra dependency fails this test.
+  const required = []
   const client = registration.factory((id) => {
-    assert.equal(id, 'react')
-    return React
+    required.push(id)
+    if (id === 'react') return React
+    if (id === 'react-dom') return { createPortal: (element) => element }
+    throw new Error('unexpected client module: ' + id)
   })
+  assert.deepEqual(required, ['react', 'react-dom'], 'the client half requires react plus the optional portal module')
   assert.deepEqual(Array.from(client.inject), ['timer', 'slots'])
   assert.equal(typeof client.apply, 'function')
   assert.equal(embeddedIconBytes, 0, 'artwork must be served by the host, not embedded')

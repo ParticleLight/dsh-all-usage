@@ -7,6 +7,16 @@ window.__ModuleLoader__.load({
     var exports = module.exports;
     Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
     const React = require("react");
+    // The usage sheet is a fixed overlay, and it is portaled to <body> so that a
+    // stacking context a third-party theme puts on an ancestor of the sidebar
+    // slot cannot trap it (issue #4). react-dom is optional: a host that does not
+    // ship it keeps the inline rendering instead of losing the plugin.
+    let ReactDOM = null
+    try {
+      ReactDOM = require("react-dom") || null
+    } catch (error) {
+      ReactDOM = null
+    }
 
     // Replaced at build time by scripts/build-client.mjs with the package
     // version, so the page can tell the user when the running host is older
@@ -2939,7 +2949,7 @@ window.__ModuleLoader__.load({
 .uh-boundary-title { color:var(--dsw-alias-label-primary); font-size:15px; font-weight:650; }
 .uh-boundary-note { max-width:420px; color:var(--dsw-alias-label-secondary); font-size:12px; line-height:1.6; }
 .uh-side-modal { position:fixed; inset:var(--uh-top-inset, 0px) 0 0 0; z-index:1100; background:color-mix(in srgb, #000 44%, transparent); display:flex; align-items:stretch; justify-content:center; padding:26px; }
-.uh-side-dialog { width:min(1120px, 100%); overflow-x:hidden; overflow-y:scroll; scrollbar-gutter:stable; scrollbar-width:auto; scrollbar-color:#707780 #1d1f22; background:var(--dsw-alias-bg-base); border:1px solid var(--dsw-alias-border-l2); border-radius:14px; box-shadow:0 18px 52px rgba(0,0,0,.35); padding:18px; }
+.uh-side-dialog { width:min(1120px, 100%); overflow-x:hidden; overflow-y:scroll; scrollbar-gutter:stable; scrollbar-width:auto; scrollbar-color:#707780 #1d1f22; background:var(--dsw-alias-bg-layer-1, #1a1c20); border:1px solid var(--dsw-alias-border-l2); border-radius:14px; box-shadow:0 18px 52px rgba(0,0,0,.35); padding:18px; }
 .uh-side-dialog::-webkit-scrollbar, .uh-pricing-table-wrap::-webkit-scrollbar { width:12px; height:12px; }
 .uh-side-dialog::-webkit-scrollbar-track, .uh-pricing-table-wrap::-webkit-scrollbar-track { background:#1d1f22; border-left:1px solid #363a40; }
 .uh-side-dialog::-webkit-scrollbar-thumb, .uh-pricing-table-wrap::-webkit-scrollbar-thumb { background:#707780; border:3px solid #1d1f22; border-radius:6px; }
@@ -2948,7 +2958,7 @@ window.__ModuleLoader__.load({
 @media (max-width: 640px) { .uh-side-modal { padding:0; } .uh-side-dialog { border-radius:0; border:0; padding:14px; } }
 /* iOS-style dashboard: grouped surfaces, tactile controls, and an elevated sheet. */
 .uh-page { gap:18px; max-width:1160px; margin:0 auto; padding:12px 2px 34px; font-family:-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif; }
-.uh-head { position:sticky; top:-18px; z-index:20; margin:0 -2px; padding:18px 2px 14px; background:color-mix(in srgb, var(--dsw-alias-bg-base) 88%, transparent); backdrop-filter:blur(18px) saturate(150%); border-bottom:1px solid color-mix(in srgb, var(--dsw-alias-border-l1) 76%, transparent); }
+.uh-head { position:sticky; top:-18px; z-index:20; margin:0 -2px; padding:18px 2px 14px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 88%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 88%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); backdrop-filter:blur(18px) saturate(150%); border-bottom:1px solid color-mix(in srgb, var(--dsw-alias-border-l1) 76%, transparent); }
 .uh-title { font-size:22px; line-height:1.2; font-weight:700; letter-spacing:0; }
 .uh-actions { gap:8px; }
 .uh-range { padding:2px; gap:2px; border:0; border-radius:9px; background:color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent); overflow:visible; }
@@ -2990,8 +3000,8 @@ window.__ModuleLoader__.load({
 .uh-side-entry:hover { border:0; background:color-mix(in srgb, var(--dsw-alias-brand-primary) 17%, transparent); }
 .uh-side-entry-icon { color:var(--dsw-alias-brand-primary); font-weight:700; }
 .uh-side-modal { align-items:flex-end; padding:0; background:rgba(0,0,0,.34); backdrop-filter:blur(8px); }
-.uh-side-dialog { width:min(1260px, 100%); max-height:calc(100vh - var(--uh-top-inset, 0px) - 44px); border:0; border-radius:24px 24px 0 0; padding:22px 24px 28px; background:color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent); box-shadow:0 -10px 44px rgba(0,0,0,.25); }
-.uh-side-dialog-head { position:sticky; top:-22px; z-index:8; justify-content:center; height:22px; margin:-22px -24px 8px; padding:8px 24px; background:color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent); border:0; }
+.uh-side-dialog { width:min(1260px, 100%); max-height:calc(100vh - var(--uh-top-inset, 0px) - 44px); border:0; border-radius:24px 24px 0 0; padding:22px 24px 28px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); box-shadow:0 -10px 44px rgba(0,0,0,.25); }
+.uh-side-dialog-head { position:sticky; top:-22px; z-index:8; justify-content:center; height:22px; margin:-22px -24px 8px; padding:8px 24px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); border:0; }
 .uh-side-dialog-head::before { content:""; width:36px; height:5px; border-radius:3px; background:color-mix(in srgb, var(--dsw-alias-label-primary) 24%, transparent); }
 .uh-side-dialog-head .uh-refresh { position:absolute; right:20px; top:7px; min-height:28px; background:transparent; }
 .uh-close-button { width:30px; padding:0; font-size:22px; line-height:1; color:var(--dsw-alias-label-secondary); }
@@ -3054,7 +3064,7 @@ window.__ModuleLoader__.load({
 .uh-donut-track { opacity:.78; }
 .uh-donut-segment { fill:none; stroke-dasharray:1; stroke-dashoffset:1; animation:uh-donut-draw .95s cubic-bezier(.22,.61,.36,1) both; cursor:pointer; outline:none; transition:filter .15s ease, opacity .15s ease; }
 .uh-donut-segment:hover, .uh-donut-segment:focus-visible, .uh-donut-segment.uh-active { filter:brightness(1.12); }
-.uh-donut-tooltip { position:absolute; top:0; left:0; z-index:3; display:flex; align-items:flex-start; gap:8px; max-width:190px; padding:9px 10px; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; background:color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent); box-shadow:0 10px 24px rgba(0,0,0,.22); backdrop-filter:blur(10px); color:var(--dsw-alias-label-primary); pointer-events:none; font-size:12px; line-height:1.4; transition:left .12s cubic-bezier(.22,.61,.36,1), top .12s cubic-bezier(.22,.61,.36,1); }
+.uh-donut-tooltip { position:absolute; top:0; left:0; z-index:3; display:flex; align-items:flex-start; gap:8px; max-width:190px; padding:9px 10px; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); box-shadow:0 10px 24px rgba(0,0,0,.22); backdrop-filter:blur(10px); color:var(--dsw-alias-label-primary); pointer-events:none; font-size:12px; line-height:1.4; transition:left .12s cubic-bezier(.22,.61,.36,1), top .12s cubic-bezier(.22,.61,.36,1); }
 .uh-donut-tooltip > div { min-width:0; display:flex; flex-direction:column; gap:4px; }
 .uh-donut-tooltip strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
 .uh-donut-tooltip span:not(.uh-donut-dot):not(.uh-model-icon) { color:var(--dsw-alias-label-secondary); font-size:11px; }
@@ -5189,18 +5199,33 @@ window.__ModuleLoader__.load({
         document.addEventListener('keydown', closeOnEscape)
         return () => document.removeEventListener('keydown', closeOnEscape)
       }, [open])
-      return React.createElement(React.Fragment, null,
-        React.createElement('button', {
-          type: 'button', className: 'uh-side-entry', title: tr('用量统计', 'Usage Statistics'), 'aria-label': tr('用量统计', 'Usage Statistics'), onClick: () => setOpen(true),
-        }, React.createElement('span', { className: 'uh-side-entry-icon' }, React.createElement(LineIcon, { name: 'chart', size: 17 })), props.wide ? React.createElement('span', { className: 'uh-side-entry-label' }, tr('用量统计', 'Usage Statistics')) : null),
-        open ? React.createElement('div', { className: 'uh-side-modal', role: 'presentation', style: captionInset > 0 ? { '--uh-top-inset': captionInset + 'px' } : undefined, onMouseDown: (event) => { if (event.target === event.currentTarget) setOpen(false) } },
+      // The sheet must not stay inside the sidebar subtree. A theme that puts any
+      // stacking context on that column — dsh-wallpaper-engine's glass recipe does,
+      // with `position:relative; z-index:0` — scopes the sheet's own z-index to the
+      // column, so later siblings (the chat column) paint over it and the panel
+      // becomes unreadable (issue #4). A portal on <body> leaves that subtree, and
+      // the caption inset rides along because it is set on the sheet itself. The
+      // target is read per render, and a host without react-dom, or a document with
+      // no body yet, falls back to the inline sheet the plugin used before.
+      const portalTarget = typeof ReactDOM !== 'undefined' && ReactDOM !== null &&
+        typeof ReactDOM.createPortal === 'function' &&
+        typeof document !== 'undefined' && document !== null &&
+        document.body !== null && document.body !== undefined
+        ? document.body
+        : null
+      const sheet = open ? React.createElement('div', { className: 'uh-side-modal', role: 'presentation', style: captionInset > 0 ? { '--uh-top-inset': captionInset + 'px' } : undefined, onMouseDown: (event) => { if (event.target === event.currentTarget) setOpen(false) } },
           React.createElement('div', { className: 'uh-side-dialog', role: 'dialog', 'aria-modal': true, 'aria-label': tr('用量统计', 'Usage Statistics') },
             React.createElement('div', { className: 'uh-side-dialog-head' },
               React.createElement('button', { className: 'uh-refresh uh-close-button', type: 'button', title: tr('关闭用量统计', 'Close Usage Statistics'), 'aria-label': tr('关闭用量统计', 'Close Usage Statistics'), onClick: () => setOpen(false) }, React.createElement(LineIcon, { name: 'close', size: 18 })),
             ),
             React.createElement(UsageDashboardBoundary, { resetKey: dashboardResetKey, fallback: dashboardFallback }, React.createElement(UsagePage, { timerCtx: props.timerCtx, language, onLanguageChange: changeLanguage })),
           ),
-        ) : null,
+        ) : null
+      return React.createElement(React.Fragment, null,
+        React.createElement('button', {
+          type: 'button', className: 'uh-side-entry', title: tr('用量统计', 'Usage Statistics'), 'aria-label': tr('用量统计', 'Usage Statistics'), onClick: () => setOpen(true),
+        }, React.createElement('span', { className: 'uh-side-entry-icon' }, React.createElement(LineIcon, { name: 'chart', size: 17 })), props.wide ? React.createElement('span', { className: 'uh-side-entry-label' }, tr('用量统计', 'Usage Statistics')) : null),
+        sheet === null || portalTarget === null ? sheet : ReactDOM.createPortal(sheet, portalTarget),
       )
     }
 
