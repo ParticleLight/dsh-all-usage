@@ -3384,7 +3384,7 @@ window.__ModuleLoader__.load({
           alive = false
           refreshVersionRef.current = () => {}
         }
-      }, [])
+      }, [useUtc])
 
       const queryScope = React.useMemo(() => stats === null ? null : makeUsageScope(stats, range, useUtc, customRange, wsFilter, providerFilter, modelFilter), [stats, range, useUtc, customRange.start, customRange.end, wsFilter, providerFilter, modelFilter])
       const queryKey = usageScopeKey(queryScope)
