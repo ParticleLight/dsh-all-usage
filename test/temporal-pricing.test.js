@@ -313,6 +313,10 @@ test('resolvePricing applies the built-in DeepSeek profile only on first-party r
   assert.equal(official.temporalRoute, 'official')
   const officialNamed = resolvePricing({ provider: 'deepseek-official', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', label: 'deepseek-official / deepseek-v4-flash', legacy: false }, state)
   assert.equal(officialNamed.temporalRoute, 'official')
+  // The Harness ships a DeepSeek Account route (deepseek-account) beside the
+  // API-key route; it is still first-party DeepSeek and must get the band plan.
+  const officialAccount = resolvePricing({ provider: 'deepseek-account', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', label: 'deepseek-account / deepseek-v4-flash', legacy: false }, state)
+  assert.equal(officialAccount.temporalRoute, 'official')
   const reseller = resolvePricing({ provider: 'openrouter', requestedModel: 'deepseek-v4-flash', actualModel: 'deepseek-v4-flash', label: 'openrouter / deepseek-v4-flash', legacy: false }, state)
   assert.equal(reseller.temporalRoute, 'other')
   const plan = temporalPlanFor(reseller, MONDAY_PEAK)
