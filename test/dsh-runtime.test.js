@@ -29,6 +29,9 @@ const RUNTIME_PROFILES = {
   '0.2.0-rc.2': { cordis: '4.0.4', loader: '1.0.5', timer: '1.1.6', settings: null, ledgerLayout: 'per-record' },
   // 0.2.1-alpha.2 moves the Cordis/loader/timer line and keeps the abstract settings seam.
   '0.2.1-alpha.2': { cordis: '4.0.5-alpha.1', loader: '1.0.6-alpha.1', timer: '1.1.7-alpha.1', settings: null, ledgerLayout: 'per-record' },
+  // 0.2.1-rc.1 promotes that same Cordis line to stable (4.0.5 / 1.0.6 / 1.1.7)
+  // and keeps the abstract settings seam.
+  '0.2.1-rc.1': { cordis: '4.0.5', loader: '1.0.6', timer: '1.1.7', settings: null, ledgerLayout: 'per-record' },
 }
 // DSH 0.1.5 replaced the whole-unit JSON store with a per-record one: a legacy
 // runtime keeps one document per shard table (<storages>/all_usage_ledger_NN.json,
