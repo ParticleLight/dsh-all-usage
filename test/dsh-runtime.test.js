@@ -349,6 +349,7 @@ test('each runtime profile declares its ledger layout', () => {
   assert.equal(ledgerLayoutOf('0.1.7-rc.2'), PER_RECORD_LAYOUT)
   assert.equal(ledgerLayoutOf('0.2.0-rc.2'), PER_RECORD_LAYOUT)
   assert.equal(ledgerLayoutOf('0.2.1-alpha.2'), PER_RECORD_LAYOUT)
+  assert.equal(ledgerLayoutOf('0.2.1-rc.1'), PER_RECORD_LAYOUT)
   // A version outside the profile table follows the current layout.
   assert.equal(ledgerLayoutOf('9.9.9-rc.1'), PER_RECORD_LAYOUT)
 })
