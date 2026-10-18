@@ -3005,9 +3005,9 @@ window.__ModuleLoader__.load({
 .uh-hrow, .uh-model-hrow { position:sticky; top:66px; z-index:2; background:var(--dsw-alias-bg-layer-1); border-bottom:1px solid var(--dsw-alias-border-l1); }
 .uh-row, .uh-model-row { padding-top:9px; padding-bottom:9px; }
 .uh-row:nth-child(even) { background:color-mix(in srgb, var(--dsw-alias-bg-layer-2) 52%, transparent); }
-.uh-side-entry { min-height:40px; border:0; border-radius:12px; padding:8px 10px; background:color-mix(in srgb, var(--dsw-alias-brand-primary) 9%, transparent); color:var(--dsw-alias-brand-primary); font-weight:600; }
-.uh-side-entry:hover { border:0; background:color-mix(in srgb, var(--dsw-alias-brand-primary) 17%, transparent); }
-.uh-side-entry-icon { color:var(--dsw-alias-brand-primary); font-weight:700; }
+/* The sidebar entry follows the host's row style (transparent at rest, hover from
+   the host token) instead of a permanent brand tint: a painted resting background
+   reads as "already hovered" next to the other sidebar rows. */
 .uh-side-modal { align-items:flex-end; padding:0; background:rgba(0,0,0,.34); backdrop-filter:blur(8px); }
 .uh-side-dialog { width:min(1260px, 100%); max-height:calc(100vh - var(--uh-top-inset, 0px) - 44px); border:0; border-radius:24px 24px 0 0; padding:22px 24px 28px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); box-shadow:0 -10px 44px rgba(0,0,0,.25); }
 .uh-side-dialog-head { position:sticky; top:-22px; z-index:8; justify-content:center; height:22px; margin:-22px -24px 8px; padding:8px 24px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); border:0; }
