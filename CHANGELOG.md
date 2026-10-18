@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.2.1（2026-10-18）
+### 新功能
+- **支持 DSH 0.2.1-rc.1** —— 声明区间追加精确版本 `0.2.1-rc.1`（0.2.1 线把 Cordis 提升为稳定版 `4.0.5` / loader `1.0.6` / timer `1.1.7`）；本机 Node 24 严格真实 Cordis smoke 通过，已验证运行时增至 8 个。注意：上游从未发布 `@deepseek-ai/dsh-invariants` 的任何 0.2.1 版本，CI 那条矩阵线会**如实标记 SKIPPED，不等于通过**。
+### 修复
+- **用量面板不再被第三方层叠上下文压住（issue #4）** —— 面板经 portal 从侧栏插槽子树移到 `<body>`，任何在侧栏列上建层叠上下文的主题或插件（如 dsh-wallpaper-engine 的左侧栏液态玻璃）都无法再盖住它；宿主不提供 `react-dom` 时退回原来的内联渲染。
+- **面板表面不再可能变成「洞」** —— 面板、抓手条、sticky 标题与环图气泡在 `--dsw-alias-bg-base` 半透明层下补了不透明垫层 `--dsw-alias-bg-layer-1`；把该令牌清零的主题（壁纸插件会这么做）不再让内容直接穿透。
+- **切换语言后看板不再变空** —— 宿主每个快照请求只回一份时区日历（`byDay` 或 `byDayUtc`），而取数只在宿主 revision 变化时重跑；现在语言变化会单独触发一次快照重取，英文不必再靠刷新整页恢复数据。
+### Features
+- **DSH 0.2.1-rc.1 is supported** — the declared range gains the exact version `0.2.1-rc.1` (that line promotes Cordis to the stable 4.0.5 / loader 1.0.6 / timer 1.1.7 pairing); the strict real Cordis smoke passes locally on Node 24, bringing the verified list to eight runtimes. Upstream has never published @deepseek-ai/dsh-invariants at any 0.2.1 version, so that CI matrix line is reported as SKIPPED — not passed.
+### Fixes
+- **The usage panel is no longer buried by a third-party stacking context (issue #4)** — the sheet is portaled out of the sidebar slot to `<body>`, so a theme or plugin that puts a stacking context on that column (dsh-wallpaper-engine's glass recipe does) can no longer paint over it; hosts without react-dom keep the previous inline rendering.
+- **Panel surfaces can no longer become holes** — the sheet, its grabber strip, the sticky heading and the donut tooltip keep an opaque --dsw-alias-bg-layer-1 underlay beneath their --dsw-alias-bg-base tint, so a theme that zeroes that token (the wallpaper plugin does) no longer lets content show through.
+- **The dashboard no longer goes blank after a language switch** — the host serves one timezone calendar per snapshot request (byDay or byDayUtc) and the fetch used to repeat only when the host revision changed; a language change now refetches the snapshot, so English no longer needs a page reload to show data.
+
 ## v1.2.0（2026-10-15）
 ### 新功能
 - **支持 DSH 0.2.1-alpha.2** —— 声明区间追加精确版本 `0.2.1-alpha.2`；本机 Node 24 严格真实 Cordis smoke 通过（Cordis `4.0.5-alpha.1` / loader `1.0.6-alpha.1` / timer `1.1.7-alpha.1`），CI 已配置 Node 22/24、待执行；仅此精确版本，不代表其他 alpha 版本。
