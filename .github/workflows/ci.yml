@@ -151,7 +151,7 @@ jobs:
           # @deepseek-ai/dsh-invariants
           # at any 0.2.1 version to npm, so those matrix lines cannot install
           # their Cordis runtime and the real smoke test cannot run. The allowance
-          # is deliberately strict: the runtime must be one of the two versions
+          # is deliberately strict: the runtime must be one of the three versions
           # listed below, the install must have failed with "npm error code
           # ETARGET" naming exactly that one dependency, and the registry must
           # still confirm it is missing. Every other runtime version, every other
