@@ -3131,7 +3131,7 @@ window.__ModuleLoader__.load({
     // language from storage here (the same key the language switch writes) and
     // asks for that copy, because shipping both doubled the payload.
     const snapshotUtcFlag = () => {
-      try { return window.localStorage.getItem(LANGUAGE_STORAGE_KEY) === 'en' ? '?utc=1' : '?utc=0' } catch (_) { return '' }
+      try { return storedLanguage() === 'en' ? '?utc=1' : '?utc=0' } catch (_) { return '' }
     }
     // 与 Host 半的数据接口（webServer 路由）
     const getStats = () => fetch('/api/all-usage' + snapshotUtcFlag(), { headers: { accept: 'application/json' } }).then((r) => {
@@ -3226,11 +3226,63 @@ window.__ModuleLoader__.load({
     }))
 
     const LANGUAGE_STORAGE_KEY = 'dsh-all-usage.language'
+    // A choice made inside the panel is marked; without the mark the panel follows
+    // DSH's own Language row (Settings → General → Language). The host locale runtime
+    // already resolves an explicit Host preference and falls back to the browser's
+    // language list, so its active id is the authority here; only zh and en ship, so
+    // any other registered language reads English, matching the host's own fallback.
+    //
+    // It resolves once per page load: the sidebar entry keeps one language for the whole
+    // session, and a flag that moved under a mounted panel would send it looking for the
+    // other timezone calendar — the mismatch that blanked the dashboard.
+    const LANGUAGE_CHOSEN_KEY = 'dsh-all-usage.language.chosen'
+    let localeScope = null
+    let hostLocaleLanguage
+    function adoptLocaleScope(scope) { localeScope = scope }
+    function languageFromLocaleId(id) {
+      const text = String(id === null || id === undefined ? '' : id).toLowerCase()
+      if (text === '') return null
+      return text.indexOf('zh') === 0 ? 'zh' : 'en'
+    }
+    function hostLanguage() {
+      if (hostLocaleLanguage !== undefined) return hostLocaleLanguage
+      hostLocaleLanguage = null
+      try {
+        const locale = localeScope !== null && typeof localeScope.get === 'function' ? localeScope.get('locale') : undefined
+        if (locale !== undefined && locale !== null) {
+          const snapshot = typeof locale.getLocale === 'function'
+            ? locale.getLocale()
+            : (typeof locale.getSnapshot === 'function' ? locale.getSnapshot() : null)
+          hostLocaleLanguage = languageFromLocaleId(snapshot !== null && typeof snapshot === 'object' ? snapshot.active : undefined)
+        }
+      } catch (error) { /* hosts without a locale runtime fall through to the browser */ }
+      return hostLocaleLanguage
+    }
+    function chosenLanguage() {
+      try {
+        if (window.localStorage.getItem(LANGUAGE_CHOSEN_KEY) !== '1') return null
+        const value = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
+        return value === 'en' ? 'en' : value === 'zh' ? 'zh' : null
+      } catch (_) { return null }
+    }
+    function browserLanguage() {
+      try {
+        const tag = typeof navigator === 'undefined' ? '' : String(navigator.language || '')
+        if (/^zh/i.test(tag)) return 'zh'
+        if (/^en/i.test(tag)) return 'en'
+      } catch (_) {}
+      return 'en'
+    }
     function storedLanguage() {
-      try { return window.localStorage.getItem(LANGUAGE_STORAGE_KEY) === 'en' ? 'en' : 'zh' } catch (_) { return 'zh' }
+      const chosen = chosenLanguage()
+      if (chosen !== null) return chosen
+      return hostLanguage() ?? browserLanguage()
     }
     function persistLanguage(language) {
-      try { window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language) } catch (_) {}
+      try {
+        window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language)
+        window.localStorage.setItem(LANGUAGE_CHOSEN_KEY, '1')
+      } catch (_) {}
     }
     const USAGE_UI_STATE_KEY = 'dsh-all-usage.ui-state'
     function storedUsageUiState() {
@@ -5262,6 +5314,11 @@ window.__ModuleLoader__.load({
       const slots = ctx.get('slots')
       const timer = ctx.get('timer')
       if (slots === undefined || timer === undefined) return
+      // DSH's Language row decides the panel's first-entry language (see
+      // storedLanguage). Only the scope is remembered here: the locale runtime is read
+      // lazily and once, because a client plugin may apply before it is provided, and
+      // because the value must not move while the panel is mounted.
+      adoptLocaleScope(ctx)
       slots.inject('sidebar.footer.action', () => slots.register(
         { name: 'sidebar.footer.action', id: 'all-usage', order: 10 },
         (props) => React.createElement(UsageSidebarEntry, { wide: props.wide, timerCtx: timer }),
