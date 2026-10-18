@@ -42,3 +42,21 @@ test('a language switch refetches the snapshot instead of reusing the other cale
   assert.notEqual(closeAt, -1, 'the snapshot mount effect must still close with a dependency array')
   assert.equal(source.slice(closeAt, closeAt + 12).trim(), '}, [])', 'the snapshot mount effect keeps its empty dependency array')
 })
+test('the hourly trend guard reads the calendar the snapshot actually carries', () => {
+  // The host answers a UTC snapshot with byDayUtc and an empty byDay (lib/http.js), so
+  // a guard that reads byDay alone drops every hourly series in English mode and the
+  // "today" trend falls back to a single daily point.
+  const start = source.indexOf('    function processedTokensOf')
+  const end = source.indexOf('    function costCallsOf')
+  assert.notEqual(start, -1, 'processedTokensOf must exist')
+  assert.notEqual(end, -1, 'costCallsOf must follow the guard')
+  const context = {}
+  vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__trusted = trustedHourlyRows', context)
+  const hourly = [{ time: Date.UTC(2026, 9, 18, 3), tokens: { input: 10, output: 5 } }]
+  const day = { date: '2026-10-18', tokens: { input: 10, output: 5 } }
+  const utcStats = { byDay: [], byDayUtc: [day] }
+  const localStats = { byDay: [day], byDayUtc: [] }
+  assert.equal(context.__trusted(hourly, utcStats, '2026-10-18', true).length, 1, 'UTC mode must read byDayUtc')
+  assert.equal(context.__trusted(hourly, localStats, '2026-10-18', false).length, 1, 'local mode must read byDay')
+  assert.equal(context.__trusted(hourly, utcStats, '2026-10-18', false).length, 0, 'a local lookup against a UTC snapshot stays untrusted')
+})

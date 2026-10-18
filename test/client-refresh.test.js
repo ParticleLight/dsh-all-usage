@@ -207,8 +207,9 @@ test('selects hourly query data for single-day trend scopes', () => {
   assert.match(source, /Array\.isArray\(queryResult\.hourly\)/)
   assert.match(source, /queryScope !== null && queryScope\.start === queryScope\.end/)
   // The hourly series is filtered through the day row before it is drawn, so the
-  // assertion covers both the gate and the builder it feeds.
-  assert.match(source, /trustedHourlyRows\(queryResult\.hourly, stats, queryScope\.start\)/)
+  // assertion covers both the gate and the builder it feeds. The gate is handed the
+  // calendar in use: a UTC snapshot carries byDayUtc and an empty byDay.
+  assert.match(source, /trustedHourlyRows\(queryResult\.hourly, stats, queryScope\.start, useUtc\)/)
   // One declaration and one call: a half-finished edit once left a second, unguarded
   // ternary behind that read .hourly off a null query result and took the panel into
   // its error boundary. Syntax checks and the pattern above both stayed green.

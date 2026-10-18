@@ -1306,8 +1306,17 @@ window.__ModuleLoader__.load({
      * row the snapshot carries. The host answers both from different structures, and a
      * disagreement means the shape would not add up to the number above it.
      */
-    function trustedHourlyRows(hourly, stats, date) {
-      const dayRow = stats !== null && stats !== undefined && Array.isArray(stats.byDay) ? stats.byDay.find((entry) => entry.date === date) : undefined
+    function trustedHourlyRows(hourly, stats, date, utc) {
+      // A snapshot carries only the calendar it was asked for (lib/http.js): a UTC
+      // snapshot answers byDayUtc and leaves byDay empty, so the guard has to read the
+      // same calendar the scope used — otherwise English loses every hourly curve and
+      // the "today" trend collapses to one point per day.
+      const days = stats === null || stats === undefined
+        ? null
+        : (utc === true
+          ? (Array.isArray(stats.byDayUtc) ? stats.byDayUtc : [])
+          : (Array.isArray(stats.byDay) ? stats.byDay : []))
+      const dayRow = days === null ? undefined : days.find((entry) => entry.date === date)
       const dayTotal = dayRow === undefined ? null : processedTokensOf(dayRow.tokens)
       if (dayTotal === null) return []
       let hourlyTotal = 0
@@ -3843,7 +3852,7 @@ window.__ModuleLoader__.load({
         // agrees with the day row the snapshot carries, so a drifting source costs the
         // curve instead of the numbers.
         const hourlySource = queryScope !== null && queryScope.start === queryScope.end && queryResult && Array.isArray(queryResult.hourly) && queryResult.hourly.length > 0
-          ? trustedHourlyRows(queryResult.hourly, stats, queryScope.start)
+          ? trustedHourlyRows(queryResult.hourly, stats, queryScope.start, useUtc)
           : []
         const hourlyRows = hourlySource.length > 0 ? buildTrendHourlyRows(hourlySource, useUtc) : []
         return hourlyRows.length > 0 ? hourlyRows : buildTrendRows(queryUsable && queryResult && Array.isArray(queryResult.daily) ? queryResult.daily : activeDayRows, bounds, useUtc)
