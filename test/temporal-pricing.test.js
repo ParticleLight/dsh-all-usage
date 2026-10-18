@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { apply } from '../lib/index.js'
 import {
   calculateCost,
+  isDeepSeekFirstPartyRoute,
+  unclassifiedFirstPartyRoute,
   normalizeCostSnapshot,
   normalizeTemporalPricing,
   resolvePricing,
@@ -1418,4 +1420,26 @@ test('the built-in DeepSeek plan already excludes statutory holidays', () => {
   assert.equal(peak.pricingBand, 'peak')
   assert.equal(peak.pricingHoliday, false)
   assert.equal(peak.total, '0.44')
+})
+
+test('the first-party route table covers every built-in DeepSeek route', () => {
+  for (const route of ['deepseek', 'deepseek-official', 'deepseek-account']) {
+    assert.equal(isDeepSeekFirstPartyRoute(route), true, route + ' must count as first-party')
+  }
+  // Exact ids only: a reseller carrying a DeepSeek-looking name is never promoted to
+  // DeepSeek's peak/off-peak pricing.
+  for (const route of ['openrouter', 'azure', 'bedrock', 'deepseek-reseller', '']) {
+    assert.equal(isDeepSeekFirstPartyRoute(route), false, route + ' must stay a reseller route')
+  }
+  assert.equal(isDeepSeekFirstPartyRoute('  DeepSeek-ACCOUNT  '), true, 'normalisation still applies')
+})
+
+test('an unknown DeepSeek-looking route is reported instead of under-counting', () => {
+  const flash = { provider: 'deepseek-account-v2', actualModel: 'deepseek-v4-flash' }
+  assert.equal(unclassifiedFirstPartyRoute(flash, { temporalRoute: 'other' }), 'deepseek-account-v2', 'a new route surfaces')
+  assert.equal(unclassifiedFirstPartyRoute(flash, {}), 'deepseek-account-v2', 'a route without a resolved plan counts too')
+  assert.equal(unclassifiedFirstPartyRoute(flash, { temporalRoute: 'official' }), null, 'first-party routes stay quiet')
+  assert.equal(unclassifiedFirstPartyRoute(flash, { temporalRoute: 'mapped' }), null, 'explicitly mapped routes stay quiet')
+  assert.equal(unclassifiedFirstPartyRoute({ provider: 'openrouter', actualModel: 'deepseek-v4-flash' }, { temporalRoute: 'other' }), null, 'resellers are not DeepSeek-looking')
+  assert.equal(unclassifiedFirstPartyRoute({ provider: 'deepseek-account-v2', actualModel: 'gpt-5.5' }, { temporalRoute: 'other' }), null, 'a non-DeepSeek model is not a pricing gap')
 })

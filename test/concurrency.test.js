@@ -1171,3 +1171,27 @@ test('unstable first-page construction returns stale after exactly three attempt
   assert.equal(attempts, 3)
   assert.equal(host.state.recordsQueryCache.size, 0)
 })
+
+test('pricing health reports unclassified routes and the last reconcile', async () => {
+  const host = makeHost()
+  try {
+    const flash = { provider: 'deepseek-account-v2', actualModel: 'deepseek-v4-flash' }
+    host.pricing.noteUnclassifiedRoute(flash, { temporalRoute: 'other' })
+    host.pricing.noteUnclassifiedRoute(flash, { temporalRoute: 'other' })
+    host.pricing.noteUnclassifiedRoute({ provider: 'deepseek-account', actualModel: 'deepseek-v4-flash' }, { temporalRoute: 'other' })
+    host.pricing.noteUnclassifiedRoute({ provider: 'openrouter', actualModel: 'deepseek-v4-flash' }, { temporalRoute: 'other' })
+    const health = host.pricing.pricingHealth()
+    assert.deepEqual(health.unclassifiedRoutes.map((entry) => [entry.provider, entry.count]), [['deepseek-account-v2', 2]])
+    assert.equal(health.lastReconcile, null, 'no reconcile has run yet')
+    assert.deepEqual(host.pricing.pricingSnapshot({ detailed: false }).health.unclassifiedRoutes.map((entry) => entry.provider), ['deepseek-account-v2'])
+
+    const result = await host.pricing.reconcileUsageCosts({ backfill: true })
+    const after = host.pricing.pricingHealth()
+    assert.ok(after.lastReconcile !== null, 'a reconcile records its counters')
+    assert.equal(after.lastReconcile.backfill.priced, result.backfill.priced)
+    assert.equal(after.lastReconcile.temporal.reconciled, result.temporal.reconciled)
+    assert.equal(Number.isFinite(after.lastReconcile.at), true)
+  } finally {
+    await host.close()
+  }
+})
