@@ -250,13 +250,14 @@ npm run check:pack
 
 ## Status and Updates
 
-The latest published release is `v1.1.18`; `v1.2.0` remains in development and has not been released. See [CHANGELOG.md](CHANGELOG.md) for the complete development and release history.
+The latest published release is `v1.2.1` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.1) | npm: `npm i dsh-all-usage@1.2.1`). See [CHANGELOG.md](CHANGELOG.md) for the complete development and release history.
 
-### Latest published: v1.1.18
+### Latest published: v1.2.1
 
-- **A new “Last 7 Days” range**: the presets are now Today / **Last 7 Days** / Last 30 Days / Last 90 Days / All Time / Custom; it covers seven calendar days including today and applies to the summary, trend, model tables, request log, filters and CSV export, with the choice remembered in the browser.
-- **A switchable heatmap span (30 days / 90 days / 12 months)**: the column count follows the span (5 / 13 / 53 columns); each column is a week and the cells keep a 1:1 aspect ratio, so a shorter span also gets larger cells (18×18px at twelve months, 34×34px at 30/90 days, capped so a few columns cannot stretch into huge tiles). Twelve months stays the default and the span is independent of the time range above.
-- **A version indicator next to the title**: it shows the running version, “Up to date” in small text when it matches the newest release on npm, a highlighted “Latest vX.Y.Z” when it is behind, and a click opens the GitHub repository. The host performs the check (one read-only request to the npm registry, cached for six hours, at most one every 30 seconds per process) and degrades to “unknown” rather than guessing.
+- **DSH `0.2.1-rc.1` and `0.2.1-rc.2` support**: both exact versions are verified on the real runtime.
+- **The panel follows DSH's language**: it opens in DSH's Language setting, switching between Chinese and English refreshes the data immediately, and the English "Today" trend draws its hourly curve again.
+- **Third-party themes can no longer bury the panel**: sidebar glass/wallpaper plugins do not cover it, and a theme that blanks the base background cannot punch holes in it.
+- **DeepSeek Account usage is priced with the peak/off-peak bands again**: that route had been charged the off-peak rate all day; existing account-route usage is re-priced on the next reconciliation.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 
