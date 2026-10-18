@@ -2,14 +2,14 @@
 
 ## v1.2.1（2026-10-18）
 ### 新功能
-- **支持 DSH 0.2.1-rc.1** —— 新运行时可直接使用。
+- **支持 DSH 0.2.1-rc.1 / rc.2** —— 新运行时可直接使用。
 - **首次打开跟随 DSH 的语言** —— 按 DSH 的 Language 设置选择语言；在面板里选过之后以面板为准。
 ### 修复
 - **用量面板不再被第三方主题压住** —— 侧栏玻璃 / 壁纸类插件不会再盖住面板，透明主题也不会把面板底色「打洞」。
 - **切换语言后看板不再变空** —— 中英切换立即刷新，不必再刷新页面；英文的「今日」趋势恢复小时曲线。
 - **DeepSeek Account 用量按峰谷价计价** —— 该路由此前全天按谷价计、峰时偏少；升级后历史用量会重新计价（峰时变贵）。
 ### Features
-- **DSH 0.2.1-rc.1 is supported** — the new runtime works out of the box.
+- **DSH 0.2.1-rc.1 and rc.2 are supported** — the new runtime works out of the box.
 - **The panel opens in DSH's language** — it follows DSH's Language setting; a choice made in the panel wins afterwards.
 ### Fixes
 - **Third-party themes can no longer bury the usage panel** — sidebar glass/wallpaper plugins don't cover it, and a theme that blanks the base background can't punch holes in it.

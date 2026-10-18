@@ -69,7 +69,7 @@ jobs:
       fail-fast: false
       matrix:
         node-version: [22, 24]
-        dsh-version: ['0.2.1-rc.1', '0.2.1-alpha.2', '0.2.0-rc.2', '0.1.7-rc.2', '0.1.5-rc.2', '0.1.5-rc.1', '0.1.1-rc.2', '0.1.1-rc.1']
+        dsh-version: ['0.2.1-rc.2', '0.2.1-rc.1', '0.2.1-alpha.2', '0.2.0-rc.2', '0.1.7-rc.2', '0.1.5-rc.2', '0.1.5-rc.1', '0.1.1-rc.2', '0.1.1-rc.1']
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -93,6 +93,7 @@ jobs:
           case "$RUNTIME_VERSION" in
             0.2.1-alpha.2) CORDIS_VERSION=4.0.5-alpha.1; LOADER_VERSION=1.0.6-alpha.1; TIMER_VERSION=1.1.7-alpha.1; SETTINGS_FILE_PACKAGE= ;;
             0.2.1-rc.1) CORDIS_VERSION=4.0.5; LOADER_VERSION=1.0.6; TIMER_VERSION=1.1.7; SETTINGS_FILE_PACKAGE= ;;
+            0.2.1-rc.2) CORDIS_VERSION=4.0.5; LOADER_VERSION=1.0.6; TIMER_VERSION=1.1.7; SETTINGS_FILE_PACKAGE= ;;
             0.2.0-rc.2) CORDIS_VERSION=4.0.4; LOADER_VERSION=1.0.5; TIMER_VERSION=1.1.6; SETTINGS_FILE_PACKAGE= ;;
             0.1.7-rc.*) CORDIS_VERSION=4.0.4; LOADER_VERSION=1.0.5; TIMER_VERSION=1.1.6; SETTINGS_FILE_PACKAGE= ;;
             0.1.5-rc.*) CORDIS_VERSION=4.0.2; LOADER_VERSION=1.0.3; TIMER_VERSION=1.1.4; SETTINGS_FILE_PACKAGE="@deepseek-ai/dsh-settings-file@${RUNTIME_VERSION}" ;;
@@ -145,8 +146,9 @@ jobs:
             sleep $((attempt * 5))
           done
 
-          # Narrow upstream-gap allowance, the 0.2.1 line only (0.2.1-alpha.2 and
-          # 0.2.1-rc.1): upstream has never published @deepseek-ai/dsh-invariants
+          # Narrow upstream-gap allowance, the 0.2.1 line only (0.2.1-alpha.2,
+          # 0.2.1-rc.1 and 0.2.1-rc.2): upstream has never published
+          # @deepseek-ai/dsh-invariants
           # at any 0.2.1 version to npm, so those matrix lines cannot install
           # their Cordis runtime and the real smoke test cannot run. The allowance
           # is deliberately strict: the runtime must be one of the two versions
@@ -161,7 +163,7 @@ jobs:
             missing="$(grep -oE 'No matching version found for [^ ]+' "$install_log" | sed -e 's/^No matching version found for //' -e 's/[.]$//' | sort -u || true)"
             expected_missing="@deepseek-ai/dsh-invariants@${RUNTIME_VERSION}"
             case "$RUNTIME_VERSION" in
-              0.2.1-alpha.2 | 0.2.1-rc.1) gap_allowed=true ;;
+              0.2.1-alpha.2 | 0.2.1-rc.1 | 0.2.1-rc.2) gap_allowed=true ;;
               *) gap_allowed=false ;;
             esac
             if [ "$gap_allowed" = true ] \
@@ -194,7 +196,7 @@ jobs:
                   echo ""
                   echo "- Upstream dependency @deepseek-ai/dsh-invariants@$RUNTIME_VERSION is absent from the npm registry (npm error code ETARGET), so the exact-runtime install could not complete."
                   echo "- npm run test:runtime was SKIPPED for this matrix line. This is not a pass and says nothing about plugin behaviour on $RUNTIME_VERSION."
-                  echo "- The allowance covers only @deepseek-ai/dsh-invariants at the two 0.2.1 versions (0.2.1-alpha.2, 0.2.1-rc.1); all other runtime lines remain hard gates."
+                  echo "- The allowance covers only @deepseek-ai/dsh-invariants at the three 0.2.1 versions (0.2.1-alpha.2, 0.2.1-rc.1, 0.2.1-rc.2); all other runtime lines remain hard gates."
                   echo "- Once upstream publishes the package this install succeeds and the full smoke test runs automatically."
                 } >> "$GITHUB_STEP_SUMMARY"
                 exit 0
@@ -208,7 +210,7 @@ jobs:
           echo "DSH_REQUIRE_RUNTIME_SMOKE=1" >> "$GITHUB_ENV"
       - name: Run real Cordis smoke test
         # Skipped only when the step above proved the 0.2.1-line upstream gap
-        # (0.2.1-alpha.2 or 0.2.1-rc.1); every other runtime line always runs
+        # (0.2.1-alpha.2, 0.2.1-rc.1 or 0.2.1-rc.2); every other runtime line always runs
         # this smoke test.
         if: steps.runtime-install.outputs.smoke_skipped != 'true'
         run: npm run test:runtime
