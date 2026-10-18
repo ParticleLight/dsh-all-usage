@@ -3353,6 +3353,9 @@ window.__ModuleLoader__.load({
       const recordsGate = recordsGateRef.current
       const pricingGate = pricingGateRef.current
       const refreshRef = React.useRef(() => {})
+      // The snapshot loader is reachable outside its mount effect, so a language
+      // switch can ask for the other timezone calendar (see the effect below).
+      const refreshStatsRef = React.useRef(() => {})
   // Latest write capability seen by the poller: the host rotates it on every
   // plugin apply, and writes must not keep using the one the page loaded with.
   const requestTokenRef = React.useRef('')
@@ -3522,6 +3525,7 @@ window.__ModuleLoader__.load({
           refreshStats()
           refreshBalance(true)
         }
+        refreshStatsRef.current = refreshStats
         return () => {
           alive = false
           clearRetry()
@@ -3530,6 +3534,21 @@ window.__ModuleLoader__.load({
           pricingModelSearchTimerRef.current = {}
         }
       }, [])
+
+      // The snapshot carries exactly one timezone calendar per request: the host
+      // halves the payload by serving either byDay or byDayUtc (lib/http.js), and
+      // the URL asks for the copy matching the stored language. That fetch lives in
+      // the mount effect above and only repeats when the host revision changes, so a
+      // language switch has to ask for the other calendar itself — English reads
+      // stats.byDayUtc, which a snapshot fetched in Chinese leaves empty, and the
+      // dashboard then renders empty until a reload. Keeping this separate from the
+      // mount effect leaves its polling timers and applied-snapshot baseline alone.
+      const snapshotUtcRef = React.useRef(useUtc)
+      React.useEffect(() => {
+        if (snapshotUtcRef.current === useUtc) return
+        snapshotUtcRef.current = useUtc
+        refreshStatsRef.current()
+      }, [useUtc])
 
       React.useEffect(() => {
         if (!languageMenuOpen || typeof document === 'undefined') return undefined
