@@ -2,23 +2,19 @@
 
 ## v1.2.1（2026-10-18）
 ### 新功能
-- **支持 DSH 0.2.1-rc.1** —— 声明区间追加精确版本 `0.2.1-rc.1`（0.2.1 线把 Cordis 提升为稳定版 `4.0.5` / loader `1.0.6` / timer `1.1.7`）；本机 Node 24 严格真实 Cordis smoke 通过，已验证运行时增至 8 个。注意：上游从未发布 `@deepseek-ai/dsh-invariants` 的任何 0.2.1 版本，CI 那条矩阵线会**如实标记 SKIPPED，不等于通过**。
-- **首次进入跟随 DSH 的语言** —— 面板语言按「面板内显式选择 → DSH 的 Language 设置（Settings → General → Language）→ 浏览器语言 → 英文」解析，且**每页只解析一次**：没在面板里选过语言时，英文宿主直接以英文打开；面板内的选择会被标记为显式，之后不再被宿主设置覆盖。
+- **支持 DSH 0.2.1-rc.1** —— 新运行时可直接使用。
+- **首次打开跟随 DSH 的语言** —— 按 DSH 的 Language 设置选择语言；在面板里选过之后以面板为准。
 ### 修复
-- **用量面板不再被第三方层叠上下文压住（issue #4）** —— 面板经 portal 从侧栏插槽子树移到 `<body>`，任何在侧栏列上建层叠上下文的主题或插件（如 dsh-wallpaper-engine 的左侧栏液态玻璃）都无法再盖住它；宿主不提供 `react-dom` 时退回原来的内联渲染。
-- **面板表面不再可能变成「洞」** —— 面板、抓手条、sticky 标题与环图气泡在 `--dsw-alias-bg-base` 半透明层下补了不透明垫层 `--dsw-alias-bg-layer-1`；把该令牌清零的主题（壁纸插件会这么做）不再让内容直接穿透。
-- **切换语言后看板不再变空** —— 宿主每个快照请求只回一份时区日历（`byDay` 或 `byDayUtc`），而取数只在宿主 revision 变化时重跑；现在语言变化会单独触发一次快照重取，英文不必再靠刷新整页恢复数据。
-- **英文模式的「今日」趋势恢复曲线** —— 小时序列只有在与快照里的当日合计一致时才画；这道守卫只读 `byDay`，而英文快照只带 `byDayUtc`，于是曲线被丢弃、退化成一天一个点。守卫现在按当前日历选 `byDay` / `byDayUtc`。
-- **DeepSeek Account 路由恢复峰谷计价** —— DSH 除 API-key 路由外还有一条一方路由 `deepseek-account`（账号计费），此前不在「一方 DeepSeek 路由」表里，被当成转售路由 ⇒ 内置峰谷档不生效，全天按目录（谷）价记账、峰时段少算。现已补入；并把该表改成带命名空间说明的路由集合（**路由 id**，不是目录供应商 id），另加漂移探测：任何 `deepseek-*` 路由若未命中该表，会出现在 `/api/all-usage/status` 的 `pricingHealth.unclassifiedRoutes` 里，同时暴露最近一次对账的非敏感计数 `pricingHealth.lastReconcile`。注意：升级后既有 `deepseek-account` 用量行会被重新按峰谷价计（峰时变贵），这是修正而非回归。
+- **用量面板不再被第三方主题压住** —— 侧栏玻璃 / 壁纸类插件不会再盖住面板，透明主题也不会把面板底色「打洞」。
+- **切换语言后看板不再变空** —— 中英切换立即刷新，不必再刷新页面；英文的「今日」趋势恢复小时曲线。
+- **DeepSeek Account 用量按峰谷价计价** —— 该路由此前全天按谷价计、峰时偏少；升级后历史用量会重新计价（峰时变贵）。
 ### Features
-- **DSH 0.2.1-rc.1 is supported** — the declared range gains the exact version `0.2.1-rc.1` (that line promotes Cordis to the stable 4.0.5 / loader 1.0.6 / timer 1.1.7 pairing); the strict real Cordis smoke passes locally on Node 24, bringing the verified list to eight runtimes. Upstream has never published @deepseek-ai/dsh-invariants at any 0.2.1 version, so that CI matrix line is reported as SKIPPED — not passed.
-- **First entry follows DSH's language** — the panel language resolves as: an explicit choice in the panel → DSH's Language setting (Settings → General → Language) → the browser language → English, resolved once per page load. An English host opens the panel in English, and a choice made in the panel is marked explicit so the host setting no longer overrides it.
+- **DSH 0.2.1-rc.1 is supported** — the new runtime works out of the box.
+- **The panel opens in DSH's language** — it follows DSH's Language setting; a choice made in the panel wins afterwards.
 ### Fixes
-- **The usage panel is no longer buried by a third-party stacking context (issue #4)** — the sheet is portaled out of the sidebar slot to `<body>`, so a theme or plugin that puts a stacking context on that column (dsh-wallpaper-engine's glass recipe does) can no longer paint over it; hosts without react-dom keep the previous inline rendering.
-- **Panel surfaces can no longer become holes** — the sheet, its grabber strip, the sticky heading and the donut tooltip keep an opaque --dsw-alias-bg-layer-1 underlay beneath their --dsw-alias-bg-base tint, so a theme that zeroes that token (the wallpaper plugin does) no longer lets content show through.
-- **The dashboard no longer goes blank after a language switch** — the host serves one timezone calendar per snapshot request (byDay or byDayUtc) and the fetch used to repeat only when the host revision changed; a language change now refetches the snapshot, so English no longer needs a page reload to show data.
-- **The English "today" trend draws its hourly curve again** — the series is only shown while its sum agrees with the snapshot's day row, and that guard read byDay alone; an English snapshot only carries byDayUtc, so the curve was dropped and the chart collapsed to one point per day. The guard now picks byDay or byDayUtc from the calendar in use.
-- **The DeepSeek Account route gets its peak/off-peak bands back** — besides the API-key route, DSH ships the first-party `deepseek-account` route (account billing), which was missing from the first-party route table and was therefore priced like a reseller: no built-in band, the catalog (off-peak) rate all day, peak hours under-counted. The route is in the table now, the table is documented as route ids rather than catalog vendor ids, and a drift detector reports any `deepseek-*` route that misses it in `pricingHealth.unclassifiedRoutes` on `/api/all-usage/status` instead of under-counting silently, next to the non-sensitive counters of the last reconciliation (`pricingHealth.lastReconcile`). Note that existing `deepseek-account` usage rows are re-priced on the next reconciliation (peak hours become more expensive) — that is the correction, not a regression.
+- **Third-party themes can no longer bury the usage panel** — sidebar glass/wallpaper plugins don't cover it, and a theme that blanks the base background can't punch holes in it.
+- **Switching the language no longer empties the dashboard** — data refreshes immediately without a page reload, and English keeps its hourly curve for "Today".
+- **DeepSeek Account usage is priced with peak/off-peak bands** — that route was charged the off-peak rate all day; existing rows are re-priced on the next scan (peak hours become more expensive).
 
 ## v1.2.0（2026-10-15）
 ### 新功能
