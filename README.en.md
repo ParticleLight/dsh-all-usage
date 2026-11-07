@@ -38,15 +38,17 @@ The installation command assembles the bundle. Usually, refreshing the browser p
 
 ![Dashboard overview](assets/screenshots/en/01-overview.png)
 
-![Usage heatmap](assets/screenshots/en/02-heatmap.png)
+![Token usage trend as stacked bars (Line / Bars toggle)](assets/screenshots/en/02-trend-bars.png)
 
-![Model usage](assets/screenshots/en/03-model-usage.png)
+![Usage heatmap](assets/screenshots/en/03-heatmap.png)
 
-![Request logs and audit](assets/screenshots/en/04-request-logs.png)
+![Model usage](assets/screenshots/en/04-model-usage.png)
 
-![Cost settings](assets/screenshots/en/05-cost-settings.png)
+![Request logs and audit](assets/screenshots/en/05-request-logs.png)
 
-The five screenshots above were captured on 2026-10-14 from the v1.2.0 client UI; the host plugin shown is v1.1.18. The live usage and workspace data belong to that capture environment, and the version-mismatch warning in Cost settings is intentionally preserved.
+![Cost settings](assets/screenshots/en/06-cost-settings.png)
+
+The first five screenshots above were captured on 2026-10-14 from the v1.2.0 client UI; the host plugin shown is v1.1.18. The bar trend view was captured on 2026-11-07 from the v1.2.1 client and shows the Line / Bars toggle added in 1.2.2. The live usage and workspace data belong to that capture environment, and the version-mismatch warning in Cost settings is intentionally preserved.
 
 ## Technology Stack and Architecture
 
