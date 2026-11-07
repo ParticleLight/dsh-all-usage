@@ -34,6 +34,11 @@ const RUNTIME_PROFILES = {
   '0.2.1-rc.1': { cordis: '4.0.5', loader: '1.0.6', timer: '1.1.7', settings: null, ledgerLayout: 'per-record' },
   // 0.2.1-rc.2 keeps that Cordis line and the abstract settings seam.
   '0.2.1-rc.2': { cordis: '4.0.5', loader: '1.0.6', timer: '1.1.7', settings: null, ledgerLayout: 'per-record' },
+  // 0.2.2-alpha.3 moves that Cordis line to its own prerelease
+  // (4.0.6-alpha.2 / 1.0.7-alpha.2 / 1.1.8-alpha.2).
+  '0.2.2-alpha.3': { cordis: '4.0.6-alpha.2', loader: '1.0.7-alpha.2', timer: '1.1.8-alpha.2', settings: null, ledgerLayout: 'per-record' },
+  // 0.2.2-rc.1 promotes the next Cordis line to stable (4.1.0 / 1.1.0 / 1.2.0).
+  '0.2.2-rc.1': { cordis: '4.1.0', loader: '1.1.0', timer: '1.2.0', settings: null, ledgerLayout: 'per-record' },
 }
 // DSH 0.1.5 replaced the whole-unit JSON store with a per-record one: a legacy
 // runtime keeps one document per shard table (<storages>/all_usage_ledger_NN.json,
@@ -353,6 +358,8 @@ test('each runtime profile declares its ledger layout', () => {
   assert.equal(ledgerLayoutOf('0.2.1-alpha.2'), PER_RECORD_LAYOUT)
   assert.equal(ledgerLayoutOf('0.2.1-rc.1'), PER_RECORD_LAYOUT)
   assert.equal(ledgerLayoutOf('0.2.1-rc.2'), PER_RECORD_LAYOUT)
+  assert.equal(ledgerLayoutOf('0.2.2-alpha.3'), PER_RECORD_LAYOUT)
+  assert.equal(ledgerLayoutOf('0.2.2-rc.1'), PER_RECORD_LAYOUT)
   // A version outside the profile table follows the current layout.
   assert.equal(ledgerLayoutOf('9.9.9-rc.1'), PER_RECORD_LAYOUT)
 })
