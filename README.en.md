@@ -254,14 +254,14 @@ npm run check:pack
 
 ## Status and Updates
 
-The latest published release is `v1.2.1` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.1) | npm: `npm i dsh-all-usage@1.2.1`). See [CHANGELOG.md](CHANGELOG.md) for the complete development and release history.
+The latest published release is `v1.2.2` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.2) | npm: `npm i dsh-all-usage@1.2.2`). See [CHANGELOG.md](CHANGELOG.md) for the complete development and release history.
 
-### Latest published: v1.2.1
+### Latest published: v1.2.2
 
-- **DSH `0.2.1-rc.1` and `0.2.1-rc.2` support**: both exact versions are verified on the real runtime.
-- **The panel follows DSH's language**: it opens in DSH's Language setting, switching between Chinese and English refreshes the data immediately, and the English "Today" trend draws its hourly curve again.
-- **Third-party themes can no longer bury the panel**: sidebar glass/wallpaper plugins do not cover it, and a theme that blanks the base background cannot punch holes in it.
-- **DeepSeek Account usage is priced with the peak/off-peak bands again**: that route had been charged the off-peak rate all day; existing account-route usage is re-priced on the next reconciliation.
+- **The trend chart can switch to bars**: a Line / Bars switch sits at the top right; bars stack one column per row by token type with the total on top, grow from the baseline (no growth with reduced motion), and the choice is remembered.
+- **DSH `0.2.2-alpha.3` and `0.2.2-rc.1` support**: both exact versions are verified on the real runtime.
+- **"Today" keeps its hourly curve**: switching to Today shows the day's hourly trend without a manual refresh.
+- **A cheaper panel and idle poll**: the always-on glow and three backdrop blurs are gone, and the idle poll no longer re-renders the dashboard when the payload has not changed.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 

@@ -253,14 +253,14 @@ npm run check:pack
 
 ## 状态与更新
 
-当前最新发布版本为 `v1.2.1`（[GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.1)｜npm：`npm i dsh-all-usage@1.2.1`）。完整开发与版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+当前最新发布版本为 `v1.2.2`（[GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.2)｜npm：`npm i dsh-all-usage@1.2.2`）。完整开发与版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
-### 最近发布：v1.2.1
+### 最近发布：v1.2.2
 
-- **支持 DSH `0.2.1-rc.1` / `0.2.1-rc.2`**：两条精确版本都已在真实运行链上验证。
-- **界面语言跟随 DSH**：首次进入按 DSH 的 Language 设置选择语言；中英切换立即刷新数据，英文「今日」趋势恢复小时曲线。
-- **面板不再被第三方主题压住**：侧栏玻璃 / 壁纸类插件不会再盖住面板，透明主题也不会把面板底色「打洞」。
-- **DeepSeek Account 路由恢复峰谷计价**：该路由此前全天按谷价计、峰时偏少；升级后历史账号路由用量会在下次对账时重新计价。
+- **趋势图可切换柱状图**：图表右上角新增「折线 / 柱状」开关；柱状把每行按 token 类型叠成一根柱子、总量封顶，自下向上生长（系统「减少动态效果」时不播放），选过的视图下次打开仍保留。
+- **支持 DSH `0.2.2-alpha.3` / `0.2.2-rc.1`**：两条精确版本都已在真实运行链上验证。
+- **切到「今日」不再只剩中间几个点**：之前会退化成单点兜底、要手动刷新才恢复；现在直接显示当日小时曲线。
+- **面板与轮询更省**：去掉永不停止的呼吸光晕与标题栏/提示框的背景模糊，空闲轮询在数据没有变化时不再刷新界面。
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
