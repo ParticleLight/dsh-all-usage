@@ -38,15 +38,17 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 ![dsh-all-usage 看板总览](assets/screenshots/zh/01-overview.png)
 
-![dsh-all-usage 使用热力图](assets/screenshots/zh/02-heatmap.png)
+![dsh-all-usage 柱状趋势视图（折线 / 柱状可切换）](assets/screenshots/zh/02-trend-bars.png)
 
-![dsh-all-usage 模型用量](assets/screenshots/zh/03-model-usage.png)
+![dsh-all-usage 使用热力图](assets/screenshots/zh/03-heatmap.png)
 
-![dsh-all-usage 请求日志与审计](assets/screenshots/zh/04-request-logs.png)
+![dsh-all-usage 模型用量](assets/screenshots/zh/04-model-usage.png)
 
-![dsh-all-usage 成本设置](assets/screenshots/zh/05-cost-settings.png)
+![dsh-all-usage 请求日志与审计](assets/screenshots/zh/05-request-logs.png)
 
-以上五张截图于 2026-10-14 从 v1.2.0 客户端界面截取，图中宿主插件版本为 v1.1.18；其中的实际用量与工作区数据属于该截图环境；成本设置中的版本不一致警告为有意保留。
+![dsh-all-usage 成本设置](assets/screenshots/zh/06-cost-settings.png)
+
+以上六张截图中，前五张于 2026-10-14 从 v1.2.0 客户端界面截取，图中宿主插件版本为 v1.1.18；柱状趋势视图截于 2026-11-07（v1.2.1 客户端，展示 1.2.2 新增的折线 / 柱状切换）。图中的实际用量与工作区数据属于该截图环境；成本设置中的版本不一致警告为有意保留。
 
 ## 技术栈与架构
 
