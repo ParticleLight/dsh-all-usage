@@ -253,11 +253,6 @@ window.__ModuleLoader__.load({
       plus: { path: 'M12 5v14M5 12h14' },
       calendar: { path: 'M6 4v3M18 4v3M4 9h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z' },
     }
-    // Honours the OS setting for people who ask for less motion: the heatmap pulse
-    // is an endless repaint and the media query cannot reach an inline animation.
-    function motionReduced() {
-      try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch (error) { return false }
-    }
     function LineIcon(props) {
       const size = props.size || 16
       const base = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }
@@ -2400,12 +2395,13 @@ window.__ModuleLoader__.load({
         // composite/paint while the panel is still loading data. Wrapping the
         // stagger keeps the wave but ends it in ~150ms.
         const style = { background: cellBg(levelOf(count)), opacity: dim ? 0.22 : 1, animationDelay: ((index % 25) * 6) + 'ms' }
-        // The today pulse is set inline, so the reduced-motion stylesheet cannot
-        // cancel it; an endless box-shadow animation repaints every frame.
-        if (cell.date === props.todayKey && !motionReduced()) style.animation = 'uh-cell-in .45s ease both, uh-glow 3s ease-in-out .7s infinite'
+        // A "today" pulse has to animate box-shadow, which is paint-only: an
+        // endless repaint on the open dashboard. The marker is a static ring in
+        // CSS (.uh-cell.uh-today), so nothing keeps painting after the wave.
+        const cellClass = cell.date === props.todayKey ? 'uh-cell uh-today' : 'uh-cell'
         return React.createElement('div', {
           key: cell.date,
-          className: 'uh-cell',
+          className: cellClass,
           style,
           role: 'button',
           'data-date': cell.date,
@@ -2896,7 +2892,7 @@ window.__ModuleLoader__.load({
 @media (prefers-reduced-motion: reduce) { .uh-trend-bar-group { animation:none; } }
 .uh-trend-hit { fill:transparent; cursor:crosshair; outline:none; }
 .uh-trend-hit:focus { fill:color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent); outline:1px solid var(--dsw-alias-brand-primary); outline-offset:2px; }
-.uh-trend-tooltip { position:absolute; z-index:4; min-width:166px; padding:10px 11px; border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2) 88%, transparent); border-radius:8px; background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 94%, transparent); box-shadow:0 10px 24px rgba(0,0,0,.22); backdrop-filter:blur(10px); color:var(--dsw-alias-label-primary); font-size:12px; line-height:1.45; pointer-events:none; opacity:0; visibility:hidden; transform:translate(14px,-50%) scale(.985); transform-origin:left center; transition:left .16s cubic-bezier(.22,.61,.36,1), top .16s cubic-bezier(.22,.61,.36,1), opacity .12s ease, transform .16s cubic-bezier(.22,.61,.36,1), visibility 0s linear .16s; }
+.uh-trend-tooltip { position:absolute; z-index:4; min-width:166px; padding:10px 11px; border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2) 88%, transparent); border-radius:8px; background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 94%, transparent); box-shadow:0 10px 24px rgba(0,0,0,.22); color:var(--dsw-alias-label-primary); font-size:12px; line-height:1.45; pointer-events:none; opacity:0; visibility:hidden; transform:translate(14px,-50%) scale(.985); transform-origin:left center; transition:left .16s cubic-bezier(.22,.61,.36,1), top .16s cubic-bezier(.22,.61,.36,1), opacity .12s ease, transform .16s cubic-bezier(.22,.61,.36,1), visibility 0s linear .16s; }
 .uh-trend-tooltip.uh-left { transform:translate(calc(-100% - 14px),-50%) scale(.985); transform-origin:right center; }
 .uh-trend-tooltip.uh-visible { opacity:1; visibility:visible; transform:translate(14px,-50%) scale(1); transition-delay:0s; }
 .uh-trend-tooltip.uh-left.uh-visible { transform:translate(calc(-100% - 14px),-50%) scale(1); }
@@ -3022,6 +3018,7 @@ window.__ModuleLoader__.load({
 .uh-grid { flex:1 1 auto; min-width:686px; display:grid; grid-auto-flow:column; grid-template-columns:repeat(53,minmax(10px,1fr)); grid-template-rows:repeat(7,minmax(10px,auto)); gap:3px; }
 .uh-cell { width:100%; height:auto; min-width:10px; aspect-ratio:1; border-radius:2px; background:var(--dsw-alias-bg-layer-2); animation:uh-cell-in .45s ease both; transition:transform .12s ease, box-shadow .12s ease; }
 .uh-cell:hover { transform:scale(1.35); box-shadow:0 1px 6px rgba(0,0,0,.28); position:relative; z-index:2; }
+.uh-cell.uh-today { box-shadow:0 0 0 2px rgba(9,105,218,.5); }
 .uh-tip { position:fixed; z-index:1200; background:var(--dsw-alias-bg-overlay); border:1px solid var(--dsw-alias-border-l2); border-radius:10px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.18); pointer-events:auto; min-width:200px; max-width:290px; animation:uh-tip-in .16s ease both; }
 .uh-tip-date { font-size:12px; font-weight:600; color:var(--dsw-alias-label-primary); margin-bottom:6px; }
 .uh-tip-row { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--dsw-alias-label-primary); padding:3px 6px; margin:0 -6px; border-radius:6px; cursor:pointer; transition:background-color .12s ease; }
@@ -3063,7 +3060,7 @@ window.__ModuleLoader__.load({
 @media (max-width: 640px) { .uh-side-modal { padding:0; } .uh-side-dialog { border-radius:0; border:0; padding:14px; } }
 /* iOS-style dashboard: grouped surfaces, tactile controls, and an elevated sheet. */
 .uh-page { gap:18px; max-width:1160px; margin:0 auto; padding:12px 2px 34px; font-family:-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif; }
-.uh-head { position:sticky; top:-18px; z-index:20; margin:0 -2px; padding:18px 2px 14px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 88%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 88%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); backdrop-filter:blur(18px) saturate(150%); border-bottom:1px solid color-mix(in srgb, var(--dsw-alias-border-l1) 76%, transparent); }
+.uh-head { position:sticky; top:-18px; z-index:20; margin:0 -2px; padding:18px 2px 14px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 88%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 88%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); border-bottom:1px solid color-mix(in srgb, var(--dsw-alias-border-l1) 76%, transparent); }
 .uh-title { font-size:22px; line-height:1.2; font-weight:700; letter-spacing:0; }
 .uh-actions { gap:8px; }
 .uh-range { padding:2px; gap:2px; border:0; border-radius:9px; background:color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent); overflow:visible; }
@@ -3169,7 +3166,7 @@ window.__ModuleLoader__.load({
 .uh-donut-track { opacity:.78; }
 .uh-donut-segment { fill:none; stroke-dasharray:1; stroke-dashoffset:1; animation:uh-donut-draw .95s cubic-bezier(.22,.61,.36,1) both; cursor:pointer; outline:none; transition:filter .15s ease, opacity .15s ease; }
 .uh-donut-segment:hover, .uh-donut-segment:focus-visible, .uh-donut-segment.uh-active { filter:brightness(1.12); }
-.uh-donut-tooltip { position:absolute; top:0; left:0; z-index:3; display:flex; align-items:flex-start; gap:8px; max-width:190px; padding:9px 10px; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); box-shadow:0 10px 24px rgba(0,0,0,.22); backdrop-filter:blur(10px); color:var(--dsw-alias-label-primary); pointer-events:none; font-size:12px; line-height:1.4; transition:left .12s cubic-bezier(.22,.61,.36,1), top .12s cubic-bezier(.22,.61,.36,1); }
+.uh-donut-tooltip { position:absolute; top:0; left:0; z-index:3; display:flex; align-items:flex-start; gap:8px; max-width:190px; padding:9px 10px; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); box-shadow:0 10px 24px rgba(0,0,0,.22); color:var(--dsw-alias-label-primary); pointer-events:none; font-size:12px; line-height:1.4; transition:left .12s cubic-bezier(.22,.61,.36,1), top .12s cubic-bezier(.22,.61,.36,1); }
 .uh-donut-tooltip > div { min-width:0; display:flex; flex-direction:column; gap:4px; }
 .uh-donut-tooltip strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
 .uh-donut-tooltip span:not(.uh-donut-dot):not(.uh-model-icon) { color:var(--dsw-alias-label-secondary); font-size:11px; }
@@ -3196,7 +3193,6 @@ window.__ModuleLoader__.load({
 @media (max-width:640px) { .uh-tbl-scroll { max-height:300px; border-radius:10px; } }
 @media (max-width:640px) { .uh-hm-body { min-width:720px; } .uh-donut-legend-row { grid-template-columns:36px minmax(0,1fr) 48px; gap:8px; } .uh-donut-legend-copy { grid-column:2; grid-row:1; } .uh-donut-legend-metrics { grid-column:2 / -1; grid-row:2; grid-template-columns:minmax(0,1fr) minmax(0,auto); gap:8px; } .uh-donut-percent { grid-column:3; grid-row:1; } .uh-ios-summary-hero { grid-template-columns:1fr; min-height:0; gap:18px; padding:18px; } .uh-ios-summary-total { align-items:flex-start; } .uh-ios-summary-meta { grid-template-columns:repeat(2,minmax(0,1fr)); padding:16px 0 0; border-left:0; border-top:1px solid var(--dsw-alias-border-l1); } .uh-ios-summary-meta-stat { padding:0 12px; } .uh-ios-summary-meta-stat:first-child { padding-left:0; } .uh-ios-summary-meta-stat:last-child { padding-right:0; } .uh-ios-summary-value { font-size:31px; } .uh-ios-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .uh-ios-metric:last-child { grid-column:1 / -1; } .uh-ios-metric-value { font-size:24px; } .uh-donut-layout { grid-template-columns:1fr; gap:12px; } .uh-donut-visual { width:min(100%,250px); } }
 @keyframes uh-cell-in { from { opacity:0; transform:scale(.4); } to { opacity:1; transform:scale(1); } }
-@keyframes uh-glow { 0% { box-shadow:0 0 0 0 rgba(9,105,218,.5); } 70% { box-shadow:0 0 0 5px rgba(9,105,218,0); } 100% { box-shadow:0 0 0 0 rgba(9,105,218,0); } }
 @keyframes uh-card-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
 @keyframes uh-bar-grow { from { transform:scaleX(0); } to { transform:scaleX(1); } }
 @keyframes uh-panel-in { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
@@ -3577,6 +3573,7 @@ window.__ModuleLoader__.load({
         let scanDone = false
         let requestToken = ''
         let appliedSnapshot = null
+        let lastStatusSignature = ''
         let fullFailures = 0
         let statusFailures = 0
         let retryTimer = null
@@ -3630,6 +3627,7 @@ window.__ModuleLoader__.load({
             setStatsError('')
             setLastStatsAt(Date.now())
             setStatus(data)
+            lastStatusSignature = JSON.stringify(data)
             setStats(data)
             if (tokenChanged) refreshBalance(false)
           }, () => {
@@ -3663,7 +3661,13 @@ window.__ModuleLoader__.load({
             }
             // Advance the freshness baseline without replacing the full payload.
             appliedSnapshot = Object.assign({}, appliedSnapshot, data)
-            setStatus(data)
+            // The idle poll returns the same payload every 15 seconds, and a new
+            // object identity alone would re-render the whole dashboard.
+            const statusSignature = JSON.stringify(data)
+            if (statusSignature !== lastStatusSignature) {
+              lastStatusSignature = statusSignature
+              setStatus(data)
+            }
             clearRetry()
             setStatsError('')
           }, () => {

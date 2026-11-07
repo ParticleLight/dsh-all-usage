@@ -121,3 +121,23 @@ for (const [prefix, tinted] of surfaces) {
     if (tinted) assert.match(rule, /--dsw-alias-bg-base/, 'the surface keeps the host tint on top of the underlay')
   })
 }
+
+// Smoothness is cheap to lose: a backdrop blur on a sticky header or on a tooltip
+// that follows the pointer re-rasters its backdrop on every frame, and a pulsing
+// box-shadow repaints forever even when nothing moves. Both sat on surfaces that
+// are already opaque, so neither bought anything visible.
+test('the dashboard leaves no always-on paint work behind', () => {
+  const ruleAt = (prefix) => {
+    const start = source.indexOf(prefix)
+    assert.notEqual(start, -1, 'the rule must exist: ' + prefix)
+    return source.slice(start, source.indexOf('}', start))
+  }
+  for (const prefix of ['.uh-head { position:sticky', '.uh-trend-tooltip { position:absolute', '.uh-donut-tooltip { position:absolute']) {
+    assert.doesNotMatch(ruleAt(prefix), /backdrop-filter/, 'no per-frame backdrop blur: ' + prefix)
+  }
+  assert.ok(source.includes('.uh-cell.uh-today { box-shadow:0 0 0 2px rgba(9,105,218,.5); }'), 'today keeps a static ring instead of a pulse')
+  assert.ok(source.includes("const cellClass = cell.date === props.todayKey ? 'uh-cell uh-today' : 'uh-cell'"), 'only today wears the ring')
+  assert.equal(source.includes('uh-glow'), false, 'the endless box-shadow keyframes must be gone')
+  assert.equal((source.match(/infinite/g) || []).length, 1, 'the spinner is the only endless animation left')
+  assert.ok(source.includes('animation:uh-spinner-turn .78s linear infinite'), 'the spinner still turns while data loads')
+})

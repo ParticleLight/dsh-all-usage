@@ -918,3 +918,22 @@ test('draws the trend as bars when the reader picks the bar view', () => {
   assert.ok(source.includes("if (value.trendChart === 'bar' || value.trendChart === 'line') state.trendChart = value.trendChart"), 'the panel must restore the picked view')
   assert.ok(source.includes('persistUsageUiState({ trendChart: kind })'), 'picking a view must be remembered')
 })
+
+// The status poll fires every 15 seconds (2 while a scan runs) and the host hands
+// back a fresh object even when nothing moved. Publishing that identity re-renders
+// the whole dashboard, so the poll only publishes a payload that differs.
+test('publishes a polled status only when the payload changed', () => {
+  const statusStart = source.indexOf('        const refreshStatus = () => {')
+  const statusEnd = source.indexOf('        const fast = timer.interval(', statusStart)
+  assert.notEqual(statusStart, -1, 'refreshStatus must exist')
+  assert.notEqual(statusEnd, -1, 'the poll timer must follow the status refresh')
+  const poll = source.slice(statusStart, statusEnd)
+  assert.ok(poll.includes('appliedSnapshot = Object.assign({}, appliedSnapshot, data)'), 'the freshness baseline still advances on every poll')
+  const guard = poll.indexOf('if (statusSignature !== lastStatusSignature) {')
+  const publish = poll.indexOf('setStatus(data)')
+  assert.notEqual(guard, -1, 'an unchanged poll must be recognised')
+  assert.ok(publish === -1 || publish > guard, 'the only rendered status is the changed one')
+  const fullStart = source.indexOf('        const refreshStats = () => {')
+  const full = source.slice(fullStart, statusStart)
+  assert.ok(full.includes('lastStatusSignature = JSON.stringify(data)'), 'the full snapshot seeds the baseline')
+})
