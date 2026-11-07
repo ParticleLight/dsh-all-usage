@@ -1302,21 +1302,27 @@ window.__ModuleLoader__.load({
       return Math.abs(scoped - dayRows) <= Math.max(dayRows * 0.05, 200000)
     }
     /**
-     * The hourly points of one day, accepted only while their own sum matches the day
-     * row the snapshot carries. The host answers both from different structures, and a
-     * disagreement means the shape would not add up to the number above it.
+     * The hourly points of one day, accepted only while their own sum matches that day’s
+     * total. Both numbers come from the same query response — the hour buckets and the
+     * day cube — so they describe the same moment. The snapshot the page holds is only
+     * replaced on a structural change (lib statusRefreshKind reports a plain data move as
+     * “query”), so its day row can be hours behind the curve on screen: comparing against
+     * it dropped a correct shape and the chart fell back to a single point.
      */
-    function trustedHourlyRows(hourly, stats, date, utc) {
+    function trustedHourlyRows(hourly, queryDaily, stats, date, utc) {
+      const sameResponse = Array.isArray(queryDaily)
+        ? queryDaily.find((entry) => entry !== null && typeof entry === 'object' && entry.date === date)
+        : undefined
       // A snapshot carries only the calendar it was asked for (lib/http.js): a UTC
-      // snapshot answers byDayUtc and leaves byDay empty, so the guard has to read the
-      // same calendar the scope used — otherwise English loses every hourly curve and
-      // the "today" trend collapses to one point per day.
-      const days = stats === null || stats === undefined
-        ? null
+      // snapshot answers byDayUtc and leaves byDay empty, so the fallback has to read the
+      // same calendar the scope used — otherwise English loses every hourly curve.
+      const snapshotDays = stats === null || stats === undefined
+        ? []
         : (utc === true
           ? (Array.isArray(stats.byDayUtc) ? stats.byDayUtc : [])
           : (Array.isArray(stats.byDay) ? stats.byDay : []))
-      const dayRow = days === null ? undefined : days.find((entry) => entry.date === date)
+      const snapshotRow = snapshotDays.find((entry) => entry !== null && typeof entry === 'object' && entry.date === date)
+      const dayRow = sameResponse !== undefined ? sameResponse : snapshotRow
       const dayTotal = dayRow === undefined ? null : processedTokensOf(dayRow.tokens)
       if (dayTotal === null) return []
       let hourlyTotal = 0
@@ -1692,6 +1698,29 @@ window.__ModuleLoader__.load({
     }
     function trendRowDate(row) {
       return row && typeof row.date === 'string' ? row.date : ''
+    }
+    /**
+     * The series the trend chart draws: today’s hourly shape while the scoped query on
+     * screen is current, otherwise the day rows for the range. The hourly branch checks
+     * that the result belongs to this scope and to the revision on screen — the previous
+     * result used to be painted as if it were today’s whole curve.
+     */
+    function buildTrendSeries(input) {
+      const settings = input !== null && input !== undefined ? input : {}
+      const stats = settings.stats === undefined ? null : settings.stats
+      const scope = settings.queryScope === undefined ? null : settings.queryScope
+      const queryResult = settings.queryResult === undefined ? null : settings.queryResult
+      const utc = settings.useUtc === true
+      const queryReady = settings.queryReady === true
+      const activeDayRows = Array.isArray(settings.activeDayRows) ? settings.activeDayRows : []
+      const bounds = scope !== null ? { start: scope.start, end: scope.end } : resolveRangeBounds(stats, settings.range, utc, settings.activeCustomRange)
+      const queryDaily = queryReady && queryResult !== null && Array.isArray(queryResult.daily) ? queryResult.daily : null
+      const hourlySource = scope !== null && scope.start === scope.end && queryReady && queryResult !== null && Array.isArray(queryResult.hourly) && queryResult.hourly.length > 0
+        ? trustedHourlyRows(queryResult.hourly, queryDaily, stats, scope.start, utc)
+        : []
+      const hourlyRows = hourlySource.length > 0 ? buildTrendHourlyRows(hourlySource, utc) : []
+      if (hourlyRows.length > 0) return hourlyRows
+      return buildTrendRows(queryDaily !== null ? queryDaily : activeDayRows, bounds, utc)
     }
     function buildTrendGeometry(rows, visible, width = 900, height = 250) {
       const keys = Array.isArray(visible) && visible.length > 0 ? visible : ['total']
@@ -3623,26 +3652,43 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         if (queryScope === null || queryKey === '') return undefined
         const seq = queryGate.next()
-        const expectedQueryVersion = liveQueryVersion
+        let alive = true
+        let healed = 0
+        const ask = (expectedVersion, attempt) => {
+          getUsageQuery(queryScope).then((data) => {
+            if (!alive || !queryGate.isCurrent(seq)) return
+            const actualVersion = data === null || typeof data !== 'object' ? null : queryVersion(data)
+            if (expectedVersion === null || actualVersion === null || actualVersion !== expectedVersion) {
+              // The host moved between the last status poll and this fetch: usage landed
+              // while the page was open, so the answer carries a revision the page does
+              // not know yet. Refresh the snapshot and ask again with the version the
+              // response carries. Dropping the answer instead left the previous result
+              // on screen until a manual refresh, and a range switch could then leave the
+              // chart on the day-row fallback (one point per series, drawn in the middle).
+              if (actualVersion !== null && attempt < 2 && healed < 2) {
+                healed += 1
+                if (healed === 1) refreshStatsRef.current()
+                ask(actualVersion, attempt + 1)
+                return
+              }
+              setQueryError('stale')
+              setQueryLoading(false)
+              return
+            }
+            setQueryResult(data)
+            setQueryResultKey(queryKey)
+            setQueryLoading(false)
+            setQueryError('')
+          }, () => {
+            if (!alive || !queryGate.isCurrent(seq)) return
+            setQueryLoading(false)
+            setQueryError('query')
+          })
+        }
         setQueryLoading(true)
         setQueryError('')
-        getUsageQuery(queryScope).then((data) => {
-          if (!queryGate.isCurrent(seq)) return
-          if (data === null || typeof data !== 'object' || expectedQueryVersion === null || queryVersion(data) !== expectedQueryVersion) {
-            setQueryError('stale')
-            setQueryLoading(false)
-            return
-          }
-          setQueryResult(data)
-          setQueryResultKey(queryKey)
-          setQueryLoading(false)
-          setQueryError('')
-        }, () => {
-          if (!queryGate.isCurrent(seq)) return
-          setQueryLoading(false)
-          setQueryError('query')
-        })
-        return undefined
+        ask(liveQueryVersion, 0)
+        return () => { alive = false }
       }, [queryKey, liveQueryVersion])
 
       const openAuditForScope = React.useCallback((scope) => {
@@ -3898,17 +3944,16 @@ window.__ModuleLoader__.load({
       // One editable row per ledger price route plus the rows that only exist in
       // the saved configuration (they stay visible, editable and removable).
       const pricingRows = React.useMemo(() => pricingOpen ? pricingRowsOf(currentPricing, pricingDraft, pricingPickedTargets) : [], [pricingOpen, currentPricing, pricingDraft, pricingPickedTargets])
-      const trendRows = React.useMemo(() => {
-        const bounds = queryScope !== null ? { start: queryScope.start, end: queryScope.end } : resolveRangeBounds(stats, range, useUtc, activeCustomRange)
-        // Today's hourly series is a shape, not a total: it is shown while its own sum
-        // agrees with the day row the snapshot carries, so a drifting source costs the
-        // curve instead of the numbers.
-        const hourlySource = queryScope !== null && queryScope.start === queryScope.end && queryResult && Array.isArray(queryResult.hourly) && queryResult.hourly.length > 0
-          ? trustedHourlyRows(queryResult.hourly, stats, queryScope.start, useUtc)
-          : []
-        const hourlyRows = hourlySource.length > 0 ? buildTrendHourlyRows(hourlySource, useUtc) : []
-        return hourlyRows.length > 0 ? hourlyRows : buildTrendRows(queryUsable && queryResult && Array.isArray(queryResult.daily) ? queryResult.daily : activeDayRows, bounds, useUtc)
-      }, [queryScope, queryUsable, queryResult, activeDayRows, stats, range, useUtc, activeCustomRangeKey])
+      const trendRows = React.useMemo(() => buildTrendSeries({
+        stats,
+        queryScope,
+        queryResult,
+        queryReady,
+        activeDayRows,
+        range,
+        useUtc,
+        activeCustomRange,
+      }), [queryScope, queryReady, queryResult, activeDayRows, stats, range, useUtc, activeCustomRangeKey])
       const trendAnimationKey = queryUsable && queryResult ? queryKey + ':' + (queryVersion(queryResult) || 'query') : queryKey
       const pricingRenderRevision = React.useMemo(() => ({}), [pricingOpen, pricingDraft, pricingLoading, pricingSaving, pricingSyncing, pricingSyncSaving, pricingError, currentPricing, pricingSummary, pricingRows, pricingOpenEditor, pricingTemporalDrafts, pricingModelSearchText, pricingModelSearchOpen, pricingModelSearchOptions, stats, language])
       const modelDonutItems = React.useMemo(() => modelRows.map((row, index) => ({ label: row.model, value: wsTotal(row), cost: row.cost, color: DONUT_COLORS[index % DONUT_COLORS.length], iconKey: modelView === 'route' ? (() => { const icon = resolveModelIcon(row); return icon === null ? null : icon.key })() : (row.iconKey === undefined ? null : row.iconKey) })), [modelRows, modelView])

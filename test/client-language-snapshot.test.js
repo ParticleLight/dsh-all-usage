@@ -117,7 +117,11 @@ test('the hourly trend guard reads the calendar the snapshot actually carries', 
   const day = { date: '2026-10-18', tokens: { input: 10, output: 5 } }
   const utcStats = { byDay: [], byDayUtc: [day] }
   const localStats = { byDay: [day], byDayUtc: [] }
-  assert.equal(context.__trusted(hourly, utcStats, '2026-10-18', true).length, 1, 'UTC mode must read byDayUtc')
-  assert.equal(context.__trusted(hourly, localStats, '2026-10-18', false).length, 1, 'local mode must read byDay')
-  assert.equal(context.__trusted(hourly, utcStats, '2026-10-18', false).length, 0, 'a local lookup against a UTC snapshot stays untrusted')
+  // The guard takes the day row of its own query response first and only falls back to the
+  // snapshot, so the calendar test passes null there and exercises the snapshot path.
+  assert.equal(context.__trusted(hourly, null, utcStats, '2026-10-18', true).length, 1, 'UTC mode must read byDayUtc')
+  assert.equal(context.__trusted(hourly, null, localStats, '2026-10-18', false).length, 1, 'local mode must read byDay')
+  assert.equal(context.__trusted(hourly, null, utcStats, '2026-10-18', false).length, 0, 'a local lookup against a UTC snapshot stays untrusted')
+  // A response that carries its own day row wins over the snapshot's calendar entirely.
+  assert.equal(context.__trusted(hourly, [day], utcStats, '2026-10-18', false).length, 1, 'the response day row is calendar-neutral')
 })

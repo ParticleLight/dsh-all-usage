@@ -205,21 +205,36 @@ test('memoizes expensive scope derivations and active detail panels', () => {
 
 test('selects hourly query data for single-day trend scopes', () => {
   assert.match(source, /Array\.isArray\(queryResult\.hourly\)/)
-  assert.match(source, /queryScope !== null && queryScope\.start === queryScope\.end/)
-  // The hourly series is filtered through the day row before it is drawn, so the
-  // assertion covers both the gate and the builder it feeds. The gate is handed the
-  // calendar in use: a UTC snapshot carries byDayUtc and an empty byDay.
-  assert.match(source, /trustedHourlyRows\(queryResult\.hourly, stats, queryScope\.start, useUtc\)/)
+  assert.match(source, /scope !== null && scope\.start === scope\.end/)
+  assert.match(source, /const hourlySource = scope !== null && scope\.start === scope\.end && queryReady/)
+  // The hourly series is filtered through the day row of its own response before it is
+  // drawn, so the assertion covers both the gate and the builder it feeds. The gate is
+  // handed the calendar in use: a UTC snapshot carries byDayUtc and an empty byDay.
+  assert.match(source, /trustedHourlyRows\(queryResult\.hourly, queryDaily, stats, scope\.start, utc\)/)
   // One declaration and one call: a half-finished edit once left a second, unguarded
   // ternary behind that read .hourly off a null query result and took the panel into
   // its error boundary. Syntax checks and the pattern above both stayed green.
   assert.equal((source.match(/trustedHourlyRows\(/g) || []).length, 2, 'the gate is declared once and called once')
   assert.equal((source.match(/const hourlyRows =/g) || []).length, 1, 'the trend block builds its rows once')
-  assert.match(source, /buildTrendHourlyRows\(hourlySource, useUtc\)/)
+  assert.match(source, /buildTrendHourlyRows\(hourlySource, utc\)/)
   assert.match(source, /Hourly Token usage trend/)
   assert.match(source, /pointLabel\(row, true\)/)
 })
 
+test('recovers a query answer the host has already moved past', () => {
+  // The page validates a query answer against the revision its last status poll saw. Usage
+  // that lands in between used to make that answer get dropped for good: the range switch
+  // then showed the previous result (today's trend fell back to one point per series, all
+  // of them drawn in the middle of the chart) until a manual refresh.
+  assert.match(source, /const ask = \(expectedVersion, attempt\) => \{/)
+  assert.match(source, /ask\(actualVersion, attempt \+ 1\)/)
+  assert.match(source, /if \(healed === 1\) refreshStatsRef\.current\(\)/)
+  assert.match(source, /ask\(liveQueryVersion, 0\)/)
+  // The stale verdict is still the last resort, after the retry budget is spent.
+  const retryAt = source.indexOf('ask(actualVersion, attempt + 1)')
+  const staleAt = source.indexOf("setQueryError('stale')", retryAt)
+  assert.ok(retryAt > 0 && staleAt > retryAt, 'the retry comes before the stale verdict')
+})
 test('uses a centered spinner without idle chart controls while trend data loads', () => {
   assert.match(source, /uh-trend-stage uh-trend-loading/)
   assert.match(source, /uh-trend-spinner/)
@@ -329,7 +344,7 @@ test('memoizes chart geometry and parent trend rows', () => {
   assert.match(pricingRevision, /pricingModelSearchOpen/)
   assert.match(pricingRevision, /pricingModelSearchOptions/)
   assert.ok(source.includes('const geometry = React.useMemo(() => buildTrendGeometry(rows, visible, width, height), [rows, visible])'))
-  assert.ok(source.includes('const trendRows = React.useMemo(() => {'))
+  assert.ok(source.includes('const trendRows = React.useMemo(() => buildTrendSeries({'))
 })
 
 test('isolates dashboard render errors from the sidebar entry', () => {

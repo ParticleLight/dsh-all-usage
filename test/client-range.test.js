@@ -10,8 +10,8 @@ assert.notEqual(start, -1, 'client date helpers must exist')
 assert.notEqual(end, -1, 'client range helper boundary must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate }', context)
-const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate } = context.__rangeHelpers
+vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate }', context)
+const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate } = context.__rangeHelpers
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
   return {
@@ -575,4 +575,50 @@ test('heatmap cells name themselves for assistive technology', () => {
   assert.ok(heatCellLabel('2026-08-18', 0, 'en').indexOf('no usage') > 0)
   // A missing count must not read as a count of NaN.
   assert.ok(heatCellLabel('2026-08-18', undefined, 'zh').indexOf('无使用记录') > 0)
+})
+
+test('keeps the hourly curve when the snapshot lags the response that carries it', () => {
+  const tokens = (input) => ({ input, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 })
+  const hourly = [
+    { time: Date.UTC(2026, 10, 6, 16), date: '2026-11-06T16:00:00.000Z', tokens: tokens(40) },
+    { time: Date.UTC(2026, 10, 6, 17), date: '2026-11-06T17:00:00.000Z', tokens: tokens(60) },
+  ]
+  const daily = [{ date: '2026-11-07', tokens: tokens(100) }]
+  // The page's snapshot is only replaced on structural changes, so it still holds the day
+  // as it looked earlier. The response's own day row is the number that goes with the hours.
+  const staleStats = { byDay: [{ date: '2026-11-07', tokens: tokens(30) }] }
+  assert.equal(trustedHourlyRows(hourly, daily, staleStats, '2026-11-07', false).length, 2)
+  // A genuine disagreement between the two cubes still costs the shape. The tolerance has
+  // an absolute floor of 200k tokens, so the mismatch has to be larger than that.
+  assert.equal(trustedHourlyRows(hourly, [{ date: '2026-11-07', tokens: tokens(5000000) }], staleStats, '2026-11-07', false).length, 0)
+  // A payload without its own day row still falls back to the snapshot row.
+  assert.equal(trustedHourlyRows(hourly, null, { byDay: [{ date: '2026-11-07', tokens: tokens(100) }] }, '2026-11-07', false).length, 2)
+})
+
+test('draws the day row instead of a query result that is not current', () => {
+  const tokens = (input) => ({ input, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 })
+  const dayRow = { date: '2026-11-07', turns: 2, tokens: tokens(100) }
+  const stats = { byDay: [dayRow] }
+  const scope = { start: '2026-11-07', end: '2026-11-07', utc: false }
+  const stale = {
+    hourly: [
+      { time: Date.UTC(2026, 10, 6, 16), date: '2026-11-06T16:00:00.000Z', tokens: tokens(40) },
+      { time: Date.UTC(2026, 10, 6, 17), date: '2026-11-06T17:00:00.000Z', tokens: tokens(60) },
+    ],
+    daily: [dayRow],
+  }
+  const input = { stats, queryScope: scope, queryResult: stale, activeDayRows: stats.byDay, range: 'today', useUtc: false }
+  // One point per series, all drawn in the middle: what a range switch used to show when
+  // the answer for the new scope had already been dropped.
+  const pending = buildTrendSeries({ ...input, queryReady: false })
+  assert.equal(pending.length, 1)
+  assert.equal(pending[0].date, '2026-11-07')
+  // Once the answer belongs to the scope on screen the hours are drawn again.
+  const ready = buildTrendSeries({ ...input, queryReady: true })
+  assert.equal(ready.length, 2)
+  assert.ok(ready.every((row) => Number.isFinite(row.time)))
+  // A multi-day scope never borrows the hourly branch.
+  const week = buildTrendSeries({ ...input, queryScope: { start: '2026-11-01', end: '2026-11-07', utc: false }, queryReady: true })
+  assert.equal(week.length, 7)
+  assert.ok(week.every((row) => !Number.isFinite(row.time)))
 })
