@@ -915,7 +915,7 @@ test('draws the trend as bars when the reader picks the bar view', () => {
   assert.ok(source.includes("React.createElement('div', { className: 'uh-range', role: 'group', 'aria-label': tr('图表类型', 'Chart type') },"), 'the switch reuses the range pill')
   assert.ok(source.includes("'aria-pressed': chartType === entry[0]"), 'the switch must expose its pressed state')
   assert.ok(source.includes('.uh-trend-bar { pointer-events:none; }'), 'the bar marks must not swallow the hover')
-  assert.ok(source.includes("if (value.trendChart === 'bar' || value.trendChart === 'line') state.trendChart = value.trendChart"), 'the panel must restore the picked view')
+    assert.ok(source.includes("if (value.trendChart === 'bar' || value.trendChart === 'line') state.trendChart = value.trendChart"), 'the panel must restore the picked view')
   assert.ok(source.includes('persistUsageUiState({ trendChart: kind })'), 'picking a view must be remembered')
 })
 
@@ -936,4 +936,20 @@ test('publishes a polled status only when the payload changed', () => {
   const fullStart = source.indexOf('        const refreshStats = () => {')
   const full = source.slice(fullStart, statusStart)
   assert.ok(full.includes('lastStatusSignature = JSON.stringify(data)'), 'the full snapshot seeds the baseline')
+})
+
+// The version chip already jumps to the repository; this button is the explicit
+// ask, and it sits beside the chip so it reads as part of the header, not a feature.
+test('offers a GitHub star button beside the version chip', () => {
+  const starStart = source.indexOf("      const starButton = React.createElement('button', {")
+  assert.notEqual(starStart, -1, 'the star button must exist')
+  const star = source.slice(starStart, source.indexOf('      const rangeLabel', starStart))
+  assert.ok(star.includes("className: 'uh-gh'"), 'the star button uses its own chip style')
+  assert.ok(star.includes("tr('在 GitHub 上给项目点个星', 'Star this plugin on GitHub')"), 'the call to action is named in both languages')
+  assert.ok(star.includes("window.open(GITHUB_REPOSITORY_URL, '_blank', 'noopener,noreferrer')"), 'it opens the repository')
+  assert.ok(star.includes("className: 'uh-gh-star'"), 'the star mark is its own element')
+  assert.ok(star.includes("className: 'uh-gh-mark'"), 'the GitHub mark follows the star')
+  assert.ok(star.includes("'GitHub'"), 'the button is labelled GitHub')
+  assert.match(source, /versionBadge,\s+starButton,/, 'it sits right after the version chip')
+  assert.ok(source.includes('.uh-gh-star { flex:none; fill:#f5c542; }'), 'the star is yellow')
 })

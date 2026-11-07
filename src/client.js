@@ -2676,6 +2676,11 @@ window.__ModuleLoader__.load({
 .uh-version-status { color:var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary)); }
 .uh-version-outdated { border-color:color-mix(in srgb, var(--dsw-alias-brand-primary) 55%, transparent); color:var(--dsw-alias-brand-primary); }
 .uh-version-outdated .uh-version-status { color:inherit; font-weight:600; }
+.uh-gh { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-secondary); border-radius:999px; padding:2px 9px; font:inherit; font-size:11px; line-height:1.6; cursor:pointer; }
+.uh-gh:hover { background:var(--dsw-alias-bg-layer-1); color:var(--dsw-alias-label-primary); }
+.uh-gh-star { flex:none; fill:#f5c542; }
+.uh-gh-mark { flex:none; fill:var(--dsw-alias-label-primary); }
+.uh-gh-label { color:var(--dsw-alias-label-primary); font-weight:600; letter-spacing:0; }
 .uh-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .uh-language-menu, .uh-filter-menu { position:relative; z-index:12; }
 .uh-filter-menu { flex:0 1 auto; min-width:0; }
@@ -5012,6 +5017,24 @@ window.__ModuleLoader__.load({
         React.createElement('span', { className: 'uh-version-number' }, 'v' + versionView.current),
         versionStatusText === '' ? null : React.createElement('span', { className: 'uh-version-status' }, versionStatusText),
       )
+      // A call to action rather than a second copy of the chip: the chip already opens
+      // the repository, this one says why. The mark is the GitHub octocat, the star is
+      // the yellow one people are being asked for.
+      const starButton = React.createElement('button', {
+        type: 'button',
+        className: 'uh-gh',
+        title: tr('在 GitHub 上给项目点个星', 'Star this plugin on GitHub'),
+        'aria-label': tr('在 GitHub 上给项目点个星', 'Star this plugin on GitHub'),
+        onClick: () => {
+          try { window.open(GITHUB_REPOSITORY_URL, '_blank', 'noopener,noreferrer') } catch (err) { /* popup blocked */ }
+        },
+      },
+        React.createElement('svg', { className: 'uh-gh-star', width: 12, height: 12, viewBox: '0 0 16 16', 'aria-hidden': true },
+          React.createElement('path', { d: 'M8 1.1l2.02 4.1 4.52.66-3.27 3.19.77 4.5L8 11.42l-4.04 2.13.77-4.5L1.46 5.86l4.52-.66L8 1.1z' })),
+        React.createElement('svg', { className: 'uh-gh-mark', width: 14, height: 14, viewBox: '0 0 16 16', 'aria-hidden': true },
+          React.createElement('path', { d: 'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z' })),
+        React.createElement('span', { className: 'uh-gh-label' }, 'GitHub'),
+      )
       const rangeLabel = range === 'custom' && activeCustomRange !== null
         ? (language === 'en' ? activeCustomRange.start + ' to ' + activeCustomRange.end + ' (UTC)' : activeCustomRange.start + ' 至 ' + activeCustomRange.end)
         : range === 'today' ? tr('今日', 'Today') : range === '7d' ? tr('近 7 天', 'Last 7 Days') : range === '30d' ? tr('近 30 天', 'Last 30 Days') : range === '90d' ? tr('近 90 天', 'Last 90 Days') : tr('全部', 'All Time')
@@ -5139,6 +5162,7 @@ window.__ModuleLoader__.load({
           React.createElement('div', { className: 'uh-title-wrap' },
             React.createElement('h2', { className: 'uh-title' }, tr('用量统计', 'Usage Statistics')),
             versionBadge,
+            starButton,
           ),
           React.createElement('div', { className: 'uh-actions' },
             React.createElement('button', {
