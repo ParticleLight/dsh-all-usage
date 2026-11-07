@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.2.2（2026-11-07）
+### 新功能
+- **趋势图可切换柱状图** —— 图表右上角新增「折线 / 柱状」切换；柱状是把每行按 token 类型叠成一根柱子、由总量封顶，柱子自下向上生长（系统开启「减少动态效果」时不播放），选过的视图下次打开仍保留。
+- **支持 DSH 0.2.2-alpha.3 / 0.2.2-rc.1** —— 新运行时可直接使用。
+### 修复
+- **切到「今日」时趋势图只剩屏幕中间几个点** —— 之前会退化成单点兜底、要手动刷新才恢复；现在切过去直接显示当日小时曲线。
+### 优化
+- **面板不再做无谓的重绘** —— 「今日」格子原本有一个永不停止的呼吸光晕，现在改为固定描边；标题栏与图表提示框不再实时模糊背景。滚动、悬停更顺，长时间挂着也更省电。
+- **空闲时不再周期性整页重渲染** —— 后台每 15 秒的轮询在数据没有变化时不再刷新界面。
+### Features
+- **The trend chart can switch to bars** — a Line / Bars switch sits at the chart's top right; bars stack one column per row by token type with the total on top, grow from the baseline (no growth when the system asks for reduced motion), and the view is remembered next time.
+- **DSH 0.2.2-alpha.3 and 0.2.2-rc.1 are supported** — the new runtimes work out of the box.
+### Fixes
+- **"Today" no longer collapses to a few dots in the middle** — it used to fall back to a single row and needed a manual refresh; the hourly curve now shows as soon as you switch.
+### Improvements
+- **The panel stops repainting for nothing** — today's calendar cell no longer carries a never-ending glow (it keeps a static outline), and the header and chart tooltips no longer blur their backdrop. Scrolling and hovering are smoother, and leaving it open costs less.
+- **An idle panel no longer re-renders on a timer** — the 15-second poll skips the dashboard when the payload has not changed.
+
 ## v1.2.1（2026-10-18）
 ### 新功能
 - **支持 DSH 0.2.1-rc.1 / rc.2** —— 新运行时可直接使用。
