@@ -35,5 +35,7 @@ test('ships a minified client bundle with the expected module contract', () => {
   assert.equal(typeof client.apply, 'function')
   assert.equal(embeddedIconBytes, 0, 'artwork must be served by the host, not embedded')
   assert.ok((bundle.match(/\/api\/all-usage\/icon\?key=/g) || []).length > 0, 'the bundle must reference the host icon route')
+  // A stale lib/client.js would otherwise ship a trend chart without the bar view.
+  assert.ok(bundle.includes('uh-trend-bar'), 'the built bundle must carry the bar marks')
   assert.ok(Buffer.byteLength(bundle) - embeddedIconBytes < Buffer.byteLength(source) * 0.7)
 })

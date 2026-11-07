@@ -10,8 +10,8 @@ assert.notEqual(start, -1, 'client date helpers must exist')
 assert.notEqual(end, -1, 'client range helper boundary must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate }', context)
-const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate } = context.__rangeHelpers
+vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, buildTrendBars, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate }', context)
+const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, buildTrendBars, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate } = context.__rangeHelpers
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
   return {
@@ -393,6 +393,48 @@ test('builds safe single-point and large-value trend geometry', () => {
   assert.ok(geometry.max > 1000000)
   const path = smoothTrendPath([{ x: 0, y: 10 }, { x: 10, y: 2 }, { x: 20, y: 8 }])
   assert.match(path, /C/)
+})
+test('draws one stacked bar per trend row on the line scale', () => {
+  const rows = buildTrendRows([
+    day('2026-08-01', 1, 100),
+    day('2026-08-02', 2, 300),
+    day('2026-08-03', 3, 200),
+  ], { start: '2026-08-01', end: '2026-08-03' }, false)
+  const geometry = buildTrendGeometry(rows, ['total'], 900, 250)
+  const bottom = geometry.height - geometry.padding.bottom
+  const bars = buildTrendBars(rows, ['total', 'input', 'cacheRead', 'output'], 900, 250)
+  assert.equal(bars.length, 3)
+  rows.forEach((row, index) => {
+    const bar = bars[index]
+    const point = geometry.points.total[index]
+    assert.ok(Math.abs(bar.x + bar.width / 2 - point.x) < 1e-6)
+    assert.ok(bar.segments.length > 1)
+    // segments stack without gaps and the top lands on the total value
+    let cursor = bottom
+    for (const segment of bar.segments) {
+      assert.ok(Math.abs(segment.y + segment.height - cursor) < 1e-6)
+      assert.ok(segment.height > 0)
+      cursor = segment.y
+    }
+    assert.ok(Math.abs(cursor - point.y) < 1e-6)
+    assert.equal(bar.segments.at(-1).key, 'total')
+  })
+  assert.ok(bars[1].segments.at(-1).height > bars[0].segments.at(-1).height)
+})
+
+test('keeps the bar view safe for one row, no rows and hidden totals', () => {
+  const single = buildTrendRows([day('2026-08-01', 1, 100)], { start: '2026-08-01', end: '2026-08-01' }, false)
+  const singleBars = buildTrendBars(single, ['total'], 900, 250)
+  assert.equal(singleBars.length, 1)
+  assert.ok(Math.abs(singleBars[0].x + singleBars[0].width / 2 - 466) < 1e-6)
+  assert.equal(singleBars[0].segments.map((segment) => segment.key).join('+'), 'total')
+
+  assert.equal(buildTrendBars([], ['total'], 900, 250).length, 0)
+
+  const partsOnly = buildTrendBars(single, ['input', 'cacheRead'], 900, 250)
+  assert.equal(partsOnly[0].segments.map((segment) => segment.key).join('+'), 'input+cacheRead')
+  const withTotal = buildTrendBars(single, ['total', 'input'], 900, 250)
+  assert.equal(withTotal[0].segments.map((segment) => segment.key).join('+'), 'input+total')
 })
 
 test('renders a visible marker for a single-day trend series', () => {

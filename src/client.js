@@ -1722,6 +1722,47 @@ window.__ModuleLoader__.load({
       if (hourlyRows.length > 0) return hourlyRows
       return buildTrendRows(queryDaily !== null ? queryDaily : activeDayRows, bounds, utc)
     }
+    /**
+     * One bar per row, measured on the same scale as the line: the visible series stack
+     * up from the baseline, so the bar carries the row total while the segments keep the
+     * split readable. The bar is centred on the line's own x for that row, which keeps
+     * the hover cursor, the tick labels and the hit areas aligned with the line view.
+     */
+    function buildTrendBars(rows, visible, width = 900, height = 250) {
+      const list = Array.isArray(rows) ? rows : []
+      const wanted = Array.isArray(visible) ? visible : []
+      const keys = wanted.filter((key) => key !== 'total')
+      const geometry = buildTrendGeometry(list, ['total'], width, height)
+      const innerHeight = Math.max(1, height - geometry.padding.top - geometry.padding.bottom)
+      const innerWidth = Math.max(1, width - geometry.padding.left - geometry.padding.right)
+      const baseline = height - geometry.padding.bottom
+      const spacing = list.length > 1 ? innerWidth / (list.length - 1) : innerWidth / 2
+      const barWidth = Math.max(2, Math.min(spacing * 0.62, 26))
+      const scale = (value) => (Number.isFinite(value) && value > 0 ? (value / geometry.max) * innerHeight : 0)
+      const showTotal = keys.length === 0 || wanted.includes('total')
+      return list.map((row, index) => {
+        const centre = geometry.padding.left + (list.length > 1 ? index * innerWidth / (list.length - 1) : innerWidth / 2)
+        const tokens = row && row.tokens ? row.tokens : {}
+        const segments = []
+        let cursor = baseline
+        let parts = 0
+        for (const key of keys) {
+          const value = Number.isFinite(tokens[key]) ? tokens[key] : 0
+          parts += value
+          const segmentHeight = scale(value)
+          if (segmentHeight <= 0) continue
+          segments.push({ key, y: cursor - segmentHeight, height: segmentHeight })
+          cursor -= segmentHeight
+        }
+        const total = row && Number.isFinite(row.total) ? row.total : parts
+        if (showTotal) {
+          const remainder = total - parts
+          const remainderHeight = remainder > 0 ? scale(remainder) : 0
+          if (remainderHeight > 0) segments.push({ key: 'total', y: cursor - remainderHeight, height: remainderHeight })
+        }
+        return { x: centre - barWidth / 2, width: barWidth, segments }
+      })
+    }
     function buildTrendGeometry(rows, visible, width = 900, height = 250) {
       const keys = Array.isArray(visible) && visible.length > 0 ? visible : ['total']
       const padding = { left: 46, right: 14, top: 14, bottom: 30 }
@@ -2046,12 +2087,20 @@ window.__ModuleLoader__.load({
       const visible = Array.isArray(props.visible) && props.visible.length > 0 ? props.visible : ['total']
       const [hoverIndex, setHoverIndex] = React.useState(null)
       const [tooltipIndex, setTooltipIndex] = React.useState(null)
+      const [chartType, setChartType] = React.useState(() => (storedUsageUiState().trendChart === 'bar' ? 'bar' : 'line'))
+      // Remembered with the other panel views, so reopening the panel (or reloading the
+      // host) keeps the reader in the view they picked instead of snapping back to the line.
+      const chooseChartType = (kind) => {
+        setChartType(kind)
+        persistUsageUiState({ trendChart: kind })
+      }
       const width = 900
       const height = 280
       const geometry = React.useMemo(() => buildTrendGeometry(rows, visible, width, height), [rows, visible])
       const colors = TREND_COLORS
       const gradientOpacity = TREND_GRADIENT_OPACITY
       const bottomY = height - geometry.padding.bottom
+      const bars = React.useMemo(() => chartType === 'bar' && !props.loading && !props.error ? buildTrendBars(rows, visible, width, height) : [], [chartType, rows, visible, width, height, props.loading, props.error])
       const seriesPaths = React.useMemo(() => {
         const result = {}
         for (const key of visible) {
@@ -2101,6 +2150,11 @@ window.__ModuleLoader__.load({
                     React.createElement('stop', { offset: '96%', stopColor: colors[key] || '#9aa4b2', stopOpacity: 0 }),
                   )),
                 ),
+                chartType === 'bar'
+                  ? bars.map((bar, barIndex) => React.createElement('g', { key: 'bar-' + barIndex, className: 'uh-trend-bar-group', style: { animationDelay: Math.min(barIndex * 16, 260) + 'ms' } },
+                    bar.segments.map((segment, segmentIndex) => React.createElement('rect', { key: 'bar-' + barIndex + '-' + segmentIndex, x: bar.x, y: segment.y, width: bar.width, height: segment.height, className: 'uh-trend-bar', 'data-series': segment.key, fill: colors[segment.key] || '#9aa4b2' })),
+                  ))
+                  : [
                 visible.map((key, seriesIndex) => {
                   const areaPath = seriesPaths[key] ? seriesPaths[key].area : ''
                   return areaPath === '' ? null : React.createElement('path', { key: 'area-' + key, d: areaPath, className: 'uh-trend-area', 'data-series': key, fill: 'url(#uh-trend-gradient-' + key + ')', style: { animationDelay: (80 + seriesIndex * 80) + 'ms' } })
@@ -2117,9 +2171,10 @@ window.__ModuleLoader__.load({
                   const point = points[0]
                   return React.createElement('circle', { key: 'single-point-' + key, cx: point.x, cy: point.y, r: 4, className: 'uh-trend-point', fill: colors[key] || '#9aa4b2' })
                 }),
+                  ],
                 hoverIndex !== null && hoverPoint ? React.createElement(React.Fragment, { key: 'hover-' + hoverIndex },
                   React.createElement('line', { x1: hoverPoint.x, x2: hoverPoint.x, y1: geometry.padding.top, y2: bottomY, className: 'uh-trend-cursor' }),
-                  visible.map((key) => { const point = (geometry.points[key] || [])[hoverIndex]; return point ? React.createElement('circle', { key: key, cx: point.x, cy: point.y, r: 4, className: 'uh-trend-point', fill: colors[key] || '#9aa4b2' }) : null }),
+                  chartType === 'bar' ? null : visible.map((key) => { const point = (geometry.points[key] || [])[hoverIndex]; return point ? React.createElement('circle', { key: key, cx: point.x, cy: point.y, r: 4, className: 'uh-trend-point', fill: colors[key] || '#9aa4b2' }) : null }),
                 ) : null,
                 rows.map((row, index) => {
                   const point = (geometry.points[visible[0]] || [])[index]
@@ -2146,7 +2201,14 @@ window.__ModuleLoader__.load({
       return React.createElement('div', { className: 'uh-panel uh-trend-panel' },
         React.createElement('div', { className: 'uh-trend-head' },
           React.createElement('div', {}, React.createElement('h3', { className: 'uh-tbl-title uh-title-with-icon' }, React.createElement(LineIcon, { name: 'chart', size: 16 }), tr('Token 使用趋势', 'Token Usage Trend')), React.createElement('div', { className: 'uh-note' }, (props.rangeLabel || '') + (aggregated ? (props.rangeLabel ? ' · ' : '') + aggregatedLabel : ''))),
-          chartReady ? React.createElement('div', { className: 'uh-note' }, aggregated ? tr('区间较长，每点为一个周期', 'Long range summarised: one point per period') : tr('点击数据点查看当日明细', 'Click a point to inspect that day')) : null,
+          chartReady ? React.createElement('div', { className: 'uh-trend-head-side' },
+            React.createElement('div', { className: 'uh-note' }, aggregated ? tr('区间较长，每点为一个周期', 'Long range summarised: one point per period') : tr('点击数据点查看当日明细', 'Click a point to inspect that day')),
+            React.createElement('div', { className: 'uh-range', role: 'group', 'aria-label': tr('图表类型', 'Chart type') },
+              [['line', tr('折线', 'Line')], ['bar', tr('柱状', 'Bars')]].map((entry) => React.createElement('button', {
+                key: entry[0], type: 'button', className: chartType === entry[0] ? 'uh-on' : '', 'aria-pressed': chartType === entry[0], onClick: () => chooseChartType(entry[0]),
+              }, entry[1])),
+            ),
+          ) : null,
         ),
         chartBody,
         chartReady ? React.createElement('div', { className: 'uh-trend-legend' },
@@ -2815,6 +2877,7 @@ window.__ModuleLoader__.load({
 .uh-sync-retry { border:0; background:transparent; color:inherit; font:inherit; text-decoration:underline; cursor:pointer; padding:0 2px; }
 .uh-trend-panel { min-height:300px; animation:uh-panel-in .38s ease both; }
 .uh-trend-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
+.uh-trend-head-side { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
 .uh-trend-chart-wrap { position:relative; min-height:250px; width:100%; overflow:hidden; }
 .uh-trend-stage { display:grid; place-items:center; min-height:250px; width:100%; }
 .uh-trend-message { color:var(--dsw-alias-label-secondary); font-size:12px; }
@@ -2827,6 +2890,10 @@ window.__ModuleLoader__.load({
 .uh-trend-line { fill:none; stroke-width:2.2; vector-effect:non-scaling-stroke; stroke-linecap:round; stroke-linejoin:round; opacity:.22; }
 .uh-trend-line-draw { fill:none; stroke-width:2.2; vector-effect:non-scaling-stroke; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:var(--uh-draw-length); stroke-dashoffset:var(--uh-draw-length); opacity:.96; pointer-events:none; animation:uh-trend-draw .95s cubic-bezier(.22,.61,.36,1) both; }
 .uh-trend-area { opacity:1; animation:uh-trend-fill .8s ease; }
+.uh-trend-bar { pointer-events:none; }
+@keyframes uh-trend-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+.uh-trend-bar-group { transform-box: fill-box; transform-origin: 50% 100%; animation:uh-trend-grow .5s cubic-bezier(.22,.61,.36,1) both; }
+@media (prefers-reduced-motion: reduce) { .uh-trend-bar-group { animation:none; } }
 .uh-trend-hit { fill:transparent; cursor:crosshair; outline:none; }
 .uh-trend-hit:focus { fill:color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent); outline:1px solid var(--dsw-alias-brand-primary); outline-offset:2px; }
 .uh-trend-tooltip { position:absolute; z-index:4; min-width:166px; padding:10px 11px; border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2) 88%, transparent); border-radius:8px; background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 94%, transparent); box-shadow:0 10px 24px rgba(0,0,0,.22); backdrop-filter:blur(10px); color:var(--dsw-alias-label-primary); font-size:12px; line-height:1.45; pointer-events:none; opacity:0; visibility:hidden; transform:translate(14px,-50%) scale(.985); transform-origin:left center; transition:left .16s cubic-bezier(.22,.61,.36,1), top .16s cubic-bezier(.22,.61,.36,1), opacity .12s ease, transform .16s cubic-bezier(.22,.61,.36,1), visibility 0s linear .16s; }
@@ -3324,6 +3391,7 @@ window.__ModuleLoader__.load({
         if (['route', 'model', 'provider'].includes(value.modelView)) state.modelView = value.modelView
         if (['today', '7d', '30d', '90d', 'all'].includes(value.range)) state.range = value.range
         if (HEATMAP_SPAN_KEYS.includes(value.heatmapSpan)) state.heatmapSpan = value.heatmapSpan
+        if (value.trendChart === 'bar' || value.trendChart === 'line') state.trendChart = value.trendChart
         if (typeof value.pricingAutoSync === 'boolean') state.pricingAutoSync = value.pricingAutoSync
         return state
       } catch (_) { return {} }
