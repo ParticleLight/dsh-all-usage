@@ -1369,14 +1369,17 @@ window.__ModuleLoader__.load({
     }
     // One accent colour, four strengths: the mix keeps the ramp readable on the
     // panel's own background in both themes, so only the hue is fixed here.
-    const HEAT_COLOR = '#0969da'
+    const HEAT_COLOR = 'var(--uh-heat)'
     const LEVEL_PCT = [20, 45, 70, 96]
     function cellBg(level) {
-      if (level <= 0) return 'var(--dsw-alias-bg-layer-2)'
-      return 'color-mix(in srgb, ' + HEAT_COLOR + ' ' + LEVEL_PCT[level - 1] + '%, var(--dsw-alias-bg-layer-2))'
+      if (level <= 0) return 'var(--uh-cell-empty)'
+      return 'color-mix(in srgb, ' + HEAT_COLOR + ' ' + LEVEL_PCT[level - 1] + '%, var(--uh-cell-empty))'
     }
+    // 55% is the lightness the dark panel always used; the light theme lowers it so
+    // the dots keep their contrast on white. The fallback keeps the old value when a
+    // host (or an older bundle) has not defined the token.
     function wsColor(i) {
-      return 'hsl(' + ((i * 137) % 360) + ', 70%, 55%)'
+      return 'hsl(' + ((i * 137) % 360) + ' 70% var(--uh-workspace-lightness, 55%))'
     }
     // The grid is built from whole weeks, so a span is a column count: 53 covers
     // about a year, 13 about 90 days and 5 about 30. Fewer columns means wider
@@ -1926,8 +1929,12 @@ window.__ModuleLoader__.load({
       }
       return Math.max(1, Math.ceil(length * 1.35 + 2))
     }
-    const DONUT_COLORS = ['#0a84ff', '#30d158', '#bf5af2', '#ff9f0a', '#ff375f', '#64d2ff']
-    const TREND_COLORS = { total: '#f4c542', input: '#5aa9ff', cacheRead: '#44d483', cacheWrite: '#d98bff', output: '#ff8c66', reasoning: '#aab4c4' }
+    // Data colours are theme tokens now: the light palette is dark enough to pass
+    // 3:1 on white, and the dark block of the tokens repeats the colours this panel
+    // always used. The fallback keeps an unknown series readable in both themes.
+    const DONUT_COLORS = ['var(--uh-donut-1)', 'var(--uh-donut-2)', 'var(--uh-donut-3)', 'var(--uh-donut-4)', 'var(--uh-donut-5)', 'var(--uh-donut-6)']
+    const TREND_COLORS = { total: 'var(--uh-series-total)', input: 'var(--uh-series-input)', cacheRead: 'var(--uh-series-cache-read)', cacheWrite: 'var(--uh-series-cache-write)', output: 'var(--uh-series-output)', reasoning: 'var(--uh-series-reasoning)' }
+    const TREND_FALLBACK_COLOR = 'var(--uh-series-reasoning)'
     const TREND_GRADIENT_OPACITY = { total: .20, input: .16, cacheRead: .18, cacheWrite: .14, output: .16, reasoning: .10 }
     function tokenMagnitude(value, language) {
       const magnitude = chineseMagnitude(value, language)
@@ -1954,7 +1961,7 @@ window.__ModuleLoader__.load({
       if (remainder > 0) {
         const remainderCost = emptyCostAggregate()
         for (const item of remainderItems) addCostAggregate(remainderCost, item.cost)
-        segments.push({ label: otherLabel + ' (' + (normalized.length - topLimit) + ')', value: remainder, color: '#b8c2cf', iconKey: null, cost: remainderCost, other: true })
+        segments.push({ label: otherLabel + ' (' + (normalized.length - topLimit) + ')', value: remainder, color: 'var(--uh-series-other)', iconKey: null, cost: remainderCost, other: true })
       }
       let angle = -Math.PI / 2
       return {
@@ -2042,8 +2049,8 @@ window.__ModuleLoader__.load({
         React.createElement('div', { className: 'uh-donut-layout' },
           React.createElement('div', { className: 'uh-donut-visual' },
             React.createElement('svg', { className: 'uh-donut-svg', viewBox: '0 0 260 260', role: 'img', 'aria-label': props.title + ' ' + tokenDisplay(data.total, language) },
-              React.createElement('circle', { cx, cy, r: (outerRadius + innerRadius) / 2, className: 'uh-donut-track', fill: 'none', stroke: 'var(--dsw-alias-bg-layer-2)', strokeWidth: outerRadius - innerRadius }),
-              data.segments.map((segment) => React.createElement('path', { key: 'donut-' + segment.index, d: donutArcLinePath(cx, cy, (outerRadius + innerRadius) / 2, segment.startAngle, segment.endAngle), className: 'uh-donut-segment' + (activeIndex === segment.index ? ' uh-active' : ''), fill: 'none', stroke: segment.color, strokeWidth: outerRadius - innerRadius, strokeLinecap: 'butt', strokeLinejoin: 'round', pathLength: 1, style: { animationDelay: (segment.index * 90) + 'ms' }, tabIndex: 0, 'aria-label': segment.label + ' ' + tokenDisplay(segment.value, language) + ' ' + percentText(segment.percentage) + ' ' + costDisplay(segment.cost, language), onMouseEnter: (event) => { setActiveIndex(segment.index); updatePointer(event) }, onMouseMove: updatePointer, onMouseLeave: clearPointer, onFocus: () => { setActiveIndex(segment.index); schedulePointer({ fixed: true, left: 12, top: 12 }) }, onBlur: clearPointer })),
+              React.createElement('circle', { cx, cy, r: (outerRadius + innerRadius) / 2, className: 'uh-donut-track', fill: 'none', strokeWidth: outerRadius - innerRadius, style: { stroke: 'var(--uh-donut-track)' } }),
+              data.segments.map((segment) => React.createElement('path', { key: 'donut-' + segment.index, d: donutArcLinePath(cx, cy, (outerRadius + innerRadius) / 2, segment.startAngle, segment.endAngle), className: 'uh-donut-segment' + (activeIndex === segment.index ? ' uh-active' : ''), fill: 'none', strokeWidth: outerRadius - innerRadius, strokeLinecap: 'butt', strokeLinejoin: 'round', pathLength: 1, style: { animationDelay: (segment.index * 90) + 'ms', stroke: segment.color }, tabIndex: 0, 'aria-label': segment.label + ' ' + tokenDisplay(segment.value, language) + ' ' + percentText(segment.percentage) + ' ' + costDisplay(segment.cost, language), onMouseEnter: (event) => { setActiveIndex(segment.index); updatePointer(event) }, onMouseMove: updatePointer, onMouseLeave: clearPointer, onFocus: () => { setActiveIndex(segment.index); schedulePointer({ fixed: true, left: 12, top: 12 }) }, onBlur: clearPointer })),
             ),
             activeSegment ? React.createElement('div', { ref: tooltipRef, className: 'uh-donut-tooltip', style: { visibility: 'hidden' } },
               React.createElement('span', { className: 'uh-donut-dot', style: { background: activeSegment.color } }),
@@ -2162,35 +2169,35 @@ window.__ModuleLoader__.load({
                 )),
                 React.createElement('defs', {},
                   visible.map((key) => React.createElement('linearGradient', { key: key, id: 'uh-trend-gradient-' + key, x1: '0', y1: '0', x2: '0', y2: '1' },
-                    React.createElement('stop', { offset: '4%', stopColor: colors[key] || '#9aa4b2', stopOpacity: gradientOpacity[key] || .12 }),
-                    React.createElement('stop', { offset: '96%', stopColor: colors[key] || '#9aa4b2', stopOpacity: 0 }),
+                    React.createElement('stop', { offset: '4%', stopOpacity: gradientOpacity[key] || .12, style: { stopColor: colors[key] || TREND_FALLBACK_COLOR } }),
+                    React.createElement('stop', { offset: '96%', stopOpacity: 0, style: { stopColor: colors[key] || TREND_FALLBACK_COLOR } }),
                   )),
                 ),
                 chartType === 'bar'
                   ? bars.map((bar, barIndex) => React.createElement('g', { key: 'bar-' + barIndex, className: 'uh-trend-bar-group', style: { animationDelay: Math.min(barIndex * 16, 260) + 'ms' } },
-                    bar.segments.map((segment, segmentIndex) => React.createElement('rect', { key: 'bar-' + barIndex + '-' + segmentIndex, x: bar.x, y: segment.y, width: bar.width, height: segment.height, className: 'uh-trend-bar', 'data-series': segment.key, fill: colors[segment.key] || '#9aa4b2' })),
+                    bar.segments.map((segment, segmentIndex) => React.createElement('rect', { key: 'bar-' + barIndex + '-' + segmentIndex, x: bar.x, y: segment.y, width: bar.width, height: segment.height, className: 'uh-trend-bar', 'data-series': segment.key, style: { fill: colors[segment.key] || TREND_FALLBACK_COLOR } })),
                   ))
                   : [
                 visible.map((key, seriesIndex) => {
                   const areaPath = seriesPaths[key] ? seriesPaths[key].area : ''
                   return areaPath === '' ? null : React.createElement('path', { key: 'area-' + key, d: areaPath, className: 'uh-trend-area', 'data-series': key, fill: 'url(#uh-trend-gradient-' + key + ')', style: { animationDelay: (80 + seriesIndex * 80) + 'ms' } })
                 }),
-                visible.map((key) => React.createElement('path', { key: 'line-base-' + key, d: seriesPaths[key] ? seriesPaths[key].line : '', className: 'uh-trend-line', 'data-series': key, stroke: colors[key] || '#9aa4b2' })),
+                visible.map((key) => React.createElement('path', { key: 'line-base-' + key, d: seriesPaths[key] ? seriesPaths[key].line : '', className: 'uh-trend-line', 'data-series': key, style: { stroke: colors[key] || TREND_FALLBACK_COLOR } })),
                 visible.map((key, seriesIndex) => {
                   const points = geometry.points[key] || []
                   const drawLength = seriesPaths[key] ? seriesPaths[key].length : 0
-                  return React.createElement('path', { key: 'line-draw-' + key, d: seriesPaths[key] ? seriesPaths[key].line : '', className: 'uh-trend-line-draw', 'data-series': key, stroke: colors[key] || '#9aa4b2', style: { '--uh-draw-length': drawLength + 'px', animationDelay: (seriesIndex * 90) + 'ms' } })
+                  return React.createElement('path', { key: 'line-draw-' + key, d: seriesPaths[key] ? seriesPaths[key].line : '', className: 'uh-trend-line-draw', 'data-series': key, style: { '--uh-draw-length': drawLength + 'px', animationDelay: (seriesIndex * 90) + 'ms', stroke: colors[key] || TREND_FALLBACK_COLOR } })
                 }),
                 visible.map((key) => {
                   const points = geometry.points[key] || []
                   if (points.length !== 1) return null
                   const point = points[0]
-                  return React.createElement('circle', { key: 'single-point-' + key, cx: point.x, cy: point.y, r: 4, className: 'uh-trend-point', fill: colors[key] || '#9aa4b2' })
+                  return React.createElement('circle', { key: 'single-point-' + key, cx: point.x, cy: point.y, r: 4, className: 'uh-trend-point', style: { fill: colors[key] || TREND_FALLBACK_COLOR } })
                 }),
                   ],
                 hoverIndex !== null && hoverPoint ? React.createElement(React.Fragment, { key: 'hover-' + hoverIndex },
                   React.createElement('line', { x1: hoverPoint.x, x2: hoverPoint.x, y1: geometry.padding.top, y2: bottomY, className: 'uh-trend-cursor' }),
-                  chartType === 'bar' ? null : visible.map((key) => { const point = (geometry.points[key] || [])[hoverIndex]; return point ? React.createElement('circle', { key: key, cx: point.x, cy: point.y, r: 4, className: 'uh-trend-point', fill: colors[key] || '#9aa4b2' }) : null }),
+                  chartType === 'bar' ? null : visible.map((key) => { const point = (geometry.points[key] || [])[hoverIndex]; return point ? React.createElement('circle', { key: key, cx: point.x, cy: point.y, r: 4, className: 'uh-trend-point', style: { fill: colors[key] || TREND_FALLBACK_COLOR } }) : null }),
                 ) : null,
                 rows.map((row, index) => {
                   const point = (geometry.points[visible[0]] || [])[index]
@@ -2207,8 +2214,8 @@ window.__ModuleLoader__.load({
               ),
               tooltipRow && tooltipPoint ? React.createElement('div', { className: 'uh-trend-tooltip' + tooltipSide + (tooltipVisible ? ' uh-visible' : ''), style: tooltipStyle, 'aria-hidden': !tooltipVisible },
                 React.createElement('strong', { className: 'uh-trend-tooltip-title' }, pointLabel(tooltipRow, true)),
-                visible.map((key) => React.createElement('div', { key, className: 'uh-trend-tooltip-row', style: { color: colors[key] || '#9aa4b2' } },
-                  React.createElement('span', { className: 'uh-trend-dot', style: { background: colors[key] || '#9aa4b2' } }),
+                visible.map((key) => React.createElement('div', { key, className: 'uh-trend-tooltip-row', style: { color: colors[key] || TREND_FALLBACK_COLOR } },
+                  React.createElement('span', { className: 'uh-trend-dot', style: { background: colors[key] || TREND_FALLBACK_COLOR } }),
                   React.createElement('span', { className: 'uh-trend-tooltip-label' }, trendSeriesLabel(key, language)),
                   React.createElement('strong', { className: 'uh-trend-tooltip-value' }, fmtCompact(trendSeriesValue(tooltipRow, key))),
                 )),
@@ -2228,7 +2235,7 @@ window.__ModuleLoader__.load({
         ),
         chartBody,
         chartReady ? React.createElement('div', { className: 'uh-trend-legend' },
-          ['total', 'input', 'cacheRead', 'cacheWrite', 'output', 'reasoning'].map((key) => React.createElement('button', { key, type: 'button', className: 'uh-trend-legend-item' + (visible.includes(key) ? ' uh-on' : ''), onClick: () => toggle(key), 'aria-pressed': visible.includes(key) }, React.createElement('span', { className: 'uh-trend-dot', style: { background: colors[key] || '#9aa4b2' } }), trendSeriesLabel(key, language))),
+          ['total', 'input', 'cacheRead', 'cacheWrite', 'output', 'reasoning'].map((key) => React.createElement('button', { key, type: 'button', className: 'uh-trend-legend-item' + (visible.includes(key) ? ' uh-on' : ''), onClick: () => toggle(key), 'aria-pressed': visible.includes(key) }, React.createElement('span', { className: 'uh-trend-dot', style: { background: colors[key] || TREND_FALLBACK_COLOR } }), trendSeriesLabel(key, language))),
         ) : null,
       )
     }
@@ -2686,6 +2693,61 @@ window.__ModuleLoader__.load({
     const MemoUsageFilterMenu = React.memo(UsageFilterMenu)
 
     const CSS = `
+/* Theme tokens: the panel now paints on both host palettes. The host toggles
+   the data-ds-dark-theme attribute on <body>, so the light values are the defaults; the dark
+   block repeats exactly the colours the panel used before (dark stays a no-op).
+   Data colours live here because JS paints them too, and var() does not resolve in
+   SVG presentation attributes - the call sites move those into style. The sheet
+   itself (the modal scrim) needs the tokens as well, because custom properties only
+   inherit downwards and .uh-side-modal is the parent of .uh-side-dialog. */
+.uh-side-modal, .uh-side-dialog, .uh-panel, .uh-tip, .uh-donut-tooltip, .uh-trend-tooltip {
+  --uh-series-total:#8a5a00;
+  --uh-series-input:#0b5cad;
+  --uh-series-cache-read:#17703a;
+  --uh-series-cache-write:#6d2fb8;
+  --uh-series-output:#a8451c;
+  --uh-series-reasoning:#55606f;
+  --uh-series-other:#6b7280;
+  --uh-donut-1:#0a63c9;
+  --uh-donut-2:#1a7a3c;
+  --uh-donut-3:#7a34c9;
+  --uh-donut-4:#a8620a;
+  --uh-donut-5:#bf2439;
+  --uh-donut-6:#0d7b93;
+  --uh-donut-track:color-mix(in srgb, var(--dsw-alias-label-primary) 9%, var(--dsw-alias-bg-layer-2));
+  --uh-heat:#0969da;
+  --uh-cell-empty:color-mix(in srgb, var(--dsw-alias-label-primary) 7%, var(--dsw-alias-bg-layer-2));
+  --uh-scrim:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.24));
+  --uh-dialog-shadow:0 -10px 44px rgba(0,0,0,.12);
+  --uh-scrollbar-thumb:#c2c7cf;
+  --uh-scrollbar-track:transparent;
+  --uh-scrollbar-track-border:transparent;
+  --uh-workspace-lightness:42%;
+}
+body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialog, body[data-ds-dark-theme] .uh-panel, body[data-ds-dark-theme] .uh-tip, body[data-ds-dark-theme] .uh-donut-tooltip, body[data-ds-dark-theme] .uh-trend-tooltip {
+  --uh-series-total:#f4c542;
+  --uh-series-input:#5aa9ff;
+  --uh-series-cache-read:#44d483;
+  --uh-series-cache-write:#d98bff;
+  --uh-series-output:#ff8c66;
+  --uh-series-reasoning:#aab4c4;
+  --uh-series-other:#b8c2cf;
+  --uh-donut-1:#0a84ff;
+  --uh-donut-2:#30d158;
+  --uh-donut-3:#bf5af2;
+  --uh-donut-4:#ff9f0a;
+  --uh-donut-5:#ff375f;
+  --uh-donut-6:#64d2ff;
+  --uh-donut-track:var(--dsw-alias-bg-layer-2);
+  --uh-heat:#0969da;
+  --uh-cell-empty:var(--dsw-alias-bg-layer-2);
+  --uh-scrim:rgba(0,0,0,.34);
+  --uh-dialog-shadow:0 -10px 44px rgba(0,0,0,.25);
+  --uh-scrollbar-thumb:#707780;
+  --uh-scrollbar-track:#1d1f22;
+  --uh-scrollbar-track-border:#363a40;
+  --uh-workspace-lightness:55%;
+}
 .uh-page { display:flex; flex-direction:column; gap:14px; padding:2px 2px 28px; font-family:inherit; }
 .uh-head { position:relative; z-index:20; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
 .uh-title { margin:0; font-size:15px; font-weight:600; color:var(--dsw-alias-label-primary); }
@@ -2767,7 +2829,7 @@ window.__ModuleLoader__.load({
 .uh-pricing-toolbar { padding:10px 0; border-top:1px solid var(--dsw-alias-border-l1); border-bottom:1px solid var(--dsw-alias-border-l1); }
 .uh-pricing-switch { display:inline-flex; align-items:center; gap:7px; color:var(--dsw-alias-label-primary); font-size:12px; }
 .uh-pricing-section { display:flex; flex-direction:column; gap:8px; }
-.uh-pricing-table-wrap { max-height:392px; overflow-x:hidden; overflow-y:scroll; scrollbar-gutter:stable; scrollbar-width:auto; scrollbar-color:#707780 #1d1f22; border:1px solid var(--dsw-alias-border-l1); border-radius:8px; background:var(--dsw-alias-bg-layer-2); }
+.uh-pricing-table-wrap { max-height:392px; overflow-x:hidden; overflow-y:scroll; scrollbar-gutter:stable; scrollbar-width:auto; scrollbar-color:var(--uh-scrollbar-thumb) var(--uh-scrollbar-track); border:1px solid var(--dsw-alias-border-l1); border-radius:8px; background:var(--dsw-alias-bg-layer-2); }
 .uh-pricing-model-table { width:100%; min-width:1080px; border-collapse:collapse; table-layout:fixed; font-size:11px; }
 .uh-pricing-model-table th, .uh-pricing-model-table td { min-width:0; padding:8px 9px; border-bottom:1px solid var(--dsw-alias-border-l1); text-align:left; vertical-align:middle; }
 .uh-pricing-model-table th { position:sticky; top:0; z-index:40; color:var(--dsw-alias-label-secondary); background:var(--dsw-alias-bg-layer-2); font-weight:650; white-space:nowrap; }
@@ -2782,8 +2844,8 @@ window.__ModuleLoader__.load({
 .uh-pricing-model-name, .uh-pricing-model-target { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dsw-alias-label-primary); }
 .uh-pricing-model-rate { color:var(--dsw-alias-label-secondary); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .uh-pricing-status, .uh-pricing-tier-badge { display:inline-flex; justify-content:center; padding:3px 6px; border-radius:6px; font-size:10px; font-weight:650; white-space:nowrap; }
-.uh-pricing-status-priced { color:#157347; background:color-mix(in srgb, #30d158 22%, transparent); }
-.uh-pricing-status-unpriced, .uh-pricing-status-ambiguous, .uh-pricing-status-unsupported { color:#9a5b00; background:color-mix(in srgb, #ff9f0a 20%, transparent); }
+.uh-pricing-status-priced { color:#157347; background:color-mix(in srgb, var(--uh-donut-2) 22%, transparent); }
+.uh-pricing-status-unpriced, .uh-pricing-status-ambiguous, .uh-pricing-status-unsupported { color:#9a5b00; background:color-mix(in srgb, var(--uh-donut-4) 20%, transparent); }
 .uh-pricing-tier-badge { color:var(--dsw-alias-brand-primary); background:color-mix(in srgb, var(--dsw-alias-brand-primary) 15%, transparent); }
 .uh-pricing-tier-badge.uh-flat { color:var(--dsw-alias-label-secondary); background:var(--dsw-alias-bg-layer-1); }
 .uh-pricing-tier-row > td { padding:0 9px 8px; background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 36%, transparent); }
@@ -3076,11 +3138,11 @@ window.__ModuleLoader__.load({
 .uh-boundary-fallback { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; min-height:360px; padding:24px; border:1px solid var(--dsw-alias-border-l1); border-radius:12px; background:var(--dsw-alias-bg-layer-1); text-align:center; }
 .uh-boundary-title { color:var(--dsw-alias-label-primary); font-size:15px; font-weight:650; }
 .uh-boundary-note { max-width:420px; color:var(--dsw-alias-label-secondary); font-size:12px; line-height:1.6; }
-.uh-side-modal { position:fixed; inset:var(--uh-top-inset, 0px) 0 0 0; z-index:1100; background:color-mix(in srgb, #000 44%, transparent); display:flex; align-items:stretch; justify-content:center; padding:26px; }
-.uh-side-dialog { width:min(1120px, 100%); overflow-x:hidden; overflow-y:scroll; scrollbar-gutter:stable; scrollbar-width:auto; scrollbar-color:#707780 #1d1f22; background:var(--dsw-alias-bg-layer-1, #1a1c20); border:1px solid var(--dsw-alias-border-l2); border-radius:14px; box-shadow:0 18px 52px rgba(0,0,0,.35); padding:18px; }
+.uh-side-modal { position:fixed; inset:var(--uh-top-inset, 0px) 0 0 0; z-index:1100; background:var(--uh-scrim); display:flex; align-items:stretch; justify-content:center; padding:26px; }
+.uh-side-dialog { width:min(1120px, 100%); overflow-x:hidden; overflow-y:scroll; scrollbar-gutter:stable; scrollbar-width:auto; scrollbar-color:var(--uh-scrollbar-thumb) var(--uh-scrollbar-track); background:var(--dsw-alias-bg-layer-1, #1a1c20); border:1px solid var(--dsw-alias-border-l2); border-radius:14px; box-shadow:var(--uh-dialog-shadow); padding:18px; }
 .uh-side-dialog::-webkit-scrollbar, .uh-pricing-table-wrap::-webkit-scrollbar { width:12px; height:12px; }
-.uh-side-dialog::-webkit-scrollbar-track, .uh-pricing-table-wrap::-webkit-scrollbar-track { background:#1d1f22; border-left:1px solid #363a40; }
-.uh-side-dialog::-webkit-scrollbar-thumb, .uh-pricing-table-wrap::-webkit-scrollbar-thumb { background:#707780; border:3px solid #1d1f22; border-radius:6px; }
+.uh-side-dialog::-webkit-scrollbar-track, .uh-pricing-table-wrap::-webkit-scrollbar-track { background:var(--uh-scrollbar-track); border-left:1px solid var(--uh-scrollbar-track-border); }
+.uh-side-dialog::-webkit-scrollbar-thumb, .uh-pricing-table-wrap::-webkit-scrollbar-thumb { background:var(--uh-scrollbar-thumb); border:3px solid var(--uh-scrollbar-track); border-radius:6px; }
 .uh-side-dialog::-webkit-scrollbar-thumb:hover, .uh-pricing-table-wrap::-webkit-scrollbar-thumb:hover { background:#9aa1aa; }
 .uh-side-dialog-head { display:flex; justify-content:flex-end; margin-bottom:8px; }
 @media (max-width: 640px) { .uh-side-modal { padding:0; } .uh-side-dialog { border-radius:0; border:0; padding:14px; } }
@@ -3099,9 +3161,9 @@ window.__ModuleLoader__.load({
 .uh-progress { padding:10px 12px; background:color-mix(in srgb, var(--dsw-alias-brand-primary) 9%, var(--dsw-alias-bg-layer-1)); border:0; border-radius:12px; }
 .uh-cards { grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; border:0; border-radius:0; overflow:visible; background:transparent; }
 .uh-card { min-height:84px; padding:12px 14px; gap:4px; border:0; border-radius:18px; background:var(--dsw-alias-bg-layer-1); box-shadow:0 1px 2px rgba(0,0,0,.07), 0 8px 22px rgba(0,0,0,.05); animation:none; }
-.uh-card:first-child { border:0; background:color-mix(in srgb, #0a84ff 15%, var(--dsw-alias-bg-layer-1)); }
-.uh-card:nth-child(2) { background:color-mix(in srgb, #30d158 13%, var(--dsw-alias-bg-layer-1)); }
-.uh-card:nth-child(3) { background:color-mix(in srgb, #ff9f0a 14%, var(--dsw-alias-bg-layer-1)); }
+.uh-card:first-child { border:0; background:color-mix(in srgb, var(--uh-donut-1) 15%, var(--dsw-alias-bg-layer-1)); }
+.uh-card:nth-child(2) { background:color-mix(in srgb, var(--uh-donut-2) 13%, var(--dsw-alias-bg-layer-1)); }
+.uh-card:nth-child(3) { background:color-mix(in srgb, var(--uh-donut-4) 14%, var(--dsw-alias-bg-layer-1)); }
 .uh-card:hover { transform:translateY(-2px); box-shadow:0 12px 28px rgba(0,0,0,.12); }
 .uh-card-label { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; letter-spacing:0; }
 .uh-ios-summary-label, .uh-section-title, .uh-title-with-icon { display:flex; align-items:center; gap:7px; }
@@ -3127,8 +3189,8 @@ window.__ModuleLoader__.load({
 /* The sidebar entry follows the host's row style (transparent at rest, hover from
    the host token) instead of a permanent brand tint: a painted resting background
    reads as "already hovered" next to the other sidebar rows. */
-.uh-side-modal { align-items:flex-end; padding:0; background:rgba(0,0,0,.34); backdrop-filter:blur(8px); }
-.uh-side-dialog { width:min(1260px, 100%); max-height:calc(100vh - var(--uh-top-inset, 0px) - 44px); border:0; border-radius:24px 24px 0 0; padding:22px 24px 28px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); box-shadow:0 -10px 44px rgba(0,0,0,.25); }
+.uh-side-modal { align-items:flex-end; padding:0; background:var(--uh-scrim); backdrop-filter:blur(8px); }
+.uh-side-dialog { width:min(1260px, 100%); max-height:calc(100vh - var(--uh-top-inset, 0px) - 44px); border:0; border-radius:24px 24px 0 0; padding:22px 24px 28px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); box-shadow:var(--uh-dialog-shadow); }
 .uh-side-dialog-head { position:sticky; top:-22px; z-index:8; justify-content:center; height:22px; margin:-22px -24px 8px; padding:8px 24px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); border:0; }
 .uh-side-dialog-head::before { content:""; width:36px; height:5px; border-radius:3px; background:color-mix(in srgb, var(--dsw-alias-label-primary) 24%, transparent); }
 .uh-side-dialog-head .uh-refresh { position:absolute; right:20px; top:7px; min-height:28px; background:transparent; }
@@ -3142,7 +3204,7 @@ window.__ModuleLoader__.load({
 .uh-ios-summary { display:flex; flex-direction:column; gap:12px; background:transparent; box-shadow:none; }
 .uh-ios-summary-hero { display:grid; grid-template-columns:minmax(0,1fr) minmax(320px,.48fr); min-height:142px; padding:20px 22px; border:1px solid var(--dsw-alias-border-l1); border-radius:18px; background:var(--dsw-alias-bg-layer-1); box-shadow:0 1px 2px rgba(0,0,0,.06), 0 8px 22px rgba(0,0,0,.06); }
 .uh-ios-summary-total { min-width:0; min-height:0; padding:0; border-radius:0; display:flex; align-items:center; justify-content:flex-start; gap:16px; background:transparent; box-shadow:none; }
-.uh-ios-summary-total-icon { display:grid; place-items:center; flex:none; width:54px; height:54px; border-radius:16px; background:color-mix(in srgb,#0a84ff 18%,var(--dsw-alias-bg-layer-2)); color:#0a84ff; }
+.uh-ios-summary-total-icon { display:grid; place-items:center; flex:none; width:54px; height:54px; border-radius:16px; background:color-mix(in srgb,var(--uh-donut-1) 18%,var(--dsw-alias-bg-layer-2)); color:var(--uh-donut-1); }
 .uh-ios-summary-total-copy { min-width:0; }
 .uh-ios-summary-label { font-size:13px; font-weight:600; color:var(--dsw-alias-label-secondary); }
 .uh-ios-summary-total .uh-ios-summary-label { font-size:14px; }
@@ -3155,7 +3217,7 @@ window.__ModuleLoader__.load({
 .uh-ios-summary-meta-stat + .uh-ios-summary-meta-stat { border-left:1px solid var(--dsw-alias-border-l1); }
 .uh-ios-summary-meta-label { display:flex; align-items:center; gap:7px; color:var(--dsw-alias-label-secondary); font-size:12px; font-weight:600; white-space:nowrap; }
 .uh-ios-summary-meta-value { margin-top:7px; color:var(--dsw-alias-label-primary); font-size:24px; line-height:1; font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; }
-.uh-ios-summary-meta-cost .uh-ios-summary-meta-value { color:#30d158; }
+.uh-ios-summary-meta-cost .uh-ios-summary-meta-value { color:var(--uh-donut-2); }
 .uh-ios-summary-meta-caption { margin-top:7px; color:var(--dsw-alias-label-secondary); font-size:11px; white-space:nowrap; }
 .uh-ios-metrics { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; }
 .uh-ios-metric { min-width:0; min-height:80px; padding:10px 13px; border:1px solid var(--dsw-alias-border-l1); border-radius:14px; display:flex; flex-direction:column; justify-content:center; gap:6px; background:var(--dsw-alias-bg-layer-1); box-shadow:0 1px 2px rgba(0,0,0,.06), 0 8px 20px rgba(0,0,0,.05); animation:uh-card-in .35s ease both; }
@@ -3166,21 +3228,21 @@ window.__ModuleLoader__.load({
 .uh-ios-metric-label { display:flex; align-items:center; gap:8px; min-width:0; color:var(--dsw-alias-label-secondary); font-size:13px; font-weight:600; white-space:nowrap; }
 .uh-ios-metric-label .uh-line-icon { flex:none; }
 .uh-ios-metric-value { min-width:0; color:var(--dsw-alias-label-primary); font-size:22px; line-height:1.05; font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; }
-.uh-ios-metric-input { background:color-mix(in srgb,#0a84ff 11%,var(--dsw-alias-bg-layer-1)); }
-.uh-ios-metric-input .uh-line-icon { color:#0a84ff; }
-.uh-ios-metric-output { background:color-mix(in srgb,#bf5af2 10%,var(--dsw-alias-bg-layer-1)); }
-.uh-ios-metric-output .uh-line-icon { color:#bf5af2; }
-.uh-ios-metric-write { background:color-mix(in srgb,#ff9f0a 11%,var(--dsw-alias-bg-layer-1)); }
-.uh-ios-metric-write .uh-line-icon { color:#ff9f0a; }
-.uh-ios-metric-read { background:color-mix(in srgb,#30d158 11%,var(--dsw-alias-bg-layer-1)); }
-.uh-ios-metric-read .uh-line-icon { color:#30d158; }
+.uh-ios-metric-input { background:color-mix(in srgb,var(--uh-donut-1) 11%,var(--dsw-alias-bg-layer-1)); }
+.uh-ios-metric-input .uh-line-icon { color:var(--uh-donut-1); }
+.uh-ios-metric-output { background:color-mix(in srgb,var(--uh-donut-3) 10%,var(--dsw-alias-bg-layer-1)); }
+.uh-ios-metric-output .uh-line-icon { color:var(--uh-donut-3); }
+.uh-ios-metric-write { background:color-mix(in srgb,var(--uh-donut-4) 11%,var(--dsw-alias-bg-layer-1)); }
+.uh-ios-metric-write .uh-line-icon { color:var(--uh-donut-4); }
+.uh-ios-metric-read { background:color-mix(in srgb,var(--uh-donut-2) 11%,var(--dsw-alias-bg-layer-1)); }
+.uh-ios-metric-read .uh-line-icon { color:var(--uh-donut-2); }
 .uh-ios-metric-rate { background:var(--dsw-alias-bg-layer-1); }
-.uh-ios-metric-rate .uh-line-icon { color:#30d158; }
+.uh-ios-metric-rate .uh-line-icon { color:var(--uh-donut-2); }
 .uh-ios-metric-rate-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; min-width:0; }
-.uh-ios-metric-rate-value { flex:none; color:#30d158; font-size:20px; line-height:1; font-weight:700; font-variant-numeric:tabular-nums; }
+.uh-ios-metric-rate-value { flex:none; color:var(--uh-donut-2); font-size:20px; line-height:1; font-weight:700; font-variant-numeric:tabular-nums; }
 .uh-ios-metric-rate-detail { min-width:0; overflow:hidden; color:var(--dsw-alias-label-secondary); font-size:12px; line-height:1.2; font-weight:600; font-variant-numeric:tabular-nums; text-overflow:ellipsis; white-space:nowrap; }
 .uh-ios-metric-bar { height:5px; border-radius:3px; background:var(--dsw-alias-bg-layer-2); overflow:hidden; }
-.uh-ios-metric-fill { height:100%; border-radius:inherit; background:#30d158; transition:width .35s ease; }
+.uh-ios-metric-fill { height:100%; border-radius:inherit; background:var(--uh-donut-2); transition:width .35s ease; }
 .uh-token-semantics { display:flex; align-items:flex-start; gap:8px; padding:10px 12px; border-radius:12px; background:color-mix(in srgb, var(--dsw-alias-brand-primary) 8%, var(--dsw-alias-bg-layer-1)); color:var(--dsw-alias-label-secondary); font-size:12px; line-height:1.55; }
 .uh-token-semantics .uh-line-icon { margin-top:1px; color:var(--dsw-alias-brand-primary); }
 .uh-ios-list-panel { min-height:360px; }

@@ -362,7 +362,8 @@ test('builds donut segments with normalized percentages and remainder', () => {
   assert.equal(donut.segments.length, 3)
   assert.equal(donut.segments[0].label, 'A')
   assert.equal(donut.segments[2].label, '其他 (2)')
-  assert.equal(donut.segments[2].color, '#b8c2cf')
+  // The overflow bucket resolves the theme token; the old #b8c2cf only read on the dark sheet.
+  assert.equal(donut.segments[2].color, 'var(--uh-series-other)')
   assert.equal(Math.round(donut.segments.reduce((sum, item) => sum + item.percentage, 0)), 100)
   assert.ok(donut.segments.every((item) => item.endAngle > item.startAngle))
   assert.match(donutArcLinePath(130, 130, 94, donut.segments[0].startAngle, donut.segments[0].endAngle), /A94 94/)
