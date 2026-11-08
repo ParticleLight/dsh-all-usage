@@ -216,7 +216,10 @@ test('drops the hard-coded dark chrome from the modal, the sheet and its scrollb
   for (const value of scrims) {
     assert.equal(value, 'var(--uh-scrim)', 'the modal scrim must come from var(--uh-scrim); a hard-coded dark scrim (rgba(0,0,0,.34) or a color-mix with #000) dims the light sheet into a black veil')
   }
-  const dialog = rules.filter((rule) => selectorParts(rule).includes('.uh-side-dialog'))
+  // The floating card's rule carries two classes (.uh-side-modal .uh-side-dialog) so the
+  // host skin cannot override its radius, so match the class inside a compound selector
+  // instead of requiring the selector to be exactly '.uh-side-dialog'.
+  const dialog = rules.filter((rule) => selectorParts(rule).some((part) => part.split(/\s+/).includes('.uh-side-dialog')))
   const shadows = dialog.flatMap((rule) => declarations(rule.body, 'box-shadow'))
   assert.ok(shadows.length >= 2, 'both .uh-side-dialog rules must carry the themed sheet shadow')
   for (const value of shadows) {

@@ -107,7 +107,7 @@ test('the source routes the sheet through the portal rather than returning it in
 const surfaces = [
   ['.uh-side-dialog { width:min(1120px', false],
   ['.uh-head { position:sticky', true],
-  ['.uh-side-dialog { width:min(1260px', true],
+  ['.uh-side-modal .uh-side-dialog { width:min(1260px', true],
   ['.uh-side-dialog-head { position:sticky', true],
   ['.uh-donut-tooltip { position:absolute', true],
 ]
@@ -126,11 +126,25 @@ for (const [prefix, tinted] of surfaces) {
 // 640px, so the panel read as a plain rectangle in a narrow window. It now floats as
 // a rounded card with a margin on every side.
 test('the usage sheet floats as a rounded card instead of sitting flush on the window edge', () => {
-  const glass = source.indexOf('.uh-side-dialog { width:min(1260px')
-  assert.notEqual(glass, -1, 'the sheet rule must exist')
+  const glass = source.indexOf('.uh-side-modal .uh-side-dialog { width:min(1260px')
+  assert.notEqual(glass, -1, 'the sheet rule must exist and carry two classes')
   const glassRule = source.slice(glass, source.indexOf('}', glass))
   assert.match(glassRule, /border-radius:24px;/, 'all four corners carry the sheet radius')
   assert.doesNotMatch(glassRule, /24px 24px 0 0/, 'the bottom corners are rounded as well')
+  // Measured in the running app: the host skin ships
+  //   [data-dsh-float] [role="dialog"] { border-radius: 14px; }
+  // which is specificity (0,2,0) and therefore beat the single-class rule, so the card
+  // still rendered with a 14px radius even after the radius was raised to 24px. The
+  // sheet selector has to carry two classes to win that fight.
+  assert.ok(
+    source.includes('.uh-side-modal .uh-side-dialog {'),
+    'the sheet selector outranks the host "[data-dsh-float] [role=dialog]" skin rule',
+  )
+  assert.match(
+    glassRule,
+    /box-sizing:border-box;/,
+    'border-box keeps the dialog padding inside max-height: content-box made the sheet 50px taller than the viewport',
+  )
 
   const modal = source.indexOf('.uh-side-modal { align-items:flex-end')
   assert.notEqual(modal, -1, 'the sheet overlay rule must exist')
@@ -138,7 +152,7 @@ test('the usage sheet floats as a rounded card instead of sitting flush on the w
   assert.match(modalRule, /padding:14px 16px 16px;/, 'the card keeps a gap on every side so its corners stay visible')
 
   assert.ok(
-    source.includes('.uh-side-dialog { max-height:calc(100vh - 16px); border-radius:20px;'),
+    source.includes('.uh-side-modal .uh-side-dialog { max-height:calc(100vh - 16px); border-radius:20px;'),
     'the compact sheet keeps rounded corners instead of falling back to a square edge',
   )
   assert.ok(
