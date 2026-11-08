@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.2.3（未发布）
+### 修复
+- **柱状图最左柱压住纵轴刻度** —— 柱子不再越出绘图区，刻度与悬停位置不变；折线视图不受影响。
+- **热力图星期标签与格子错行** —— 标签重新对齐到各自的格子行。
+- **热力图悬停提示不显示** —— 提示框改按屏幕定位，不再被面板裁掉。
+- **浅色主题下图表与日历看不清** —— 数据色改为跟随主题，浅色对比度达标，深色外观不变。
+### 优化
+- **面板改为浮动圆角卡片** —— 四角圆角、四周留边，窄窗口不再退化成直角。
+- **标题栏独立成圆角卡片** —— 下边框换成柔和阴影，滚动时停在拖拽条下方。
+### Fixes
+- **The leftmost bar covers the y-axis labels** — bars stay inside the plot; ticks and hover targets are unchanged, and the line view is untouched.
+- **Heatmap weekday labels drift off their rows** — each label lines up with its grid row again.
+- **The heatmap tooltip never shows up** — it is positioned against the screen again instead of being clipped by the panel.
+- **Charts and the calendar are hard to read on a light theme** — data colours follow the theme; light passes contrast and the dark look is unchanged.
+### Improvements
+- **The panel is a floating rounded card** — rounded on all four corners with a margin, so a narrow window no longer squares it off.
+- **The toolbar is a rounded card of its own** — the hard bottom border becomes a soft shadow, and it parks under the drag strip while scrolling.
+
 ## v1.2.2（2026-11-07）
 ### 新功能
 - **趋势图可切换柱状图** —— 图表右上角新增「折线 / 柱状」切换；柱状是把每行按 token 类型叠成一根柱子、由总量封顶，柱子自下向上生长（系统开启「减少动态效果」时不播放），选过的视图下次打开仍保留。
