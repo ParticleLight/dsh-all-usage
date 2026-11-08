@@ -159,7 +159,9 @@ test('uses language-style custom menus for unified filters', () => {
   assert.ok(source.includes('if (wsFilter !== null && !rangeWorkspaceIds.has(wsFilter)) setWsFilter(null)'))
   assert.ok(source.includes('.uh-head { position:relative; z-index:20;'))
   assert.ok(source.includes('.uh-language-menu.uh-open { z-index:30; }'))
-  assert.ok(source.includes('.uh-head { position:sticky; top:-18px; z-index:20;'))
+  // The sticky toolbar parks 16px below the scrollport top so it sits under the 22px
+  // drag strip instead of covering its grabber (measured: toolbar y=78, sheet top y=40).
+  assert.ok(source.includes('.uh-head { position:sticky; top:16px; z-index:20;'))
   // The desktop client keeps its own window buttons in a caption strip across the
   // top of the window and marks the document with `data-windows-titlebar`. The
   // sheet itself starts below that strip, so nothing the panel paints — backdrop,

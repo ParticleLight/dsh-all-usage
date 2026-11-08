@@ -161,6 +161,19 @@ test('the usage sheet floats as a rounded card instead of sitting flush on the w
   )
 })
 
+// The toolbar used to be a full-bleed rectangle with a hard bottom border, so inside the
+// rounded sheet it still read as a square white block (the reported bug). It is now a
+// rounded card of its own that parks under the drag strip while the page scrolls.
+test('the toolbar is a rounded card instead of a full-bleed square strip', () => {
+  const head = source.indexOf('.uh-head { position:sticky')
+  assert.notEqual(head, -1, 'the toolbar rule must exist')
+  const headRule = source.slice(head, source.indexOf('}', head))
+  assert.match(headRule, /border-radius:18px;/, 'the toolbar carries its own radius')
+  assert.doesNotMatch(headRule, /border-bottom:/, 'the straight bottom border is gone')
+  assert.match(headRule, /top:16px;/, 'the sticky toolbar parks below the 22px drag strip (measured at y=78 with the sheet top at y=40)')
+  assert.match(headRule, /box-shadow:/, 'the card needs an edge once the border is gone')
+})
+
 // The glass theme puts backdrop-filter on .uh-side-modal and .uh-side-dialog, and a
 // filter makes an element the containing block for its position:fixed descendants.
 // The dialog scrolls as well, so the heatmap tooltip (fixed, viewport coordinates)

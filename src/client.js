@@ -3148,7 +3148,9 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
 @media (max-width: 640px) { .uh-side-modal { padding:0; } .uh-side-dialog { border-radius:0; border:0; padding:14px; } }
 /* iOS-style dashboard: grouped surfaces, tactile controls, and an elevated sheet. */
 .uh-page { gap:18px; max-width:1160px; margin:0 auto; padding:12px 2px 34px; font-family:-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif; }
-.uh-head { position:sticky; top:-18px; z-index:20; margin:0 -2px; padding:18px 2px 14px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 88%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 88%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); border-bottom:1px solid color-mix(in srgb, var(--dsw-alias-border-l1) 76%, transparent); }
+/* The toolbar is a rounded card of its own: as a full-bleed rectangle with a hard bottom
+   border it read as a square white block sitting inside the rounded sheet. */
+.uh-head { position:sticky; top:16px; z-index:20; margin:0 -2px; padding:14px 12px; border:0; border-radius:18px; background:linear-gradient(color-mix(in srgb, var(--dsw-alias-bg-base) 88%, transparent), color-mix(in srgb, var(--dsw-alias-bg-base) 88%, transparent)), var(--dsw-alias-bg-layer-1, #1a1c20); box-shadow:0 1px 2px rgba(0,0,0,.06), 0 12px 26px -18px rgba(0,0,0,.32); }
 .uh-title { font-size:22px; line-height:1.2; font-weight:700; letter-spacing:0; }
 .uh-actions { gap:8px; }
 .uh-range { padding:2px; gap:2px; border:0; border-radius:9px; background:color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent); overflow:visible; }
@@ -3199,7 +3201,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
 .uh-side-dialog-head .uh-refresh { position:absolute; right:20px; top:7px; min-height:28px; background:transparent; }
 .uh-close-button { width:30px; padding:0; font-size:22px; line-height:1; color:var(--dsw-alias-label-secondary); }
 .uh-close-button:hover { color:var(--dsw-alias-label-primary); background:color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent); }
-@media (max-width:640px) { .uh-page { gap:14px; padding-bottom:20px; } .uh-head { position:static; padding:4px 0 10px; } .uh-title { font-size:20px; } .uh-custom-range { grid-template-columns:1fr; align-items:stretch; } .uh-custom-range-fields { grid-template-columns:repeat(2, minmax(0, 1fr)); } .uh-custom-range-actions { justify-content:flex-end; } .uh-side-modal { padding:8px; } .uh-side-modal .uh-side-dialog { max-height:calc(100vh - 16px); border-radius:20px; padding:18px 14px 24px; } .uh-side-dialog-head { top:-18px; margin:-18px -14px 8px; padding:7px 14px; } .uh-card-value { font-size:22px; } }
+@media (max-width:640px) { .uh-page { gap:14px; padding-bottom:20px; } .uh-head { position:static; padding:10px 12px; } .uh-title { font-size:20px; } .uh-custom-range { grid-template-columns:1fr; align-items:stretch; } .uh-custom-range-fields { grid-template-columns:repeat(2, minmax(0, 1fr)); } .uh-custom-range-actions { justify-content:flex-end; } .uh-side-modal { padding:8px; } .uh-side-modal .uh-side-dialog { max-height:calc(100vh - 16px); border-radius:20px; padding:18px 14px 24px; } .uh-side-dialog-head { top:-18px; margin:-18px -14px 8px; padding:7px 14px; } .uh-card-value { font-size:22px; } }
 /* Navigation separates the dashboard into three focused iOS-style surfaces. */
 .uh-ios-tabs { display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; padding:4px; border-radius:14px; background:color-mix(in srgb, var(--dsw-alias-label-primary) 9%, transparent); }
 .uh-ios-tab { min-height:32px; border:0; border-radius:10px; background:transparent; color:var(--dsw-alias-label-secondary); font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
