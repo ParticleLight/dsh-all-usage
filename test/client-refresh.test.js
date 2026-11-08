@@ -169,7 +169,7 @@ test('uses language-style custom menus for unified filters', () => {
   assert.ok(source.includes("getPropertyValue('--dsh-windows-titlebar-height')"))
   assert.ok(source.includes('navigator.windowControlsOverlay'))
   assert.ok(source.includes('.uh-side-modal { position:fixed; inset:var(--uh-top-inset, 0px) 0 0 0;'))
-  assert.ok(source.includes('max-height:calc(100vh - var(--uh-top-inset, 0px) - 44px);'))
+  assert.ok(source.includes('max-height:calc(100vh - var(--uh-top-inset, 0px) - 56px);'))
   assert.ok(source.includes("style: captionInset > 0 ? { '--uh-top-inset': captionInset + 'px' } : undefined, onMouseDown"))
   assert.ok(source.includes('padding:12px 2px 34px;'))
   assert.ok(source.includes("className: 'uh-language-menu' + (languageMenuOpen ? ' uh-open' : '')"))

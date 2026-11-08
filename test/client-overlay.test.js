@@ -121,6 +121,31 @@ for (const [prefix, tinted] of surfaces) {
     if (tinted) assert.match(rule, /--dsw-alias-bg-base/, 'the surface keeps the host tint on top of the underlay')
   })
 }
+// The sheet used to be a bottom sheet: square bottom corners because it sat flush
+// against the window edge, and a second set of rules zeroed the radius again below
+// 640px, so the panel read as a plain rectangle in a narrow window. It now floats as
+// a rounded card with a margin on every side.
+test('the usage sheet floats as a rounded card instead of sitting flush on the window edge', () => {
+  const glass = source.indexOf('.uh-side-dialog { width:min(1260px')
+  assert.notEqual(glass, -1, 'the sheet rule must exist')
+  const glassRule = source.slice(glass, source.indexOf('}', glass))
+  assert.match(glassRule, /border-radius:24px;/, 'all four corners carry the sheet radius')
+  assert.doesNotMatch(glassRule, /24px 24px 0 0/, 'the bottom corners are rounded as well')
+
+  const modal = source.indexOf('.uh-side-modal { align-items:flex-end')
+  assert.notEqual(modal, -1, 'the sheet overlay rule must exist')
+  const modalRule = source.slice(modal, source.indexOf('}', modal))
+  assert.match(modalRule, /padding:14px 16px 16px;/, 'the card keeps a gap on every side so its corners stay visible')
+
+  assert.ok(
+    source.includes('.uh-side-dialog { max-height:calc(100vh - 16px); border-radius:20px;'),
+    'the compact sheet keeps rounded corners instead of falling back to a square edge',
+  )
+  assert.ok(
+    source.includes('.uh-side-modal { padding:8px; }'),
+    'the compact sheet keeps a gap around the card',
+  )
+})
 
 // The glass theme puts backdrop-filter on .uh-side-modal and .uh-side-dialog, and a
 // filter makes an element the containing block for its position:fixed descendants.
