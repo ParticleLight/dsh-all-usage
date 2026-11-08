@@ -343,7 +343,9 @@ test('memoizes chart geometry and parent trend rows', () => {
   const pricingRevision = source.slice(source.indexOf('const pricingRenderRevision'), source.indexOf('const modelDonutItems'))
   assert.match(pricingRevision, /pricingModelSearchOpen/)
   assert.match(pricingRevision, /pricingModelSearchOptions/)
-  assert.ok(source.includes('const geometry = React.useMemo(() => buildTrendGeometry(rows, visible, width, height), [rows, visible])'))
+  // The bar view insets its x domain by half a bar, so the geometry depends on the
+  // chart type as well as the rows; the line view keeps the un-inset points.
+  assert.ok(source.includes("const geometry = React.useMemo(() => buildTrendGeometry(rows, visible, width, height, chartType === 'bar' ? 'bar' : null), [rows, visible, chartType])"))
   assert.ok(source.includes('const trendRows = React.useMemo(() => buildTrendSeries({'))
 })
 

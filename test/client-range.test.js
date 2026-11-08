@@ -400,7 +400,10 @@ test('draws one stacked bar per trend row on the line scale', () => {
     day('2026-08-02', 2, 300),
     day('2026-08-03', 3, 200),
   ], { start: '2026-08-01', end: '2026-08-03' }, false)
-  const geometry = buildTrendGeometry(rows, ['total'], 900, 250)
+  // The bar view draws on the same x for each row as the line view, but the bar
+  // geometry insets the data domain by half a bar so the end bars stay inside the
+  // plot instead of sitting on top of the y-axis labels.
+  const geometry = buildTrendGeometry(rows, ['total'], 900, 250, 'bar')
   const bottom = geometry.height - geometry.padding.bottom
   const bars = buildTrendBars(rows, ['total', 'input', 'cacheRead', 'output'], 900, 250)
   assert.equal(bars.length, 3)
@@ -435,6 +438,91 @@ test('keeps the bar view safe for one row, no rows and hidden totals', () => {
   assert.equal(partsOnly[0].segments.map((segment) => segment.key).join('+'), 'input+cacheRead')
   const withTotal = buildTrendBars(single, ['total', 'input'], 900, 250)
   assert.equal(withTotal[0].segments.map((segment) => segment.key).join('+'), 'input+total')
+})
+
+function trendBarRows(count) {
+  const rows = []
+  for (let index = 0; index < count; index += 1) {
+    const date = new Date(Date.UTC(2026, 7, 1 + index)).toISOString().slice(0, 10)
+    rows.push({
+      date,
+      total: 100 + index * 40,
+      tokens: { input: 40, output: 20, cacheRead: 30, cacheWrite: 5, reasoning: 5 },
+    })
+  }
+  return rows
+}
+
+test('keeps every trend bar inside the plot and clear of the y-axis labels', () => {
+  // Regression guard: the first bar used to be centred on the axis x, so its left
+  // half (x = 33 at 900x250) covered the tick labels drawn at padding.left - 7.
+  for (const count of [1, 2, 5, 15, 24]) {
+    const rows = trendBarRows(count)
+    const geometry = buildTrendGeometry(rows, ['total'], 900, 250, 'bar')
+    const bars = buildTrendBars(rows, ['total', 'input'], 900, 250)
+    assert.equal(bars.length, rows.length, 'one bar per row at ' + count)
+    for (const bar of bars) {
+      assert.ok(bar.width > 0 && bar.width <= 26, 'bar width ' + bar.width + ' at ' + count)
+      assert.ok(bar.x >= geometry.padding.left - 1e-9, 'left edge ' + bar.x + ' at ' + count)
+      assert.ok(bar.x + bar.width <= 900 - geometry.padding.right + 1e-9, 'right edge ' + (bar.x + bar.width) + ' at ' + count)
+    }
+    // With more than one row the end bars land exactly on the plot edges, which is
+    // the whole point of insetting the domain by half a bar width.
+    if (count > 1) {
+      assert.ok(Math.abs(bars[0].x - geometry.padding.left) < 1e-9, 'first bar flush left at ' + count)
+      assert.ok(Math.abs(bars.at(-1).x + bars.at(-1).width - (900 - geometry.padding.right)) < 1e-9, 'last bar flush right at ' + count)
+    }
+    // The tick labels are right-aligned at padding.left - 7; every bar has to leave
+    // at least 6px between that edge and its own left edge.
+    const tickRightEdge = geometry.padding.left - 7
+    const leftMost = Math.min(...bars.map((bar) => bar.x))
+    assert.ok(leftMost - tickRightEdge >= 6, 'tick gap ' + (leftMost - tickRightEdge) + ' at ' + count)
+  }
+  assert.match(source, /x: geometry\.padding\.left - 7/)
+})
+
+test('aligns bar centres with the bar-mode geometry and steps forward', () => {
+  for (const count of [2, 5, 24]) {
+    const rows = trendBarRows(count)
+    const bars = buildTrendBars(rows, ['total', 'input'], 900, 250)
+    const geometry = buildTrendGeometry(rows, ['total'], 900, 250, 'bar')
+    assert.equal(geometry.barWidth, bars[0].width)
+    const centres = bars.map((bar) => bar.x + bar.width / 2)
+    centres.forEach((centre, index) => {
+      // The bar is centred on the very same point the bar-mode geometry reports.
+      assert.ok(Math.abs(centre - geometry.points.total[index].x) < 1e-9, 'centre ' + index + ' at ' + count)
+    })
+    for (let index = 1; index < centres.length; index += 1) {
+      assert.ok(centres[index] > centres[index - 1], 'centres increase at ' + count)
+      assert.ok(centres[index] - centres[index - 1] > 0)
+      assert.ok(Math.abs((centres[index] - centres[index - 1]) - (centres[1] - centres[0])) < 1e-9, 'even spacing at ' + count)
+    }
+  }
+  // The line view has no bar, so the geometry says so instead of inventing a width.
+  assert.equal(buildTrendGeometry(trendBarRows(5), ['total'], 900, 250).barWidth, null)
+  assert.equal(buildTrendGeometry(trendBarRows(5), ['total'], 900, 250, 'line').barWidth, null)
+})
+
+test('keeps the line geometry exactly as it was before the bar scale', () => {
+  for (const count of [2, 5, 15, 24]) {
+    const rows = trendBarRows(count)
+    const line = buildTrendGeometry(rows, ['total'], 900, 250)
+    const bar = buildTrendGeometry(rows, ['total'], 900, 250, 'bar')
+    assert.equal(line.padding.left, 46)
+    assert.equal(line.padding.right, 14)
+    assert.equal(line.points.total[0].x, 46)
+    assert.ok(Math.abs(line.points.total.at(-1).x - 886) < 1e-9)
+    // Only the horizontal placement moves: the value scale is shared.
+    assert.equal(line.max, bar.max)
+    assert.deepEqual(line.points.total.map((point) => point.y), bar.points.total.map((point) => point.y))
+    // Inset centres never reach the un-inset ones.
+    assert.ok(bar.points.total[0].x > line.points.total[0].x)
+    assert.ok(bar.points.total.at(-1).x < line.points.total.at(-1).x)
+  }
+  // One row still sits in the middle of the plot in either mode.
+  const single = trendBarRows(1)
+  assert.equal(buildTrendGeometry(single, ['total'], 900, 250).points.total[0].x, 466)
+  assert.equal(buildTrendGeometry(single, ['total'], 900, 250, 'bar').points.total[0].x, 466)
 })
 
 test('renders a visible marker for a single-day trend series', () => {

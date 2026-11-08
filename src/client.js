@@ -1717,26 +1717,30 @@ window.__ModuleLoader__.load({
       if (hourlyRows.length > 0) return hourlyRows
       return buildTrendRows(queryDaily !== null ? queryDaily : activeDayRows, bounds, utc)
     }
+    // 柱宽按相邻数据点的间距算，最多 26px：柱状模式要靠它把横向数据域内缩半个柱宽，
+    // 否则首尾柱会压住 Y 轴刻度文字（最左柱盖住刻度那一列）并顶到画布右边缘。
+    function trendBarWidth(count, innerWidth) {
+      const slot = count > 1 ? innerWidth / (count - 1) : innerWidth / 2
+      return Math.max(2, Math.min(slot * 0.62, 26))
+    }
     /**
      * One bar per row, measured on the same scale as the line: the visible series stack
      * up from the baseline, so the bar carries the row total while the segments keep the
-     * split readable. The bar is centred on the line's own x for that row, which keeps
-     * the hover cursor, the tick labels and the hit areas aligned with the line view.
+     * split readable. The bar is centred on the plot's own x for that row (inset by half
+     * a bar in bar mode), so the hover cursor, tick labels and hit areas still agree.
      */
     function buildTrendBars(rows, visible, width = 900, height = 250) {
       const list = Array.isArray(rows) ? rows : []
       const wanted = Array.isArray(visible) ? visible : []
       const keys = wanted.filter((key) => key !== 'total')
-      const geometry = buildTrendGeometry(list, ['total'], width, height)
+      const geometry = buildTrendGeometry(list, ['total'], width, height, 'bar')
       const innerHeight = Math.max(1, height - geometry.padding.top - geometry.padding.bottom)
-      const innerWidth = Math.max(1, width - geometry.padding.left - geometry.padding.right)
       const baseline = height - geometry.padding.bottom
-      const spacing = list.length > 1 ? innerWidth / (list.length - 1) : innerWidth / 2
-      const barWidth = Math.max(2, Math.min(spacing * 0.62, 26))
+      const barWidth = geometry.barWidth
       const scale = (value) => (Number.isFinite(value) && value > 0 ? (value / geometry.max) * innerHeight : 0)
       const showTotal = keys.length === 0 || wanted.includes('total')
       return list.map((row, index) => {
-        const centre = geometry.padding.left + (list.length > 1 ? index * innerWidth / (list.length - 1) : innerWidth / 2)
+        const centre = geometry.points.total[index].x
         const tokens = row && row.tokens ? row.tokens : {}
         const segments = []
         let cursor = baseline
@@ -1758,16 +1762,21 @@ window.__ModuleLoader__.load({
         return { x: centre - barWidth / 2, width: barWidth, segments }
       })
     }
-    function buildTrendGeometry(rows, visible, width = 900, height = 250) {
+    function buildTrendGeometry(rows, visible, width = 900, height = 250, mode = null) {
       const keys = Array.isArray(visible) && visible.length > 0 ? visible : ['total']
       const padding = { left: 46, right: 14, top: 14, bottom: 30 }
       const innerWidth = Math.max(1, width - padding.left - padding.right)
       const innerHeight = Math.max(1, height - padding.top - padding.bottom)
+      const count = Array.isArray(rows) ? rows.length : 0
+      // 柱状模式内缩半个柱宽：柱子以数据点为中心向两侧各伸出 barWidth/2，不内缩首尾柱
+      // 就会压住 Y 轴刻度文字（左侧）并顶到画布右边缘（右侧）；折线模式 inset 恒为 0。
+      const barWidth = mode === 'bar' ? trendBarWidth(count, innerWidth) : null
+      const inset = barWidth === null ? 0 : barWidth / 2
       const values = (Array.isArray(rows) ? rows : []).flatMap((row) => keys.map((key) => key === 'total' ? row.total : row.tokens[key] || 0))
       const max = Math.max(1, ...values)
       const points = {}
-      for (const key of keys) points[key] = (Array.isArray(rows) ? rows : []).map((row, index) => ({ x: padding.left + (rows.length > 1 ? index * innerWidth / (rows.length - 1) : innerWidth / 2), y: padding.top + innerHeight - ((key === 'total' ? row.total : row.tokens[key] || 0) / max) * innerHeight, value: key === 'total' ? row.total : row.tokens[key] || 0 }))
-      return { width, height, padding, max, points }
+      for (const key of keys) points[key] = (Array.isArray(rows) ? rows : []).map((row, index) => ({ x: padding.left + (count > 1 ? inset + index * (innerWidth - inset * 2) / (count - 1) : innerWidth / 2), y: padding.top + innerHeight - ((key === 'total' ? row.total : row.tokens[key] || 0) / max) * innerHeight, value: key === 'total' ? row.total : row.tokens[key] || 0 }))
+      return { width, height, padding, max, barWidth, points }
     }
     function modelParts(row, unknownProvider, unknownModel) {
       const structuredModel = typeof row.actualModel === 'string' && row.actualModel !== '' ? row.actualModel : (typeof row.requestedModel === 'string' && row.requestedModel !== '' ? row.requestedModel : '')
@@ -2091,7 +2100,7 @@ window.__ModuleLoader__.load({
       }
       const width = 900
       const height = 280
-      const geometry = React.useMemo(() => buildTrendGeometry(rows, visible, width, height), [rows, visible])
+      const geometry = React.useMemo(() => buildTrendGeometry(rows, visible, width, height, chartType === 'bar' ? 'bar' : null), [rows, visible, chartType])
       const colors = TREND_COLORS
       const gradientOpacity = TREND_GRADIENT_OPACITY
       const bottomY = height - geometry.padding.bottom
