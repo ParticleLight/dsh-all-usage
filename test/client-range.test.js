@@ -752,3 +752,63 @@ test('draws the day row instead of a query result that is not current', () => {
   assert.equal(week.length, 7)
   assert.ok(week.every((row) => !Number.isFinite(row.time)))
 })
+
+// The heatmap weekday column and the day grid are two CSS grids that must keep the
+// same seven row heights: the labels used to sit on a fixed 10px pitch while the
+// cells were sized by aspect-ratio, so 周一/周三/周五 drifted -12.3/-28.7/-45.11px.
+// The styles live in the client's single CSS string, so these guards read the rule
+// bodies out of the source text instead of pinning a whole-stylesheet snapshot.
+function cssRuleBodies(selector) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')
+  const pattern = new RegExp('(?:^|[\\s;}])' + escaped + '\\s*\\{([^}]*)\\}', 'g')
+  return Array.from(source.matchAll(pattern), (match) => match[1])
+}
+
+function cssDeclarations(bodies, property) {
+  const pattern = new RegExp('(?:^|[;\\s])' + property + '\\s*:\\s*([^;}]+)', 'g')
+  return bodies.flatMap((body) => Array.from(body.matchAll(pattern), (match) => match[1].trim()))
+}
+
+test('keeps the weekday labels on the same seven rows as the heatmap grid', () => {
+  const weekdays = cssRuleBodies('.uh-wdays')
+  assert.ok(weekdays.length > 0, '.uh-wdays rule is missing: the heatmap weekday column lost its styles')
+  // The row template has to be fractional so the rows take the height the square day
+  // cells give the grid; a fixed 10px track is exactly what decoupled the columns.
+  const rowTemplates = cssDeclarations(weekdays, 'grid-template-rows')
+  assert.ok(rowTemplates.length > 0, '.uh-wdays must declare grid-template-rows for its seven weekday rows')
+  for (const template of rowTemplates) {
+    assert.match(template, /^repeat\(\s*7\s*,[^;]*\b1fr\b[^;]*\)$/, '.uh-wdays rows must be fractional (repeat(7,minmax(10px,1fr)) or an equivalent 1fr expression) so they follow the grid rows, got: ' + template)
+  }
+  // Both columns describe the same seven weekdays, so neither may change the row count.
+  const gridRows = cssDeclarations(cssRuleBodies('.uh-grid'), 'grid-template-rows')
+  assert.ok(gridRows.length > 0, '.uh-grid must keep grid-template-rows for its seven weekday rows')
+  for (const template of gridRows) {
+    assert.match(template, /^repeat\(\s*7\s*,/, '.uh-grid must keep seven weekday rows so the .uh-wdays labels stay aligned with it, got: ' + template)
+  }
+  assert.ok(!/repeat\(\s*7\s*,\s*10px\s*\)/.test(source), 'a fixed repeat(7,10px) row template is back: the weekday labels will drift off the grid rows again')
+})
+
+test('stretches the weekday column to the height of the heatmap grid', () => {
+  const bodies = cssRuleBodies('.uh-hm-body')
+  assert.ok(bodies.length > 0, '.uh-hm-body rule is missing: the heatmap body lost its styles')
+  const declared = cssDeclarations(bodies, 'align-items')
+  assert.ok(declared.length > 0, '.uh-hm-body must set align-items:stretch so the weekday column is as tall as the day grid')
+  for (const value of declared) {
+    assert.equal(value.replace(/\s*!important$/, ''), 'stretch', '.uh-hm-body must stretch both columns (align-items:stretch) so the weekday rows can follow the grid rows, got: ' + value)
+  }
+})
+
+test('centres each weekday label in its row instead of pinning a line height', () => {
+  const bodies = cssRuleBodies('.uh-wdays span')
+  assert.ok(bodies.length > 0, '.uh-wdays span rule is missing: the weekday labels lost their styles')
+  const base = bodies[0]
+  assert.match(base, /display\s*:\s*flex/, '.uh-wdays span must be a flex box (display:flex) so the label can be centred inside its row, got: ' + base)
+  assert.match(base, /align-items\s*:\s*center/, '.uh-wdays span must centre the label vertically (align-items:center) inside its row, got: ' + base)
+  // A fixed line height ignored the grid's real row pitch, which is what made the
+  // labels jump; any absolute length here re-introduces the drift.
+  for (const body of bodies) {
+    for (const value of cssDeclarations([body], 'line-height')) {
+      assert.doesNotMatch(value, /[\d.]+(?:px|pt|rem|em)\b/, '.uh-wdays span must not pin its height with an absolute line-height, got: ' + value)
+    }
+  }
+})
