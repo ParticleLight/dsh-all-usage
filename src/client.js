@@ -17,6 +17,18 @@ window.__ModuleLoader__.load({
     } catch (error) {
       ReactDOM = null
     }
+    // The sheet's glass theme puts backdrop-filter on .uh-side-modal and on
+    // .uh-side-dialog, and backdrop-filter makes an element the containing block
+    // for its position:fixed descendants: a tooltip placed from viewport pointer
+    // coordinates was then measured against the scrolling dialog and painted
+    // outside the viewport. Fixed layers escape to <body> instead; a host without
+    // react-dom or without a body keeps the inline rendering, so nothing is lost.
+    function uhFixedLayer(node) {
+      if (node === null || node === undefined) return node
+      if (ReactDOM === null || typeof ReactDOM.createPortal !== 'function') return node
+      if (typeof document === 'undefined' || document === null || document.body === null || document.body === undefined) return node
+      return ReactDOM.createPortal(node, document.body)
+    }
 
     // Replaced at build time by scripts/build-client.mjs with the package
     // version, so the page can tell the user when the running host is older
@@ -2465,7 +2477,7 @@ window.__ModuleLoader__.load({
           ),
         ),
         React.createElement('div', { className: 'uh-note', style: { marginTop: 10 } }, tr('口径：每完成一个回合点亮一次（含子代理会话）；悬停查看按工作区明细，点击工作区可筛选热力图与明细表；键盘可用方向键浏览、回车查看当日明细。日期按本地时区。', 'Methodology: one cell lights up for each completed turn, including subagent sessions. Hover to view workspace details; click a workspace to filter the heatmap and detail tables. English dates and day boundaries use UTC.')),
-        hoverDate !== null ? React.createElement(MemoUsageHeatmapTooltip, { date: hoverDate, day: hoverDay, language, tooltipRef, workspaceTitles: workspaceLookup.titles, workspaceIndexes: workspaceLookup.indexes, onWorkspaceSelect: selectWorkspace }) : null,
+        hoverDate !== null ? uhFixedLayer(React.createElement(MemoUsageHeatmapTooltip, { date: hoverDate, day: hoverDay, language, tooltipRef, workspaceTitles: workspaceLookup.titles, workspaceIndexes: workspaceLookup.indexes, onWorkspaceSelect: selectWorkspace })) : null,
       )
     }
     const MemoUsageHeatmap = React.memo(UsageHeatmap)

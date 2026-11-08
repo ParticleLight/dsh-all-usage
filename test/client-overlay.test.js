@@ -122,6 +122,99 @@ for (const [prefix, tinted] of surfaces) {
   })
 }
 
+// The glass theme puts backdrop-filter on .uh-side-modal and .uh-side-dialog, and a
+// filter makes an element the containing block for its position:fixed descendants.
+// The dialog scrolls as well, so the heatmap tooltip (fixed, viewport coordinates)
+// was laid out against the dialog's content box: a left:782/top:413 style painted at
+// y=-586, far above the viewport, and nobody ever saw the tooltip. Fixed layers are
+// now handed to <body> through uhFixedLayer, so this file renders that helper against
+// a stub react-dom and asserts both the portal and its fallback paths.
+// Read the whole helper out of the source: the checkout keeps CRLF in src/, so the
+// block is matched with a line-ending-agnostic pattern instead of two indexOf calls.
+const fixedLayerMatch = /\r?\n    function uhFixedLayer\(node\) \{[\s\S]*?\r?\n    \}/.exec(source)
+const fixedLayerStart = fixedLayerMatch === null ? -1 : fixedLayerMatch.index
+const fixedLayerSource = fixedLayerMatch === null ? '' : fixedLayerMatch[0]
+const offViewportTooltip = 'the tooltip is laid out against the scrolling .uh-side-dialog content box again and paints outside the viewport (measured: a left:782/top:413 tooltip rendered at y=-586)'
+
+/** Load uhFixedLayer with a stub react-dom/document pair, exactly as the page would. */
+function loadFixedLayer({ createPortal, documentValue }) {
+  const calls = []
+  const ReactDOM = createPortal === false
+    ? null
+    : createPortal === 'missing'
+      ? {}
+      : {
+          createPortal: (element, target) => {
+            calls.push({ element, target })
+            return { type: 'portal', element, target }
+          },
+        }
+  const factory = new Function('ReactDOM', 'document', fixedLayerSource + '\nreturn uhFixedLayer')
+  const layer = factory(ReactDOM, documentValue)
+  return { calls, run: (node) => layer(node) }
+}
+
+function stubDocument() {
+  return { body: { name: 'body' } }
+}
+
+test('a fixed tooltip leaves the scrolling dialog and mounts on document.body', () => {
+  assert.notEqual(fixedLayerStart, -1, 'uhFixedLayer is missing from the client: ' + offViewportTooltip)
+  assert.ok(fixedLayerSource.trimEnd().endsWith('}'), 'uhFixedLayer must be read out whole, up to its closing brace')
+  const body = stubDocument().body
+  const node = { type: 'tooltip', props: { className: 'uh-tip' } }
+  const { calls, run } = loadFixedLayer({ createPortal: true, documentValue: { body } })
+  const layer = run(node)
+  assert.equal(calls.length, 1, 'the tooltip is portaled exactly once: ' + offViewportTooltip)
+  assert.equal(calls[0].target, body, 'the portal target must be document.body, not an ancestor inside the dialog: ' + offViewportTooltip)
+  assert.equal(calls[0].element, node, 'the portal carries the tooltip element itself')
+  assert.equal(layer.type, 'portal', 'uhFixedLayer returns whatever the portal returns, not the raw node')
+  assert.equal(layer.element, node)
+  assert.notEqual(layer, node, 'returning the node un-portaled leaves the tooltip inside the scrolling dialog: ' + offViewportTooltip)
+})
+
+test('a host without react-dom renders the tooltip in place instead of crashing', () => {
+  assert.notEqual(fixedLayerStart, -1, 'uhFixedLayer is missing from the client: ' + offViewportTooltip)
+  const node = { type: 'tooltip', props: { className: 'uh-tip' } }
+  for (const [label, createPortal] of [['a null react-dom', false], ['a react-dom without createPortal', 'missing']]) {
+    const { calls, run } = loadFixedLayer({ createPortal, documentValue: stubDocument() })
+    assert.equal(run(node), node, label + ' must hand the tooltip back untouched so the panel still paints it: ' + offViewportTooltip)
+    assert.equal(calls.length, 0, label + ' must not call createPortal')
+  }
+})
+
+test('a host without a body renders the tooltip in place instead of crashing', () => {
+  assert.notEqual(fixedLayerStart, -1, 'uhFixedLayer is missing from the client: ' + offViewportTooltip)
+  const node = { type: 'tooltip', props: { className: 'uh-tip' } }
+  for (const [label, documentValue] of [['no document', undefined], ['a document without body', {}], ['a null body', { body: null }]]) {
+    const { calls, run } = loadFixedLayer({ createPortal: true, documentValue })
+    assert.equal(run(node), node, label + ' must hand the tooltip back untouched so the panel still paints it')
+    assert.equal(calls.length, 0, label + ' must not call createPortal with a missing target')
+  }
+})
+
+test('a missing tooltip never reaches the portal', () => {
+  assert.notEqual(fixedLayerStart, -1, 'uhFixedLayer is missing from the client: ' + offViewportTooltip)
+  const { calls, run } = loadFixedLayer({ createPortal: true, documentValue: stubDocument() })
+  assert.equal(run(null), null, 'a null tooltip stays null')
+  assert.equal(run(undefined), undefined, 'an undefined tooltip stays undefined')
+  assert.equal(calls.length, 0, 'nothing to portal means no portal call')
+})
+
+test('the heatmap renders its tooltip through uhFixedLayer and keeps both guards', () => {
+  const heatmapStart = source.indexOf('    function UsageHeatmap(props) {')
+  const heatmapEnd = source.indexOf('    const MemoUsageHeatmap = React.memo(UsageHeatmap)')
+  assert.notEqual(heatmapStart, -1, 'UsageHeatmap must exist')
+  assert.notEqual(heatmapEnd, -1, 'the memo wrapper must follow UsageHeatmap')
+  const heatmap = source.slice(heatmapStart, heatmapEnd)
+  const tooltipLines = heatmap.split('\n').filter((line) => line.includes('React.createElement(MemoUsageHeatmapTooltip'))
+  assert.equal(tooltipLines.length, 1, 'the heatmap renders its tooltip from exactly one place')
+  assert.match(tooltipLines[0], /uhFixedLayer\(\s*React\.createElement\(MemoUsageHeatmapTooltip\b/, 'the heatmap tooltip must be wrapped in uhFixedLayer(...): ' + offViewportTooltip)
+  assert.doesNotMatch(heatmap, /\?\s*React\.createElement\(MemoUsageHeatmapTooltip/, 'a bare tooltip element is rendered again: ' + offViewportTooltip)
+  assert.match(fixedLayerSource, /typeof ReactDOM\.createPortal !== 'function'/, 'uhFixedLayer must keep the createPortal feature check')
+  assert.match(fixedLayerSource, /document\.body/, 'uhFixedLayer must keep the document.body check')
+})
+
 // Smoothness is cheap to lose: a backdrop blur on a sticky header or on a tooltip
 // that follows the pointer re-rasters its backdrop on every frame, and a pulsing
 // box-shadow repaints forever even when nothing moves. Both sat on surfaces that
