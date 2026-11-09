@@ -72,6 +72,8 @@ test("the language follows DSH's Language row until the panel chooses one", () =
     assert.equal(loadLanguage({ hostLocale: id }).api.storedLanguage(), id, 'every language DSH ships is carried by the panel')
   }
   assert.equal(loadLanguage({ navigatorLanguage: 'ko-KR' }).api.storedLanguage(), 'en', 'a language neither side ships falls back to English')
+  assert.equal(loadLanguage({ hostLocale: 'ko', navigatorLanguage: 'zh-CN' }).api.storedLanguage(), 'en', 'a host language pack the panel does not carry reads English, not the browser language the host overrode')
+  assert.equal(loadLanguage({ hostLocale: '', navigatorLanguage: 'fr-FR' }).api.storedLanguage(), 'fr', 'a host that reports no active locale leaves the browser to decide')
   assert.equal(loadLanguage({ navigatorLanguage: 'pt-BR' }).api.storedLanguage(), 'pt', 'a regional tag resolves to its language')
   assert.equal(loadLanguage({ navigatorLanguage: 'zh-TW' }).api.storedLanguage(), 'zh', 'a Chinese browser starts in Chinese')
 

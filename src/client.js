@@ -3480,7 +3480,14 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
     let localeScope = null
     let hostLocaleLanguage
     function adoptLocaleScope(scope) { localeScope = scope }
-    function languageFromLocaleId(id) { return normalizeLanguage(id) }
+    // The host's active id is always a locale it registers right now, so an id the
+    // panel does not carry means the host is reading a language pack shipped outside
+    // DSH's own eight. That pack's lookup chain ends at English, so the panel reads
+    // English too instead of the browser language the host already overrode.
+    function languageFromLocaleId(id) {
+      if (typeof id !== 'string' || id === '') return null
+      return normalizeLanguage(id) ?? 'en'
+    }
     function hostLanguage() {
       if (hostLocaleLanguage !== undefined) return hostLocaleLanguage
       hostLocaleLanguage = null
