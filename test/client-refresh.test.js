@@ -125,7 +125,7 @@ test('calculates streaks from the full daily history', () => {
 })
 
 test('uses the latest full refresh time as the normal health timestamp', () => {
-  assert.match(source, /lastStatsText !== '' \? '已更新 ' \+ lastStatsText/)
+  assert.match(source, /pickFormat\(language, '已更新 \{time\}', 'Updated \{time\}', \{ time: lastStatsText \}\)/)
   assert.doesNotMatch(source, /syncCompletedAt !== '' \? '已同步 '/)
 })
 
@@ -546,7 +546,7 @@ test('keeps the replacement cards and merges cache hits into the rate card', () 
   const rateBar = source.indexOf("className: 'uh-ios-metric-bar'", rateStart)
   const rateDetail = source.indexOf("className: 'uh-ios-metric-rate-detail'", rateStart)
   assert.ok(rateStart >= 0 && rateBar > rateStart && rateDetail > rateBar)
-  assert.ok(source.includes("language === 'en' ? 'Context reused ' + fmtCompact(agg.totals.cacheRead) + ' tokens' : '复用上下文 ' + fmtCompact(agg.totals.cacheRead) + ' Token'"))
+  assert.ok(source.includes("pickFormat(language, '复用上下文 {count} Token', 'Context reused {count} tokens', { count: fmtCompact(agg.totals.cacheRead) })"))
   assert.ok(source.includes('.uh-ios-metric-rate-detail { min-width:0; overflow:hidden; color:var(--dsw-alias-label-secondary); font-size:12px;'))
   assert.ok(source.includes('fmtCompact(agg.totals.cacheRead)'))
   assert.doesNotMatch(source, /summaryMetric/)

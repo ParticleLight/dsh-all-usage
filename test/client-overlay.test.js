@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import { localeHelperSource } from './support/locale-helpers.js'
 
 // Issue #4: the usage sheet used to be rendered inside the sidebar slot, right
 // next to its entry button. A fixed overlay only keeps its own z-index inside the
@@ -52,7 +53,7 @@ function renderEntry({ open, reactDOM, documentValue }) {
     'React', 'ReactDOM', 'document', 'LineIcon', 'storedLanguage', 'persistLanguage',
     'uhWindowControlsInset', 'uhReportClientEnv', 'UsageDashboardBoundary', 'UsagePage',
     'globalThis',
-    component + '\nglobalThis.__entry = UsageSidebarEntry',
+    localeHelperSource(source) + '\n' + component + '\nglobalThis.__entry = UsageSidebarEntry',
   )
   const previous = globalThis.__entry
   try {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import vm from 'node:vm'
+import { localeHelperSource } from './support/locale-helpers.js'
 
 // The host serves one timezone calendar per snapshot request — byDay or byDayUtc,
 // chosen by the utc flag the client derives from the panel language — and the fetch
@@ -24,7 +25,7 @@ assert.notEqual(languageStart, -1, 'snapshotUtcFlag must exist')
 assert.notEqual(languageEnd, -1, 'the host data interface must follow the flag helper')
 assert.notEqual(keysStart, -1, 'the language keys must exist')
 assert.notEqual(keysEnd, -1, 'the UI-state key must follow the language helpers')
-const languageSnippet = source.slice(languageStart, languageEnd) + '\n' + source.slice(keysStart, keysEnd) +
+const languageSnippet = localeHelperSource(source) + '\n' + source.slice(languageStart, languageEnd) + '\n' + source.slice(keysStart, keysEnd) +
   '\nglobalThis.__language = { storedLanguage, snapshotUtcFlag, adoptLocaleScope, persistLanguage }'
 
 /** Run the language helpers against a fake storage, navigator and locale runtime. */
@@ -60,11 +61,18 @@ test("the language follows DSH's Language row until the panel chooses one", () =
   assert.equal(chineseHost.api.storedLanguage(), 'zh')
   assert.equal(chineseHost.api.snapshotUtcFlag(), '?utc=0')
 
+  assert.equal(loadLanguage({ hostLocale: 'ja' }).api.snapshotUtcFlag(), '?utc=1', 'every non-Chinese language reads the UTC calendar')
+
   const chosen = loadLanguage({ stored: 'zh', chosen: true, hostLocale: 'en' })
   assert.equal(chosen.api.storedLanguage(), 'zh', 'a panel choice outranks the host language')
 
-  assert.equal(loadLanguage({ navigatorLanguage: 'ja-JP', hostLocale: 'ja' }).api.storedLanguage(), 'en', 'a language the panel does not ship reads English')
-  assert.equal(loadLanguage({ navigatorLanguage: 'fr-FR' }).api.storedLanguage(), 'en', 'an unregistered browser language falls back to English')
+  assert.equal(loadLanguage({ navigatorLanguage: 'ja-JP', hostLocale: 'ja' }).api.storedLanguage(), 'ja', 'a Japanese host opens the panel in Japanese')
+  assert.equal(loadLanguage({ navigatorLanguage: 'fr-FR' }).api.storedLanguage(), 'fr', 'the browser language stands in when the host offers none')
+  for (const id of ['zh', 'en', 'ja', 'es', 'fr', 'de', 'ru', 'pt']) {
+    assert.equal(loadLanguage({ hostLocale: id }).api.storedLanguage(), id, 'every language DSH ships is carried by the panel')
+  }
+  assert.equal(loadLanguage({ navigatorLanguage: 'ko-KR' }).api.storedLanguage(), 'en', 'a language neither side ships falls back to English')
+  assert.equal(loadLanguage({ navigatorLanguage: 'pt-BR' }).api.storedLanguage(), 'pt', 'a regional tag resolves to its language')
   assert.equal(loadLanguage({ navigatorLanguage: 'zh-TW' }).api.storedLanguage(), 'zh', 'a Chinese browser starts in Chinese')
 
   // Resolved once: flipping the host under a mounted panel must not move the language,

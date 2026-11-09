@@ -2,6 +2,7 @@ import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { minify } from 'terser'
 import { assertSafeSvg } from './svg-guard.mjs'
+import { collectClientStrings, verifyDictionary } from './locale-keys.mjs'
 
 const sourceUrl = new URL('../src/client.js', import.meta.url)
 const outputUrl = new URL('../lib/client.js', import.meta.url)
@@ -11,6 +12,12 @@ const ICON_PLACEHOLDER = '/* __MODEL_ICON_DATA__ */ null'
 // plugin only at startup, so a page served by a newer package than the running
 // host has to be able to say so.
 const VERSION_PLACEHOLDER = '/* __PLUGIN_VERSION__ */ "0.0.0"'
+// The six non-Chinese locales DSH ships live beside the source as keyed dictionaries
+// (keys are the English source strings) and are inlined here, so the runtime bundle
+// carries them and the package ships no extra files.
+const localesUrl = new URL('../src/locales/', import.meta.url)
+const LOCALE_PLACEHOLDER = '/* __LOCALE_MESSAGES__ */ {}'
+const LOCALE_IDS = ['ja', 'es', 'fr', 'de', 'ru', 'pt']
 
 /**
  * Build the icon table the client bundle carries: resolution metadata and a host
@@ -65,13 +72,44 @@ async function buildIconTable(pluginVersion) {
   return icons
 }
 
+async function buildLocaleTable(source) {
+  const { entries, dynamic } = collectClientStrings(source)
+  if (dynamic.length > 0) {
+    const where = dynamic.map((call) => 'line ' + call.line + ' (' + call.call + ')').join(', ')
+    throw new Error('src/client.js has ui strings that are not literals, so no dictionary can cover them: ' + where)
+  }
+  const table = {}
+  for (const id of LOCALE_IDS) {
+    let raw
+    try {
+      raw = await readFile(new URL(id + '.json', localesUrl), 'utf8')
+    } catch (error) {
+      throw new Error('src/locales/' + id + '.json is required: ' + error.message)
+    }
+    const dictionary = JSON.parse(raw)
+    if (dictionary === null || typeof dictionary !== 'object' || Array.isArray(dictionary)) throw new Error('src/locales/' + id + '.json must be an object keyed by the English source string')
+    const report = verifyDictionary(id, dictionary, entries)
+    const problems = [
+      report.missing.length > 0 ? 'missing ' + report.missing.length + ': ' + report.missing.slice(0, 5).map((key) => JSON.stringify(key)).join(', ') : '',
+      report.extra.length > 0 ? 'unused ' + report.extra.length + ': ' + report.extra.slice(0, 5).map((key) => JSON.stringify(key)).join(', ') : '',
+      report.empty.length > 0 ? 'empty ' + report.empty.length + ': ' + report.empty.slice(0, 5).map((key) => JSON.stringify(key)).join(', ') : '',
+      report.placeholders.length > 0 ? 'placeholder mismatch ' + report.placeholders.length + ': ' + report.placeholders.slice(0, 5).map((key) => JSON.stringify(key)).join(', ') : '',
+    ].filter(Boolean)
+    if (problems.length > 0) throw new Error('src/locales/' + id + '.json does not cover the panel strings: ' + problems.join('; '))
+    table[id] = dictionary
+  }
+  return table
+}
+
 const rawSource = await readFile(sourceUrl, 'utf8')
 if (!rawSource.includes(ICON_PLACEHOLDER)) throw new Error('src/client.js must contain the model icon placeholder: ' + ICON_PLACEHOLDER)
 if (!rawSource.includes(VERSION_PLACEHOLDER)) throw new Error('src/client.js must contain the plugin version placeholder: ' + VERSION_PLACEHOLDER)
+if (!rawSource.includes(LOCALE_PLACEHOLDER)) throw new Error('src/client.js must contain the locale placeholder: ' + LOCALE_PLACEHOLDER)
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 if (typeof packageJson.version !== 'string' || packageJson.version === '') throw new Error('package.json must declare a version')
 const iconTable = await buildIconTable(packageJson.version)
-const source = rawSource.replace(ICON_PLACEHOLDER, JSON.stringify(iconTable)).replace(VERSION_PLACEHOLDER, JSON.stringify(packageJson.version))
+const localeTable = await buildLocaleTable(rawSource)
+const source = rawSource.replace(ICON_PLACEHOLDER, JSON.stringify(iconTable)).replace(VERSION_PLACEHOLDER, JSON.stringify(packageJson.version)).replace(LOCALE_PLACEHOLDER, JSON.stringify(localeTable))
 const result = await minify(source, {
   ecma: 2022,
   compress: { passes: 2 },

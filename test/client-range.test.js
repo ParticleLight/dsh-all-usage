@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import vm from 'node:vm'
+import { localeHelperSource } from './support/locale-helpers.js'
 
 const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
 const start = source.indexOf('    function pad2')
@@ -10,7 +11,7 @@ assert.notEqual(start, -1, 'client date helpers must exist')
 assert.notEqual(end, -1, 'client range helper boundary must exist')
 
 const context = {}
-vm.runInNewContext(source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, buildTrendBars, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate }', context)
+vm.runInNewContext(localeHelperSource(source) + '\n' + source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, buildTrendBars, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate }', context)
 const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, buildTrendBars, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate } = context.__rangeHelpers
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {

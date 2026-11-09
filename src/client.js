@@ -23,6 +23,54 @@ window.__ModuleLoader__.load({
     // coordinates was then measured against the scrolling dialog and painted
     // outside the viewport. Fixed layers escape to <body> instead; a host without
     // react-dom or without a body keeps the inline rendering, so nothing is lost.
+    // DSH ships exactly these interface locales (Settings → General → Language). The
+    // panel offers the same eight ids and native labels so the host choice maps one to
+    // one, and a language the panel does not carry reads English, matching the host's
+    // own fallback. Chinese keeps its hand-written copy; the other six look their text
+    // up by the English source string, which the build inlines from src/locales.
+    const LANGUAGE_ENTRIES = [
+      ['zh', '中文'],
+      ['en', 'English'],
+      ['ja', '日本語'],
+      ['es', 'Español'],
+      ['fr', 'Français'],
+      ['de', 'Deutsch'],
+      ['ru', 'Русский'],
+      ['pt', 'Português'],
+    ]
+    const LANGUAGE_IDS = LANGUAGE_ENTRIES.map((entry) => entry[0])
+    const LANGUAGE_LABELS = new Map(LANGUAGE_ENTRIES)
+    const LOCALE_MESSAGES = /* __LOCALE_MESSAGES__ */ {}
+    const INTL_LOCALES = { zh: 'zh-CN', en: 'en-US', ja: 'ja-JP', es: 'es-ES', fr: 'fr-FR', de: 'de-DE', ru: 'ru-RU', pt: 'pt-BR' }
+    function normalizeLanguage(value) {
+      const text = String(value === null || value === undefined ? '' : value).trim().toLowerCase().replace(/_/g, '-')
+      if (text === '') return null
+      const primary = text.split('-')[0]
+      return LANGUAGE_IDS.includes(primary) ? primary : null
+    }
+    function intlLocale(language) { return INTL_LOCALES[language] || INTL_LOCALES.en }
+    function localeMessage(language, en) {
+      const table = LOCALE_MESSAGES[language]
+      if (table === null || table === undefined) return null
+      const value = table[en]
+      return typeof value === 'string' && value !== '' ? value : null
+    }
+    // 中文读手写原文，英文读原文本身，其余六种语言按英文原文查表；缺词回落英文。
+    function pick(language, zh, en) {
+      if (language === 'zh') return zh
+      if (language === 'en') return en
+      return localeMessage(language, en) ?? en
+    }
+    function fillMessage(text, params) {
+      if (params === null || params === undefined) return text
+      return String(text).replace(/\{([a-z]+)\}/g, (whole, name) => {
+        const value = params[name]
+        return value === null || value === undefined ? whole : String(value)
+      })
+    }
+    function pickFormat(language, zh, en, params) {
+      return fillMessage(pick(language, zh, en), params)
+    }
     function uhFixedLayer(node) {
       if (node === null || node === undefined) return node
       if (ReactDOM === null || typeof ReactDOM.createPortal !== 'function') return node
@@ -237,7 +285,7 @@ window.__ModuleLoader__.load({
     }
     function fmtCount(n, language) {
       if (typeof n !== 'number' || !Number.isFinite(n)) return '0'
-      return Math.round(n).toLocaleString(language === 'en' ? 'en-US' : 'zh-CN')
+      return Math.round(n).toLocaleString(intlLocale(language))
     }
     function rateOf(input, cacheRead) {
       const denom = input + cacheRead
@@ -413,7 +461,7 @@ window.__ModuleLoader__.load({
       return icon
     }
     function chineseMagnitude(n, language) {
-      if (language === 'en' || typeof n !== 'number' || !Number.isFinite(n) || n < 10000) return ''
+      if (language !== 'zh' || typeof n !== 'number' || !Number.isFinite(n) || n < 10000) return ''
       const value = n >= 100000000 ? n / 100000000 : n / 10000
       const rounded = Math.round(value * 1000) / 1000
       return String(rounded) + (n >= 100000000 ? '亿' : '万')
@@ -426,7 +474,7 @@ window.__ModuleLoader__.load({
       if (n === null || n === undefined) return '—'
       const sym = currency === 'CNY' ? '¥' : currency === 'USD' ? '$' : currency + ' '
       const digits = Number.isFinite(places) ? places : 4
-      return sym + n.toLocaleString(language === 'en' ? 'en-US' : 'zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+      return sym + n.toLocaleString(intlLocale(language), { minimumFractionDigits: digits, maximumFractionDigits: digits })
     }
     function decimalParts(value) {
       const raw = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim().toLowerCase() : ''
@@ -496,24 +544,24 @@ window.__ModuleLoader__.load({
     }
     function costBandLabel(row, language) {
       const cost = row && row.cost && typeof row.cost === 'object' ? row.cost : {}
-      if (cost.pricingBand === 'peak') return language === 'en' ? 'Peak' : '峰时'
-      if (cost.pricingBand === 'off-peak') return cost.pricingHoliday === true ? (language === 'en' ? 'Holiday off-peak' : '节假日谷时') : (language === 'en' ? 'Off-peak' : '谷时')
-      if (cost.temporalExemptReason === 'route-not-official') return language === 'en' ? 'static (non-first-party)' : '静态价（非官方直连）'
-      if (cost.temporalExemptReason === 'no-temporal-profile') return language === 'en' ? 'static (no band plan)' : '静态价（无峰谷计划）'
+      if (cost.pricingBand === 'peak') return pick(language, "峰时", "Peak")
+      if (cost.pricingBand === 'off-peak') return cost.pricingHoliday === true ? (pick(language, "节假日谷时", "Holiday off-peak")) : (pick(language, "谷时", "Off-peak"))
+      if (cost.temporalExemptReason === 'route-not-official') return pick(language, "静态价（非官方直连）", "static (non-first-party)")
+      if (cost.temporalExemptReason === 'no-temporal-profile') return pick(language, "静态价（无峰谷计划）", "static (no band plan)")
       return '—'
     }
     function costPolicyLabel(row, language) {
       const cost = row && row.cost && typeof row.cost === 'object' ? row.cost : {}
       const parts = []
       if (cost.pricingPolicyId) parts.push(cost.pricingPolicyId)
-      if (cost.pricingTimezone === 'UTC' && Number.isFinite(cost.pricingAt)) parts.push((language === 'en' ? 'at ' : '计费时刻 ') + new Date(cost.pricingAt).toISOString().slice(0, 16).replace('T', ' ') + ' UTC')
+      if (cost.pricingTimezone === 'UTC' && Number.isFinite(cost.pricingAt)) parts.push((pick(language, "计费时刻 ", "at ")) + new Date(cost.pricingAt).toISOString().slice(0, 16).replace('T', ' ') + ' UTC')
       return parts.length > 0 ? parts.join(' · ') : null
     }
     function costCoverageLabel(row, language) {
       const value = costAggregate(row)
-      if (value.pricedCalls > 0 && value.unpricedCalls === 0 && value.ambiguousCalls === 0 && value.unsupportedCalls === 0) return language === 'en' ? value.pricedCalls + ' priced' : value.pricedCalls + ' 次已计价'
+      if (value.pricedCalls > 0 && value.unpricedCalls === 0 && value.ambiguousCalls === 0 && value.unsupportedCalls === 0) return pickFormat(language, '{count} 次已计价', '{count} priced', { count: value.pricedCalls })
       const pending = value.unpricedCalls + value.ambiguousCalls + value.unsupportedCalls
-      return pending > 0 ? (language === 'en' ? pending + ' unpriced' : pending + ' 次未计价') : (language === 'en' ? 'No pricing' : '暂无价格')
+      return pending > 0 ? (pickFormat(language, '{count} 次未计价', '{count} unpriced', { count: pending })) : (pick(language, "暂无价格", "No pricing"))
     }
     function pricingDraftOf(pricing) {
       const config = pricing && pricing.config && typeof pricing.config === 'object' ? pricing.config : {}
@@ -549,27 +597,24 @@ window.__ModuleLoader__.load({
       })
     }
     function pricingStatusLabel(status, language) {
-      const labels = { priced: ['已计价', 'priced'], unpriced: ['未计价', 'unpriced'], ambiguous: ['待确认', 'ambiguous'], unsupported: ['不支持', 'unsupported'] }
-      const pair = labels[status] || labels.unpriced
-      return language === 'en' ? pair[1] : pair[0]
+      if (status === 'priced') return pick(language, '已计价', 'priced')
+      if (status === 'ambiguous') return pick(language, '待确认', 'ambiguous')
+      if (status === 'unsupported') return pick(language, '不支持', 'unsupported')
+      return pick(language, '未计价', 'unpriced')
     }
     function pricingSemanticsLabel(value, language) {
-      const labels = {
-        fresh: ['Fresh：输入 + 缓存读写', 'Fresh: input + cache read/write'],
-        total: ['Total：输入已含缓存', 'Total: input already includes cache'],
-        legacy: ['Legacy：输入 + 缓存写', 'Legacy: input + cache write'],
-      }
-      const pair = labels[value] || labels.fresh
-      return language === 'en' ? pair[1] : pair[0]
+      if (value === 'total') return pick(language, 'Total：输入已含缓存', 'Total: input already includes cache')
+      if (value === 'legacy') return pick(language, 'Legacy：输入 + 缓存写', 'Legacy: input + cache write')
+      return pick(language, 'Fresh：输入 + 缓存读写', 'Fresh: input + cache read/write')
     }
     function pricingTierBandLabel(tiers, index, language) {
       const rows = Array.isArray(tiers) ? tiers : []
-      if (index < 0) return rows.length > 0 ? '≤ ' + fmtCount(rows[0].size, language) : (language === 'en' ? 'All contexts' : '全部上下文')
+      if (index < 0) return rows.length > 0 ? '≤ ' + fmtCount(rows[0].size, language) : (pick(language, "全部上下文", "All contexts"))
       const tier = rows[index]
       if (!tier) return ''
       const lower = '> ' + fmtCount(tier.size, language)
       const next = rows[index + 1]
-      return next ? lower + (language === 'en' ? ' and ≤ ' : ' 且 ≤ ') + fmtCount(next.size, language) : lower
+      return next ? lower + (pick(language, " 且 ≤ ", " and ≤ ")) + fmtCount(next.size, language) : lower
     }
     function validPricingRateDraft(value) {
       const text = String(value === undefined || value === null ? '' : value).trim().toLowerCase()
@@ -630,14 +675,10 @@ window.__ModuleLoader__.load({
       return String(value)
     }
     function pricingRateLabel(key, language) {
-      const labels = {
-        input: ['输入 / 1M', 'Input / 1M'],
-        output: ['输出 / 1M', 'Output / 1M'],
-        cacheRead: ['缓存读 / 1M', 'Cache read / 1M'],
-        cacheWrite: ['缓存写 / 1M', 'Cache write / 1M'],
-      }
-      const pair = labels[key] || labels.input
-      return language === 'en' ? pair[1] : pair[0]
+      if (key === 'output') return pick(language, '输出 / 1M', 'Output / 1M')
+      if (key === 'cacheRead') return pick(language, '缓存读 / 1M', 'Cache read / 1M')
+      if (key === 'cacheWrite') return pick(language, '缓存写 / 1M', 'Cache write / 1M')
+      return pick(language, '输入 / 1M', 'Input / 1M')
     }
     function pricingRowKey(row) {
       if (row === null || typeof row !== 'object') return ''
@@ -922,7 +963,7 @@ window.__ModuleLoader__.load({
     // weekday, so the translation splits it and re-buckets by weekday.
     const PRICING_TEMPORAL_ZONE_SHIFT = 480
     function pricingTemporalShift(language) {
-      return language === 'en' ? 0 : PRICING_TEMPORAL_ZONE_SHIFT
+      return language !== 'zh' ? 0 : PRICING_TEMPORAL_ZONE_SHIFT
     }
     function pricingTemporalShiftRules(rules, shiftMinutes) {
       const shift = Number.isFinite(shiftMinutes) ? Math.trunc(shiftMinutes) : 0
@@ -1270,9 +1311,17 @@ window.__ModuleLoader__.load({
       const text = String(value || '').trim()
       return text.includes(' / ') ? text : pricingModelKey(text)
     }
+    // Weekday names come from Intl for the added languages; Chinese keeps the two
+    // hand-written sets the heatmap and the pricing chart already used.
+    function weekdayLabels(language, narrow) {
+      if (language === 'zh') return narrow ? ['日', '一', '二', '三', '四', '五', '六'] : ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+      const formatter = new Intl.DateTimeFormat(intlLocale(language), { timeZone: 'UTC', weekday: narrow ? 'narrow' : 'short' })
+      const sunday = Date.UTC(2024, 0, 7)
+      return Array.from({ length: 7 }, (value, index) => formatter.format(new Date(sunday + index * 86400000)))
+    }
     function humanDate(date, language) {
       const parts = date.split('-')
-      const utc = language === 'en'
+      const utc = language !== 'zh'
       const d = utc ? new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))) : new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
       const monthIndex = utc ? d.getUTCMonth() : d.getMonth()
       const weekIndex = utc ? d.getUTCDay() : d.getDay()
@@ -1280,6 +1329,10 @@ window.__ModuleLoader__.load({
         const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][monthIndex]
         const week = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][weekIndex]
         return month + ' ' + Number(parts[2]) + ', ' + parts[0] + ' (' + week + ', UTC)'
+      }
+      if (language !== 'zh') {
+        const day = new Intl.DateTimeFormat(intlLocale(language), { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' }).format(d)
+        return day + ' · ' + weekdayLabels(language, false)[weekIndex] + ' · UTC'
       }
       const week = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][weekIndex]
       return parts[0] + '年' + Number(parts[1]) + '月' + Number(parts[2]) + '日 ' + week
@@ -1349,14 +1402,17 @@ window.__ModuleLoader__.load({
     function heatCellLabel(date, count, language) {
       const text = humanDate(date, language)
       const uses = Number.isFinite(count) && count > 0 ? count : 0
-      return language === 'en'
-        ? text + ': ' + (uses > 0 ? uses + ' uses' : 'no usage')
-        : text + '：' + (uses > 0 ? uses + ' 次使用' : '无使用记录')
+      const amount = uses > 0 ? pickFormat(language, '{count} 次使用', '{count} uses', { count: uses }) : pick(language, '无使用记录', 'no usage')
+      return pickFormat(language, '{date}：{amount}', '{date}: {amount}', { date: text, amount })
     }
     function monthLabel(year, month, language) {
       if (language === 'en') {
         const label = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][month]
         return month === 0 ? year + ' ' + label : label
+      }
+      if (language !== 'zh') {
+        const label = new Intl.DateTimeFormat(intlLocale(language), { timeZone: 'UTC', month: 'short' }).format(new Date(Date.UTC(year, month, 1)))
+        return month === 0 ? String(year) + ' ' + label : label
       }
       return month === 0 ? year + '年1月' : (month + 1) + '月'
     }
@@ -1413,7 +1469,7 @@ window.__ModuleLoader__.load({
         const previous = week > 0 ? cells[(week - 1) * 7] : null
         if (previous === null || first.month !== previous.month) months.push({ left: (week * 100 / count) + '%', text: monthLabel(first.year, first.month, language) })
       }
-      return { cells, months, weekdays: language === 'en' ? ['', 'Mon', '', 'Wed', '', 'Fri', ''] : ['', '周一', '', '周三', '', '周五', ''] }
+      return { cells, months, weekdays: weekdayLabels(language, false).map((label, index) => index % 2 === 1 ? label : '') }
     }
     // The header chip shows the running version and what the registry says. A
     // missing or failed check degrades to 'unknown' rather than claiming either
@@ -1651,8 +1707,8 @@ window.__ModuleLoader__.load({
       const options = detailed
         ? { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }
         : { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }
-      if (language === 'en') options.timeZone = 'UTC'
-      return new Date(time).toLocaleString(language === 'en' ? 'en-US' : 'zh-CN', options)
+      if (language !== 'zh') options.timeZone = 'UTC'
+      return new Date(time).toLocaleString(intlLocale(language), options)
     }
     function trendRowLabel(row, language, detailed) {
       if (row && Number.isFinite(row.time)) return trendHourLabel(row.time, language, detailed)
@@ -1690,13 +1746,13 @@ window.__ModuleLoader__.load({
       const days = trendBucketStrideDays(rows)
       if (first.granularity === 'week') {
         const weeks = Math.max(1, Math.round(days / 7))
-        if (weeks <= 1) return language === 'en' ? 'Weekly' : '按周汇总'
-        return language === 'en' ? 'Every ' + weeks + ' weeks' : '每 ' + weeks + ' 周汇总'
+        if (weeks <= 1) return pick(language, "按周汇总", "Weekly")
+        return pickFormat(language, '每 {count} 周汇总', 'Every {count} weeks', { count: weeks })
       }
-      if (days <= 1) return language === 'en' ? 'Daily' : '按天汇总'
-      if (days < 28) return (language === 'en' ? 'Every ' : '每 ') + days + (language === 'en' ? ' days' : ' 天汇总')
-      if (days < 300) return language === 'en' ? 'Monthly' : '按月汇总'
-      return language === 'en' ? 'Yearly' : '按年汇总'
+      if (days <= 1) return pick(language, "按天汇总", "Daily")
+      if (days < 28) return (pick(language, "每 ", "Every ")) + days + (pick(language, " 天汇总", " days"))
+      if (days < 300) return pick(language, "按月汇总", "Monthly")
+      return pick(language, "按年汇总", "Yearly")
     }
     /** A range point is always named as a span; a single-day point keeps its day label. */
     function trendRowLabelRange(row, language, detailed) {
@@ -1941,7 +1997,7 @@ window.__ModuleLoader__.load({
       return magnitude !== '' ? magnitude : fmtCompact(value)
     }
     function tokenDisplay(value, language) {
-      return tokenMagnitude(value, language) + (language === 'en' ? ' tokens' : ' Token')
+      return tokenMagnitude(value, language) + (pick(language, " Token", " tokens"))
     }
     function buildDonutSegments(items, otherLabel, limit = 5) {
       const topLimit = Math.max(1, Number.isInteger(limit) ? limit : 5)
@@ -1988,8 +2044,8 @@ window.__ModuleLoader__.load({
       return 'M' + start.x.toFixed(2) + ' ' + start.y.toFixed(2) + ' A' + radius + ' ' + radius + ' 0 ' + (sweep > Math.PI ? 1 : 0) + ' 1 ' + end.x.toFixed(2) + ' ' + end.y.toFixed(2)
     }
     function UsageDonutChart(props) {
-      const language = props.language === 'en' ? 'en' : 'zh'
-      const tr = (zh, en) => language === 'en' ? en : zh
+      const language = normalizeLanguage(props.language) || 'en'
+      const tr = (zh, en) => pick(language, zh, en)
       const [activeIndex, setActiveIndex] = React.useState(null)
       const tooltipRef = React.useRef(null)
       const pointerRef = React.useRef(null)
@@ -2063,7 +2119,7 @@ window.__ModuleLoader__.load({
             ) : null,
             React.createElement('div', { className: 'uh-donut-center' },
               React.createElement('strong', {}, tokenMagnitude(data.total, language)),
-              React.createElement('span', {}, language === 'en' ? 'tokens' : 'Token'),
+              React.createElement('span', {}, pick(language, "Token", "tokens")),
             ),
           ),
           React.createElement('div', { className: 'uh-donut-legend', role: 'list' },
@@ -2091,12 +2147,12 @@ window.__ModuleLoader__.load({
 
     function trendSeriesLabel(key, language) {
       const labels = {
-        total: language === 'en' ? 'Total' : '总处理',
-        input: language === 'en' ? 'Input' : '输入',
-        cacheRead: language === 'en' ? 'Cache hits' : '缓存命中',
-        cacheWrite: language === 'en' ? 'Cache writes' : '缓存写入',
-        output: language === 'en' ? 'Output' : '输出',
-        reasoning: language === 'en' ? 'Reasoning' : '推理',
+        total: pick(language, "总处理", "Total"),
+        input: pick(language, "输入", "Input"),
+        cacheRead: pick(language, "缓存命中", "Cache hits"),
+        cacheWrite: pick(language, "缓存写入", "Cache writes"),
+        output: pick(language, "输出", "Output"),
+        reasoning: pick(language, "推理", "Reasoning"),
       }
       return labels[key] || key
     }
@@ -2104,8 +2160,8 @@ window.__ModuleLoader__.load({
       return key === 'total' ? row.total : (row.tokens && Number.isFinite(row.tokens[key]) ? row.tokens[key] : 0)
     }
     function UsageTrendChart(props) {
-      const language = props.language === 'en' ? 'en' : 'zh'
-      const tr = (zh, en) => language === 'en' ? en : zh
+      const language = normalizeLanguage(props.language) || 'en'
+      const tr = (zh, en) => pick(language, zh, en)
       const rows = Array.isArray(props.rows) ? props.rows : []
       const visible = Array.isArray(props.visible) && props.visible.length > 0 ? props.visible : ['total']
       const [hoverIndex, setHoverIndex] = React.useState(null)
@@ -2243,32 +2299,30 @@ window.__ModuleLoader__.load({
     const MemoUsageTrendChart = React.memo(UsageTrendChart)
 
     function UsageHeatmapTooltip(props) {
-      const language = props.language === 'en' ? 'en' : 'zh'
+      const language = normalizeLanguage(props.language) || 'en'
       const day = props.day
       const rows = React.useMemo(() => (day && Array.isArray(day.perWorkspace) ? day.perWorkspace : []).slice().sort((left, right) => right.turns - left.turns), [day])
       const tokens = day === undefined ? null : rowTokens(day)
       const tokensText = tokens !== null && tokens.input + tokens.output + tokens.cacheRead > 0
-        ? (language === 'en'
-          ? 'Tokens: Input ' + fmtCompact(tokens.input) + ' · Cache hits ' + fmtCompact(tokens.cacheRead) + ' · Output ' + fmtCompact(tokens.output)
-          : 'Token：输入 ' + fmtCompact(tokens.input) + ' · 缓存命中 ' + fmtCompact(tokens.cacheRead) + ' · 输出 ' + fmtCompact(tokens.output))
+        ? pickFormat(language, 'Token：输入 {input} · 缓存命中 {cache} · 输出 {output}', 'Tokens: Input {input} · Cache hits {cache} · Output {output}', { input: fmtCompact(tokens.input), cache: fmtCompact(tokens.cacheRead), output: fmtCompact(tokens.output) })
         : ''
       return React.createElement('div', { ref: props.tooltipRef, className: 'uh-tip', style: { left: 0, top: 0, visibility: 'hidden' } },
         React.createElement('div', { className: 'uh-tip-date' }, humanDate(props.date, language)),
         day !== undefined && day.turns > 0
           ? rows.map((entry) => React.createElement('div', { key: entry.workspaceId, className: 'uh-tip-row', onClick: () => props.onWorkspaceSelect(entry.workspaceId) },
               React.createElement('span', { className: 'uh-dot', style: { background: wsColor(props.workspaceIndexes.get(entry.workspaceId) || 0) } }),
-              React.createElement('span', {}, props.workspaceTitles.get(entry.workspaceId) || (language === 'en' ? 'Unknown workspace' : '未知工作区')),
-              React.createElement('span', { className: 'uh-n' }, language === 'en' ? entry.turns + ' uses' : entry.turns + ' 次'),
+              React.createElement('span', {}, props.workspaceTitles.get(entry.workspaceId) || (pick(language, "未知工作区", "Unknown workspace"))),
+              React.createElement('span', { className: 'uh-n' }, pickFormat(language, '{count} 次', '{count} uses', { count: entry.turns })),
             ))
-          : React.createElement('div', { className: 'uh-empty', style: { padding: '6px 0' } }, language === 'en' ? 'No usage records for this day' : '这一天没有使用记录'),
+          : React.createElement('div', { className: 'uh-empty', style: { padding: '6px 0' } }, pick(language, "这一天没有使用记录", "No usage records for this day")),
         tokensText !== '' ? React.createElement('div', { className: 'uh-tip-tokens' }, tokensText) : null,
       )
     }
     const MemoUsageHeatmapTooltip = React.memo(UsageHeatmapTooltip)
 
     function UsageHeatmap(props) {
-      const language = props.language === 'en' ? 'en' : 'zh'
-      const tr = (zh, en) => language === 'en' ? en : zh
+      const language = normalizeLanguage(props.language) || 'en'
+      const tr = (zh, en) => pick(language, zh, en)
       const workspaces = Array.isArray(props.workspaces) ? props.workspaces : []
       const heatmapRows = Array.isArray(props.rows) ? props.rows : []
       const selectedWorkspace = props.workspaceId || null
@@ -2483,7 +2537,7 @@ window.__ModuleLoader__.load({
             }, cellElements),
           ),
         ),
-        React.createElement('div', { className: 'uh-note', style: { marginTop: 10 } }, tr('口径：每完成一个回合点亮一次（含子代理会话）；悬停查看按工作区明细，点击工作区可筛选热力图与明细表；键盘可用方向键浏览、回车查看当日明细。日期按本地时区。', 'Methodology: one cell lights up for each completed turn, including subagent sessions. Hover to view workspace details; click a workspace to filter the heatmap and detail tables. English dates and day boundaries use UTC.')),
+        React.createElement('div', { className: 'uh-note', style: { marginTop: 10 } }, tr('口径：每完成一个回合点亮一次（含子代理会话）；悬停查看按工作区明细，点击工作区可筛选热力图与明细表；键盘可用方向键浏览、回车查看当日明细。日期按本地时区。', 'Methodology: one cell lights up for each completed turn, including subagent sessions. Hover to view workspace details; click a workspace to filter the heatmap and detail tables. Dates and day boundaries follow UTC; Chinese uses local dates.')),
         hoverDate !== null ? uhFixedLayer(React.createElement(MemoUsageHeatmapTooltip, { date: hoverDate, day: hoverDay, language, tooltipRef, workspaceTitles: workspaceLookup.titles, workspaceIndexes: workspaceLookup.indexes, onWorkspaceSelect: selectWorkspace })) : null,
       )
     }
@@ -2536,8 +2590,8 @@ window.__ModuleLoader__.load({
     }
     const MemoModelIcon = React.memo(ModelIcon)
     function UsageRecordsPanel(props) {
-      const language = props.language === 'en' ? 'en' : 'zh'
-      const tr = (zh, en) => language === 'en' ? en : zh
+      const language = normalizeLanguage(props.language) || 'en'
+      const tr = (zh, en) => pick(language, zh, en)
       const rows = Array.isArray(props.rows) ? props.rows : []
       const selected = React.useMemo(() => rows.find((row) => row.id === props.selectedId) || rows[0] || null, [rows, props.selectedId])
       const scrollRef = React.useRef(null)
@@ -2555,7 +2609,7 @@ window.__ModuleLoader__.load({
         if (element.scrollHeight <= element.clientHeight + 4) pullNextPage()
       }, [rows, props.hasMore, props.loading])
       const auditSource = (row) => row && row.materialization === 'ledger-recovery' ? tr('账本恢复', 'Ledger recovery') : row && row.materialization === 'ledger-reuse' ? tr('账本复用', 'Ledger reuse') : row && row.materialization === 'scan' ? tr('扫描', 'Scan') : row && row.materialization === 'live' ? tr('实时', 'Live') : tr('未知', 'Unknown')
-      const auditTime = (row, detailed) => row && Number.isFinite(row.time) ? new Date(row.time).toLocaleString(language === 'en' ? 'en-US' : 'zh-CN', language === 'en' ? (detailed ? { timeZone: 'UTC' } : { timeZone: 'UTC', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : (detailed ? undefined : { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })) : '—'
+      const auditTime = (row, detailed) => row && Number.isFinite(row.time) ? new Date(row.time).toLocaleString(intlLocale(language), language !== 'zh' ? (detailed ? { timeZone: 'UTC' } : { timeZone: 'UTC', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : (detailed ? undefined : { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })) : '—'
       const select = (rowId) => { if (typeof props.onSelect === 'function') props.onSelect(rowId) }
       return React.createElement('div', { className: 'uh-panel uh-records-panel', ref: props.panelRef, style: { display: props.visible ? 'block' : 'none' } },
         React.createElement('div', { className: 'uh-records-head' },
@@ -2591,12 +2645,12 @@ window.__ModuleLoader__.load({
             React.createElement('div', { className: 'uh-record-num' }, fmtCompact(auditToken(row, 'cacheRead'))),
             React.createElement('div', { className: 'uh-record-num' }, fmtCompact(auditToken(row, 'cacheWrite'))),
             React.createElement('div', { className: 'uh-record-num' }, fmtCompact(auditToken(row, 'output'))),
-            React.createElement('div', { className: 'uh-record-num uh-cost-num' }, costDisplay(row, language), row.cost && (row.cost.pricingBand === 'peak' || row.cost.pricingBand === 'off-peak') ? React.createElement('small', { className: 'uh-record-band-badge' }, row.cost.pricingBand === 'peak' ? (language === 'en' ? 'Peak' : '峰') : (language === 'en' ? 'OFF' : '谷')) : null),
+            React.createElement('div', { className: 'uh-record-num uh-cost-num' }, costDisplay(row, language), row.cost && (row.cost.pricingBand === 'peak' || row.cost.pricingBand === 'off-peak') ? React.createElement('small', { className: 'uh-record-band-badge' }, row.cost.pricingBand === 'peak' ? (pick(language, "峰", "Peak")) : (pick(language, "谷", "OFF"))) : null),
             React.createElement('div', { className: 'uh-record-source' }, auditSource(row)),
           )),
         ),
         React.createElement('div', { className: 'uh-records-footer' },
-          React.createElement('span', { className: 'uh-note' }, rows.length > 0 ? (props.hasMore ? tr('已显示 ' + rows.length + ' 条，继续加载可查看更多', rows.length + ' shown; load more for additional records') : tr('共显示 ' + rows.length + ' 条', rows.length + ' records shown')) : ''),
+          React.createElement('span', { className: 'uh-note' }, rows.length > 0 ? (props.hasMore ? pickFormat(language, '已显示 {count} 条，继续加载可查看更多', '{count} shown; load more for additional records', { count: rows.length }) : pickFormat(language, '共显示 {count} 条', '{count} records shown', { count: rows.length })) : ''),
           props.hasMore ? React.createElement('button', { type: 'button', className: 'uh-refresh', onClick: props.onLoadMore, disabled: props.loading }, props.loading ? tr('加载中…', 'Loading…') : tr('加载更多', 'Load more')) : null,
         ),
         selected ? React.createElement('div', { className: 'uh-record-detail' },
@@ -2780,7 +2834,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
 .uh-language-caret { color:var(--dsw-alias-label-secondary); transition:transform .18s ease; }
 .uh-language-trigger.uh-open .uh-language-caret { transform:rotate(180deg); }
 .uh-language-menu.uh-open { z-index:30; }
-.uh-language-options { position:absolute; top:calc(100% + 7px); right:0; min-width:142px; padding:5px; border:1px solid var(--dsw-alias-border-l2); border-radius:12px; background:var(--dsw-alias-bg-layer-1); box-shadow:0 14px 28px color-mix(in srgb, #000 24%, transparent); animation:uh-menu-in .16s ease both; }
+.uh-language-options { position:absolute; top:calc(100% + 7px); right:0; min-width:142px; max-height:min(320px, calc(100vh - 140px)); overflow-y:auto; padding:5px; border:1px solid var(--dsw-alias-border-l2); border-radius:12px; background:var(--dsw-alias-bg-layer-1); box-shadow:0 14px 28px color-mix(in srgb, #000 24%, transparent); animation:uh-menu-in .16s ease both; }
 .uh-filter-options { left:0; right:auto; min-width:100%; max-width:300px; }
 .uh-language-option { display:flex; align-items:center; gap:8px; width:100%; min-height:32px; padding:6px 8px; border:0; border-radius:8px; background:transparent; color:var(--dsw-alias-label-primary); font:inherit; font-size:12px; text-align:left; cursor:pointer; transition:background-color .14s ease, color .14s ease; }
 .uh-filter-option-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -3243,7 +3297,8 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
 .uh-ios-metric-read .uh-line-icon { color:var(--uh-donut-2); }
 .uh-ios-metric-rate { background:var(--dsw-alias-bg-layer-1); }
 .uh-ios-metric-rate .uh-line-icon { color:var(--uh-donut-2); }
-.uh-ios-metric-rate-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; min-width:0; }
+.uh-ios-metric-rate-head { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:baseline; gap:8px; min-width:0; }
+.uh-ios-metric-rate .uh-ios-metric-label { white-space:normal; overflow-wrap:anywhere; line-height:1.25; }
 .uh-ios-metric-rate-value { flex:none; color:var(--uh-donut-2); font-size:20px; line-height:1; font-weight:700; font-variant-numeric:tabular-nums; }
 .uh-ios-metric-rate-detail { min-width:0; overflow:hidden; color:var(--dsw-alias-label-secondary); font-size:12px; line-height:1.2; font-weight:600; font-variant-numeric:tabular-nums; text-overflow:ellipsis; white-space:nowrap; }
 .uh-ios-metric-bar { height:5px; border-radius:3px; background:var(--dsw-alias-bg-layer-2); overflow:hidden; }
@@ -3316,7 +3371,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
     // language from storage here (the same key the language switch writes) and
     // asks for that copy, because shipping both doubled the payload.
     const snapshotUtcFlag = () => {
-      try { return storedLanguage() === 'en' ? '?utc=1' : '?utc=0' } catch (_) { return '' }
+      try { return storedLanguage() === 'zh' ? '?utc=0' : '?utc=1' } catch (_) { return '' }
     }
     // 与 Host 半的数据接口（webServer 路由）
     const getStats = () => fetch('/api/all-usage' + snapshotUtcFlag(), { headers: { accept: 'application/json' } }).then((r) => {
@@ -3414,8 +3469,9 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
     // A choice made inside the panel is marked; without the mark the panel follows
     // DSH's own Language row (Settings → General → Language). The host locale runtime
     // already resolves an explicit Host preference and falls back to the browser's
-    // language list, so its active id is the authority here; only zh and en ship, so
-    // any other registered language reads English, matching the host's own fallback.
+    // language list, so its active id is the authority here. The panel carries the
+    // same eight languages the host ships; an id outside that set reads English, which
+    // is also the host's own fallback.
     //
     // It resolves once per page load: the sidebar entry keeps one language for the whole
     // session, and a flag that moved under a mounted panel would send it looking for the
@@ -3424,11 +3480,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
     let localeScope = null
     let hostLocaleLanguage
     function adoptLocaleScope(scope) { localeScope = scope }
-    function languageFromLocaleId(id) {
-      const text = String(id === null || id === undefined ? '' : id).toLowerCase()
-      if (text === '') return null
-      return text.indexOf('zh') === 0 ? 'zh' : 'en'
-    }
+    function languageFromLocaleId(id) { return normalizeLanguage(id) }
     function hostLanguage() {
       if (hostLocaleLanguage !== undefined) return hostLocaleLanguage
       hostLocaleLanguage = null
@@ -3446,15 +3498,19 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
     function chosenLanguage() {
       try {
         if (window.localStorage.getItem(LANGUAGE_CHOSEN_KEY) !== '1') return null
-        const value = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
-        return value === 'en' ? 'en' : value === 'zh' ? 'zh' : null
+        return normalizeLanguage(window.localStorage.getItem(LANGUAGE_STORAGE_KEY))
       } catch (_) { return null }
     }
+    // Mirrors the host: the first navigator language the panel carries wins, full tag
+    // before primary subtag, and English when nothing matches.
     function browserLanguage() {
       try {
-        const tag = typeof navigator === 'undefined' ? '' : String(navigator.language || '')
-        if (/^zh/i.test(tag)) return 'zh'
-        if (/^en/i.test(tag)) return 'en'
+        const raw = typeof navigator === 'undefined' ? [] : navigator.languages
+        const tags = Array.isArray(raw) && raw.length > 0 ? raw : [typeof navigator === 'undefined' ? '' : navigator.language]
+        for (const tag of tags) {
+          const match = normalizeLanguage(tag)
+          if (match !== null) return match
+        }
       } catch (_) {}
       return 'en'
     }
@@ -3494,9 +3550,9 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
 
     function UsagePage(props) {
       const timer = props.timerCtx
-      const language = props.language === 'en' ? 'en' : 'zh'
-      const tr = (zh, en) => language === 'en' ? en : zh
-      const useUtc = language === 'en'
+      const language = normalizeLanguage(props.language) || 'en'
+      const tr = (zh, en) => pick(language, zh, en)
+      const useUtc = language !== 'zh'
       const usageUiStateRef = React.useRef(null)
       if (usageUiStateRef.current === null) usageUiStateRef.current = storedUsageUiState()
       const usageUiState = usageUiStateRef.current
@@ -3626,7 +3682,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         })
       }, [pricingSaving, pricingSyncing, pricingSyncSaving])
       React.useEffect(() => { refreshPricingPanelRef.current = refreshOpenPricing })
-      const setLanguage = (next) => { if (typeof props.onLanguageChange === 'function') props.onLanguageChange(next === 'en' ? 'en' : 'zh') }
+      const setLanguage = (next) => { if (typeof props.onLanguageChange === 'function') props.onLanguageChange(normalizeLanguage(next) ?? 'zh') }
       const chooseLanguage = (next) => { setLanguage(next); setLanguageMenuOpen(false) }
       React.useEffect(() => { persistUsageUiState({ detailView }) }, [detailView])
       React.useEffect(() => { persistUsageUiState({ modelView }) }, [modelView])
@@ -4050,7 +4106,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         const modelFilterValue = (row) => {
           const structured = typeof row.actualModel === 'string' && row.actualModel !== '' ? row.actualModel : typeof row.requestedModel === 'string' && row.requestedModel !== '' ? row.requestedModel : null
           if (structured !== null) return modelDisplayLabel(structured)
-          const display = typeof row.model === 'string' && row.model !== '' ? row.model : (language === 'en' ? 'Unknown model' : '未知模型')
+          const display = typeof row.model === 'string' && row.model !== '' ? row.model : (pick(language, "未知模型", "Unknown model"))
           const separator = display.indexOf(' / ')
           const legacyProvider = separator > 0 ? display.slice(0, separator) : ''
           // Legacy rows carry the provider inside the label; strip it the same way as a
@@ -4086,18 +4142,18 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       const wsTitle = React.useCallback((id) => {
         const alias = aliases[id]
         const meta = wsById.get(id)
-        if (meta !== undefined && meta.retiredBucket === true) return language === 'en' ? 'Deleted' : '已删除'
-        const base = typeof alias === 'string' && alias !== '' ? alias : (meta && meta.title ? meta.title : (language === 'en' ? 'Unknown workspace' : '未知工作区'))
-        return meta !== undefined && meta.deleted === true ? base + (language === 'en' ? ' (deleted)' : '（已删除）') : base
+        if (meta !== undefined && meta.retiredBucket === true) return pick(language, "已删除", "Deleted")
+        const base = typeof alias === 'string' && alias !== '' ? alias : (meta && meta.title ? meta.title : (pick(language, "未知工作区", "Unknown workspace")))
+        return meta !== undefined && meta.deleted === true ? base + (pick(language, "（已删除）", " (deleted)")) : base
       }, [aliases, wsById, language])
 
       // The three filter menus are memoised, so their option lists have to keep a
       // stable identity: rebuilding them per render was the reason opening a menu
       // cost ~157ms even with only a couple of dozen entries.
-      const workspaceFilterOptions = React.useMemo(() => [{ value: '', label: language === 'en' ? 'All workspaces' : '全部工作区' }].concat(rangeWorkspaceOptions.map((w) => ({ value: w.id, label: wsTitle(w.id) }))), [rangeWorkspaceOptions, wsTitle, language])
-      const providerFilterOptions = React.useMemo(() => [{ value: '', label: language === 'en' ? 'All providers' : '全部供应商' }].concat(providerOptions.map((value) => ({ value, label: value }))), [providerOptions, language])
+      const workspaceFilterOptions = React.useMemo(() => [{ value: '', label: pick(language, "全部工作区", "All workspaces") }].concat(rangeWorkspaceOptions.map((w) => ({ value: w.id, label: wsTitle(w.id) }))), [rangeWorkspaceOptions, wsTitle, language])
+      const providerFilterOptions = React.useMemo(() => [{ value: '', label: pick(language, "全部供应商", "All providers") }].concat(providerOptions.map((value) => ({ value, label: value }))), [providerOptions, language])
       // Icons resolve at list build time instead of inside the render.
-      const modelFilterOptions = React.useMemo(() => [{ value: '', label: language === 'en' ? 'All models' : '全部模型' }].concat(modelOptions.map((option) => ({ value: option.value, label: option.label, iconKey: (() => { const icon = resolveModelIcon({ actualModel: option.value, requestedModel: option.value }); return icon === null ? null : icon.key })() }))), [modelOptions, language])
+      const modelFilterOptions = React.useMemo(() => [{ value: '', label: pick(language, "全部模型", "All models") }].concat(modelOptions.map((option) => ({ value: option.value, label: option.label, iconKey: (() => { const icon = resolveModelIcon({ actualModel: option.value, requestedModel: option.value }); return icon === null ? null : icon.key })() }))), [modelOptions, language])
       const fullHistoryDayMap = React.useMemo(() => {
         const result = new Map()
         for (const day of activeDayRows) result.set(day.date, day)
@@ -4508,7 +4564,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
           balanceSub = balance.message || tr('DeepSeek 接口返回余额不可用', 'The DeepSeek API reported that balance information is unavailable')
         } else if (balance.status === 'error') {
           balanceValue = tr('查询失败', 'Lookup failed')
-          const detail = balance.detail ? (language === 'en' ? ' (' + String(balance.detail).slice(0, 90) + ')' : '（' + String(balance.detail).slice(0, 90) + '）') : ''
+          const detail = balance.detail ? (pickFormat(language, '（{detail}）', ' ({detail})', { detail: String(balance.detail).slice(0, 90) })) : ''
           balanceSub = (balance.message || '') + detail + tr(' 点“刷新”重试', ' Click Refresh to try again')
         } else if (balance.status === 'ok' && Array.isArray(balance.currencies) && balance.currencies.length > 0) {
           const list = balance.currencies
@@ -4538,7 +4594,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
           React.createElement('div', { className: 'uh-ios-metric-rate-value' }, (cacheRate).toFixed(1) + '%'),
         ),
         React.createElement('div', { className: 'uh-ios-metric-bar' }, React.createElement('div', { className: 'uh-ios-metric-fill', style: { width: Math.max(0, Math.min(100, cacheRate)) + '%' } })),
-        React.createElement('div', { className: 'uh-ios-metric-rate-detail' }, language === 'en' ? 'Context reused ' + fmtCompact(agg.totals.cacheRead) + ' tokens' : '复用上下文 ' + fmtCompact(agg.totals.cacheRead) + ' Token'),
+        React.createElement('div', { className: 'uh-ios-metric-rate-detail' }, pickFormat(language, '复用上下文 {count} Token', 'Context reused {count} tokens', { count: fmtCompact(agg.totals.cacheRead) })),
       )
 
       const maxTotal = rows.length > 0 ? wsTotal(rows[0]) : 0
@@ -4569,7 +4625,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
           ? React.createElement('div', { className: 'uh-empty', style: { padding: '8px 0' } }, tr('暂无数据', 'No data yet'))
           : React.createElement('div', { className: 'uh-wsbars' },
             tokenCardRows,
-            rows.length > 2 ? React.createElement('div', { className: 'uh-card-sub' }, language === 'en' ? 'See the details table for the other ' + (rows.length - 2) + ' workspaces' : '其余 ' + (rows.length - 2) + ' 个工作区见明细表') : null,
+            rows.length > 2 ? React.createElement('div', { className: 'uh-card-sub' }, pickFormat(language, '其余 {count} 个工作区见明细表', 'See the details table for the other {count} workspaces', { count: rows.length - 2 })) : null,
           ),
       )
 
@@ -4634,7 +4690,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         const tokenHeaders = [tr('输入 Token', 'Input Tokens'), tr('缓存命中 Token', 'Cache-Hit Tokens'), tr('缓存写入 Token', 'Cache-Write Tokens'), tr('输出 Token', 'Output Tokens'), tr('推理 Token', 'Reasoning Tokens'), tr('总处理 Token', 'Total Tokens Processed'), tr('成本', 'Cost'), tr('缓存命中率', 'Cache Hit Rate')]
         const output = [
           line([tr('DSH 用量统计导出', 'DSH Usage Statistics Export')]),
-          line([tr('导出时间', 'Exported At'), useUtc ? new Date().toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }) : new Date().toLocaleString('zh-CN')]),
+          line([tr('导出时间', 'Exported At'), new Date().toLocaleString(intlLocale(language), useUtc ? { timeZone: 'UTC', timeZoneName: 'short' } : undefined)]),
           line([tr('时间范围', 'Time Range'), rangeLabel]),
           line([tr('时区', 'Timezone'), useUtc ? 'UTC' : tr('本地', 'Local')]),
           line([tr('工作区筛选', 'Workspace Filter'), wsFilter || tr('全部', 'All')]),
@@ -4713,7 +4769,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
 
       const pricingSync = currentPricing.sync && typeof currentPricing.sync === 'object' ? currentPricing.sync : {}
       const pricingBusy = pricingSaving || pricingSyncing || pricingSyncSaving
-      const pricingWeekdayLabels = language === 'en' ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] : ['日', '一', '二', '三', '四', '五', '六']
+      const pricingWeekdayLabels = weekdayLabels(language, language === 'zh')
       const pricingConfiguredCount = pricingRows.filter((view) => view.usageBacked === false).length
       const pricingUnknownCount = pricingRows.filter((view) => view.usageBacked === null).length
       // The page is served from the same package as the host, so a version
@@ -5013,14 +5069,14 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
             React.createElement('input', { type: 'checkbox', checked: pricingDraft.sync.autoEnabled === true, disabled: pricingBusy, onChange: (event) => updatePricingSync(event.target.checked) }),
             React.createElement('span', {}, tr('启用 6 小时自动同步', 'Enable 6-hour automatic sync')),
           ),
-          React.createElement('span', { className: 'uh-note' }, pricingSyncSaving ? tr('保存中…', 'Saving…') : (pricingSync.lastSuccessAt > 0 ? tr('上次成功：', 'Last success: ') + new Date(pricingSync.lastSuccessAt).toLocaleString() : tr('尚未同步', 'Not synced yet'))),
+          React.createElement('span', { className: 'uh-note' }, pricingSyncSaving ? tr('保存中…', 'Saving…') : (pricingSync.lastSuccessAt > 0 ? tr('上次成功：', 'Last success: ') + new Date(pricingSync.lastSuccessAt).toLocaleString(intlLocale(language)) : tr('尚未同步', 'Not synced yet'))),
           React.createElement('button', { type: 'button', className: 'uh-refresh', onClick: syncPricingNow, disabled: pricingBusy }, React.createElement(LineIcon, { name: 'refresh', size: 14 }), pricingSyncing ? tr('同步中…', 'Syncing…') : tr('立即同步', 'Sync now')),
         ),
         pricingSync.lastError ? React.createElement('div', { className: 'uh-pricing-error', role: 'alert' }, tr('上次同步失败：', 'Last sync failed: ') + pricingSync.lastError) : null,
         pricingHostMismatch ? React.createElement('div', { className: 'uh-pricing-error', role: 'status' }, tr('宿主插件 v', 'Host plugin v') + pricingHostVersion + tr(' 与当前页面 v', ' and this page v') + clientPluginVersion + tr(' 不一致：DSH 只在启动时加载插件，请重启 DSH 让新版本生效（本面板正按旧宿主的数据降级显示）', ' differ: DSH imports the plugin only at startup, so restart DSH for the new version (this panel is showing the older host payload)')) : null,
         pricingModelsMissing ? React.createElement('div', { className: 'uh-pricing-error', role: 'status' }, tr('宿主未提供模型清单（插件版本较旧）：无法列出账本模型；请重启 DSH 后重新打开本面板', 'The host sent no model list (older plugin): the ledger models cannot be listed; restart DSH and reopen this panel')) : null,
         React.createElement('div', { className: 'uh-pricing-table-note' },
-          tr('共 ', '') + pricingRows.length + tr(' 个模型', ' models') + (pricingConfiguredCount > 0 ? tr('（', ' (') + pricingConfiguredCount + tr(' 项仅存在于配置中，账本暂无用量）', ' configured rows have no ledger usage)') : '') + (pricingUnknownCount > 0 ? tr('（其中 ', ' (') + pricingUnknownCount + tr(' 项用量未知：宿主未标注账本用量）', ' rows have unknown usage: the host did not label ledger usage)') : '') + (pricingRows.length >= 500 ? tr(' · 已达 500 行上限', ' · capped at 500 rows') : ''),
+          pickFormat(language, '共 {count} 个模型', '{count} models', { count: pricingRows.length }) + (pricingConfiguredCount > 0 ? pickFormat(language, '（{count} 项仅存在于配置中，账本暂无用量）', ' ({count} configured rows have no ledger usage)', { count: pricingConfiguredCount }) : '') + (pricingUnknownCount > 0 ? pickFormat(language, '（其中 {count} 项用量未知：宿主未标注账本用量）', ' ({count} rows have unknown usage: the host did not label ledger usage)', { count: pricingUnknownCount }) : '') + (pricingRows.length >= 500 ? pick(language, ' · 已达 500 行上限', ' · capped at 500 rows') : ''),
         ),
         React.createElement('div', { className: 'uh-pricing-table-wrap' },
           React.createElement('table', { className: 'uh-pricing-model-table uh-pricing-price-table' },
@@ -5090,7 +5146,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
           : versionView.status === 'unknown'
             ? tr('\n尚未确认是否有新版本', '\nWhether a newer release exists is not confirmed')
             : '')
-        + (versionView.checkedAt !== null ? tr('\n检查时间：', '\nChecked: ') + new Date(versionView.checkedAt).toLocaleString() : '')
+        + (versionView.checkedAt !== null ? tr('\n检查时间：', '\nChecked: ') + new Date(versionView.checkedAt).toLocaleString(intlLocale(language)) : '')
         + (versionView.error !== '' ? tr('\n版本检查失败：', '\nVersion check failed: ') + versionView.error : '')
         + tr('\n点击打开 GitHub 仓库', '\nClick to open the GitHub repository')
       const versionBadge = React.createElement('button', {
@@ -5124,7 +5180,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         React.createElement('span', { className: 'uh-gh-label' }, 'GitHub'),
       )
       const rangeLabel = range === 'custom' && activeCustomRange !== null
-        ? (language === 'en' ? activeCustomRange.start + ' to ' + activeCustomRange.end + ' (UTC)' : activeCustomRange.start + ' 至 ' + activeCustomRange.end)
+        ? (pickFormat(language, '{start} 至 {end}', '{start} to {end} (UTC)', { start: activeCustomRange.start, end: activeCustomRange.end }))
         : range === 'today' ? tr('今日', 'Today') : range === '7d' ? tr('近 7 天', 'Last 7 Days') : range === '30d' ? tr('近 30 天', 'Last 30 Days') : range === '90d' ? tr('近 90 天', 'Last 90 Days') : tr('全部', 'All Time')
       const rangeFilePart = rangeFilenamePart(range, activeCustomRange, useUtc)
       const customRangeErrorText = customDraftIssue === 'invalid'
@@ -5132,12 +5188,12 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         : customDraftIssue === 'order'
           ? tr('结束日期不能早于开始日期', 'End date must be on or after the start date')
           : customDraftIssue === 'bounds'
-            ? tr('可选范围为 ' + earliestAvailableDate + ' 至 ' + latestCalendarDate, 'Choose a date from ' + earliestAvailableDate + ' to ' + latestCalendarDate)
+            ? pickFormat(language, '可选范围为 {from} 至 {to}', 'Choose a date from {from} to {to}', { from: earliestAvailableDate, to: latestCalendarDate })
             : ''
       const customRangePanel = customRangeOpen ? React.createElement('div', { className: 'uh-custom-range', role: 'group', 'aria-label': tr('自定义时间范围', 'Custom date range') },
         React.createElement('div', { className: 'uh-custom-range-meta' },
           React.createElement('div', { className: 'uh-custom-range-title' }, React.createElement(LineIcon, { name: 'calendar', size: 15 }), tr('自定义时间范围', 'Custom date range')),
-          React.createElement('div', { className: 'uh-custom-range-note' }, tr('可查看全部可扫描历史日数据；中文按本地日期，English 按 UTC。热力图可切换最近 30 天 / 90 天 / 12 个月。', 'All available historical daily data can be selected. Chinese uses local dates; English uses UTC. The heatmap switches between the last 30 days, 90 days and 12 months.')),
+          React.createElement('div', { className: 'uh-custom-range-note' }, tr('可查看全部可扫描历史日数据；中文按本地日期，其他语言按 UTC。热力图可切换最近 30 天 / 90 天 / 12 个月。', 'All available historical daily data can be selected. Chinese uses local dates; every other language follows UTC. The heatmap switches between the last 30 days, 90 days and 12 months.')),
         ),
         React.createElement('div', { className: 'uh-custom-range-fields' },
           React.createElement('label', { className: 'uh-custom-range-field' },
@@ -5225,25 +5281,31 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       const scanning = !scan.done
       const pct = scan.total > 0 ? Math.min(100, Math.round((scan.scanned / scan.total) * 100)) : 40
       const isEmpty = scan.done && dayRows.length === 0 && agg.totals.turns === 0 && agg.totals.calls === 0
-      const syncCompletedAt = typeof sync.lastCompletedAt === 'number' && sync.lastCompletedAt > 0 ? new Date(sync.lastCompletedAt).toLocaleString(language === 'en' ? 'en-US' : 'zh-CN') : ''
-      const lastStatsText = lastStatsAt > 0 ? new Date(lastStatsAt).toLocaleString(language === 'en' ? 'en-US' : 'zh-CN') : ''
-      const healthTitle = syncCompletedAt === '' ? undefined : (language === 'en' ? 'Historical scan completed ' + syncCompletedAt : '历史扫描完成于 ' + syncCompletedAt)
-      const healthText = language === 'en'
-        ? (lastStatsText !== '' ? 'Updated ' + lastStatsText : (scanning ? 'Refreshing data' : 'Update state pending'))
-          + ' · ' + (sync.sessionsSkippedByRevision || 0) + ' revision reused'
-          + ' · ' + (sync.sessionsRead || 0) + ' read'
-          + ((sync.sessionsRestoredFromLedger || 0) > 0 ? ' · ' + sync.sessionsRestoredFromLedger + ' ledger restored' : '')
-          + ((sync.sessionsFailed || 0) > 0 ? ' · ' + sync.sessionsFailed + ' failed' : '')
-          + ' · ' + (sync.persistenceSnapshotsAvailable === true ? 'revision optimization on' : 'full-read fallback')
-        : (lastStatsText !== '' ? '已更新 ' + lastStatsText : (scanning ? '正在更新数据' : '数据更新准备中'))
-          + ' · revision 复用 ' + (sync.sessionsSkippedByRevision || 0)
-          + ' · 实际读取 ' + (sync.sessionsRead || 0)
-          + ((sync.sessionsRestoredFromLedger || 0) > 0 ? ' · 账本恢复 ' + sync.sessionsRestoredFromLedger : '')
-          + ((sync.sessionsFailed || 0) > 0 ? ' · 失败 ' + sync.sessionsFailed : '')
-          + ' · ' + (sync.persistenceSnapshotsAvailable === true ? '免读优化已启用' : '全量读取回退')
-      const staleText = statsError === '' ? '' : (language === 'en'
-        ? 'Usage data may be stale' + (lastStatsText !== '' ? '; last full update ' + lastStatsText : '')
-        : '用量数据可能已过期' + (lastStatsText !== '' ? '；上次完整更新 ' + lastStatsText : ''))
+      const syncCompletedAt = typeof sync.lastCompletedAt === 'number' && sync.lastCompletedAt > 0 ? new Date(sync.lastCompletedAt).toLocaleString(intlLocale(language)) : ''
+      const lastStatsText = lastStatsAt > 0 ? new Date(lastStatsAt).toLocaleString(intlLocale(language)) : ''
+      const healthTitle = syncCompletedAt === '' ? undefined : (pickFormat(language, '历史扫描完成于 {time}', 'Historical scan completed {time}', { time: syncCompletedAt }))
+      const healthState = lastStatsText !== ''
+        ? pickFormat(language, '已更新 {time}', 'Updated {time}', { time: lastStatsText })
+        : pick(language, scanning ? '正在更新数据' : '数据更新准备中', scanning ? 'Refreshing data' : 'Update state pending')
+      const healthText = pickFormat(
+        language,
+        '{state} · revision 复用 {reused} · 实际读取 {read}{ledger}{failed} · {optimization}',
+        '{state} · {reused} revision reused · {read} read{ledger}{failed} · {optimization}',
+        {
+          state: healthState,
+          reused: sync.sessionsSkippedByRevision || 0,
+          read: sync.sessionsRead || 0,
+          ledger: (sync.sessionsRestoredFromLedger || 0) > 0 ? pickFormat(language, ' · 账本恢复 {count}', ' · {count} ledger restored', { count: sync.sessionsRestoredFromLedger }) : '',
+          failed: (sync.sessionsFailed || 0) > 0 ? pickFormat(language, ' · 失败 {count}', ' · {count} failed', { count: sync.sessionsFailed }) : '',
+          optimization: sync.persistenceSnapshotsAvailable === true ? pick(language, '免读优化已启用', 'revision optimization on') : pick(language, '全量读取回退', 'full-read fallback'),
+        },
+      )
+      const staleText = statsError === '' ? '' : pickFormat(
+        language,
+        lastStatsText === '' ? '用量数据可能已过期' : '用量数据可能已过期；上次完整更新 {time}',
+        lastStatsText === '' ? 'Usage data may be stale' : 'Usage data may be stale; last full update {time}',
+        { time: lastStatsText },
+      )
 
       return React.createElement('div', { className: 'uh-page' },
         React.createElement('div', { className: 'uh-head' },
@@ -5279,11 +5341,11 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
                 onClick: () => setLanguageMenuOpen((open) => !open),
               },
                 React.createElement(LineIcon, { name: 'language', size: 14 }),
-                React.createElement('span', { className: 'uh-language-label' }, language === 'en' ? 'English' : '中文'),
+                React.createElement('span', { className: 'uh-language-label' }, LANGUAGE_LABELS.get(language)),
                 React.createElement(LineIcon, { name: 'chevron', size: 13, className: 'uh-language-caret' }),
               ),
               languageMenuOpen ? React.createElement('div', { className: 'uh-language-options', role: 'menu', 'aria-label': tr('界面语言', 'Interface language') },
-                [['zh', '中文'], ['en', 'English']].map((entry) => React.createElement('button', {
+                LANGUAGE_ENTRIES.map((entry) => React.createElement('button', {
                   key: entry[0],
                   type: 'button',
                   role: 'menuitemradio',
@@ -5346,7 +5408,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         pricingPanel,
         customRangePanel,
         scanning ? React.createElement('div', { className: 'uh-progress' },
-          React.createElement('span', {}, language === 'en' ? 'Scanning historical sessions: ' + scan.scanned + ' / ' + scan.total + (scan.failed > 0 ? ' (' + scan.failed + ' failed to read)' : '') : '正在统计历史会话 ' + scan.scanned + ' / ' + scan.total + (scan.failed > 0 ? '（' + scan.failed + ' 个读取失败）' : '')),
+          React.createElement('span', {}, pickFormat(language, '正在统计历史会话 {scanned} / {total}{failed}', 'Scanning historical sessions: {scanned} / {total}{failed}', { scanned: scan.scanned, total: scan.total, failed: scan.failed > 0 ? pickFormat(language, '（{count} 个读取失败）', ' ({count} failed to read)', { count: scan.failed }) : '' })),
           React.createElement('div', { className: 'uh-bar' }, React.createElement('div', { className: 'uh-fill', style: { width: pct + '%' } })),
         ) : null,
         React.createElement('div', { className: 'uh-sync-health' + (staleText !== '' ? ' uh-stale' : ''), title: staleText !== '' ? undefined : healthTitle },
@@ -5365,7 +5427,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
                 React.createElement('div', { className: 'uh-ios-summary-total-copy' },
                   React.createElement('div', { className: 'uh-ios-summary-label' }, tr('总处理 Token', 'Total Tokens Processed')),
                   React.createElement('div', { className: 'uh-ios-summary-value' }, valueWithMagnitude(fmtCompact(animatedTotal), totalTokens, language)),
-                  React.createElement('div', { className: 'uh-ios-summary-caption' }, language === 'en' ? rangeLabel + ' · ' + fmtCompact(animatedTurns) + (scopedCountIsCalls ? ' calls' : ' uses') + ' · includes cache reads/writes and reasoning' : rangeLabel + ' · ' + fmtCompact(animatedTurns) + (scopedCountIsCalls ? ' 次调用' : ' 次使用') + ' · 含缓存读写与推理'),
+                  React.createElement('div', { className: 'uh-ios-summary-caption' }, pickFormat(language, '{range} · {count}{kind} · 含缓存读写与推理', '{range} · {count}{kind} · includes cache reads/writes and reasoning', { range: rangeLabel, count: fmtCompact(animatedTurns), kind: scopedCountIsCalls ? pick(language, ' 次调用', ' calls') : pick(language, ' 次使用', ' uses') })),
                 ),
               ),
               React.createElement('div', { className: 'uh-ios-summary-meta' },
@@ -5382,8 +5444,8 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
             ),
             React.createElement('div', { className: 'uh-ios-metrics' },
               card(tr('DeepSeek 账户余额', 'DeepSeek Account Balance'), balanceValue, balanceSub, 0, 'wallet', 'deepseek'),
-              card(scopedCountIsCalls ? tr('匹配调用次数', 'Matching Calls') : tr('总使用次数', 'Total Uses'), fmtCompact(animatedTurns), range === 'all' && !scopedCountIsCalls ? (language === 'en' ? agg.totals.sessions + ' sessions' : agg.totals.sessions + ' 个会话') : (language === 'en' ? (scopedCountIsCalls ? 'Calls in ' : 'Turns in ') + rangeLabel : rangeLabel + (scopedCountIsCalls ? '内的调用数' : '内的回合数')), 1, 'chart'),
-              card(tr('连续使用', 'Current Streak'), language === 'en' ? st.streak + ' days' : st.streak + ' 天', language === 'en' ? 'Longest streak: ' + st.best + ' days' : '最长连续 ' + st.best + ' 天', 2, 'clock'),
+              card(scopedCountIsCalls ? tr('匹配调用次数', 'Matching Calls') : tr('总使用次数', 'Total Uses'), fmtCompact(animatedTurns), range === 'all' && !scopedCountIsCalls ? pickFormat(language, '{count} 个会话', '{count} sessions', { count: agg.totals.sessions }) : pickFormat(language, scopedCountIsCalls ? '{range}内的调用数' : '{range}内的回合数', scopedCountIsCalls ? 'Calls in {range}' : 'Turns in {range}', { range: rangeLabel }), 1, 'chart'),
+              card(tr('连续使用', 'Current Streak'), pickFormat(language, '{count} 天', '{count} days', { count: st.streak }), pickFormat(language, '最长连续 {count} 天', 'Longest streak: {count} days', { count: st.best }), 2, 'clock'),
               tokenCard,
               summaryRateMetric,
             ),
@@ -5414,7 +5476,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
           ),
           detailView === 'model' ? React.createElement('div', { className: 'uh-panel uh-ios-list-panel' },
             React.createElement('div', { className: 'uh-hm-head' },
-              React.createElement('h3', { className: 'uh-tbl-title uh-title-with-icon', style: { margin: 0 } }, React.createElement(LineIcon, { name: 'chart', size: 16 }), language === 'en' ? 'Model Usage Details (' + rangeLabel + ')' : '模型用量明细（' + rangeLabel + '）'),
+              React.createElement('h3', { className: 'uh-tbl-title uh-title-with-icon', style: { margin: 0 } }, React.createElement(LineIcon, { name: 'chart', size: 16 }), pickFormat(language, '模型用量明细（{range}）', 'Model Usage Details ({range})', { range: rangeLabel })),
               React.createElement('div', { className: 'uh-range' },
                 [['route', tr('混合查看', 'Combined View')], ['model', tr('按模型', 'By Model')], ['provider', tr('按供应商', 'By Provider')]].map((entry) => React.createElement('button', {
                   key: entry[0], className: modelView === entry[0] ? 'uh-on' : '', onClick: () => setModelView(entry[0]),
@@ -5440,10 +5502,10 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
                   modelElements,
                 ),
               ),
-            React.createElement('div', { className: 'uh-note', style: { marginTop: 10 } }, language === 'en' ? modelViewLabel + ': Combined View distinguishes “Provider / Model”; By Model merges identically named models across providers; By Provider aggregates all of a provider’s models. Historical records without routing information are grouped as “Unknown.”' : modelViewLabel + '：混合查看按“供应商 / 模型”区分；按模型会跨供应商合并同名模型；按供应商则汇总其全部模型。缺少路由信息的历史记录会归为“未知”。'),
+            React.createElement('div', { className: 'uh-note', style: { marginTop: 10 } }, pickFormat(language, '{label}：混合查看按“供应商 / 模型”区分；按模型会跨供应商合并同名模型；按供应商则汇总其全部模型。缺少路由信息的历史记录会归为“未知”。', '{label}: Combined View distinguishes “Provider / Model”; By Model merges identically named models across providers; By Provider aggregates all of a provider’s models. Historical records without routing information are grouped as “Unknown.”', { label: modelViewLabel })),
           ) : null,
           detailView === 'workspace' ? React.createElement('div', { className: 'uh-panel uh-ios-list-panel' },
-            React.createElement('h3', { className: 'uh-tbl-title uh-title-with-icon' }, React.createElement(LineIcon, { name: 'folder', size: 16 }), language === 'en' ? 'Workspace Details (' + rangeLabel + ')' : '工作区明细（' + rangeLabel + '）'),
+            React.createElement('h3', { className: 'uh-tbl-title uh-title-with-icon' }, React.createElement(LineIcon, { name: 'folder', size: 16 }), pickFormat(language, '工作区明细（{range}）', 'Workspace Details ({range})', { range: rangeLabel })),
             rows.length === 0
               ? React.createElement('div', { className: 'uh-empty' }, tr('该时间范围内没有使用记录', 'No usage records in this time range'))
               : React.createElement(React.Fragment, null,
@@ -5484,7 +5546,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       const [open, setOpen] = React.useState(false)
       const [dashboardResetKey, setDashboardResetKey] = React.useState(0)
       const [language, setLanguage] = React.useState(storedLanguage)
-      const tr = (zh, en) => language === 'en' ? en : zh
+      const tr = (zh, en) => pick(language, zh, en)
       // The sheet, its grabber strip and its close button all start below the
       // caption strip the desktop client keeps for its own window buttons.
       const captionInset = uhWindowControlsInset()
@@ -5497,7 +5559,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         ),
       )
       const changeLanguage = (next) => {
-        const value = next === 'en' ? 'en' : 'zh'
+        const value = normalizeLanguage(next) ?? 'zh'
         setLanguage(value)
         persistLanguage(value)
       }
