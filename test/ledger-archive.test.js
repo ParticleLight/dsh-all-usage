@@ -160,9 +160,19 @@ async function treeStore(root, { remove = true } = {}) {
       const doc = JSON.parse(await readFile(path, 'utf8'))
       return doc.record
     },
-    async deleteRecord(key) {
+    async deleteRecord(key, expected) {
       const path = paths.get(key)
       if (!remove || path === undefined) return false
+      // Same optimistic rule as the real stores: re-read the document and remove it
+      // only while it still holds the row that was archived.
+      if (expected !== undefined) {
+        if (expected === null || typeof expected !== 'object') return false
+        let doc = null
+        try { doc = JSON.parse(await readFile(path, 'utf8')) } catch (error) { return false }
+        if (doc === null || typeof doc !== 'object' || doc.record === null || typeof doc.record !== 'object') return false
+        if (doc.record.updatedAt !== expected.updatedAt) return false
+        if (JSON.stringify(doc.record) !== JSON.stringify(expected)) return false
+      }
       paths.delete(key)
       return rm(path).then(() => true, () => false)
     },
@@ -174,6 +184,33 @@ async function coldStart(root) {
   const fixture = createInvariantHost({ backend: backend.backend })
   await fixture.ledger.loadLedger()
   return fixture
+}
+
+// One row of one month file, as the read path would see it.
+async function archivedRow(root, month, sessionId) {
+  const text = gunzipSync(await readFile(join(root, 'archive', month + '.jsonl.gz'))).toString('utf8')
+  for (const line of text.split(/[\r\n]+/)) {
+    if (line === '') continue
+    const row = JSON.parse(line)
+    if (row.sessionId === sessionId) return row
+  }
+  return undefined
+}
+
+// A second fold of the same session that really records more: one extra turn with
+// its own usage sample, so a stale copy is visible in the record, not only in a stamp.
+function raceLog(id, cwd, seed, extraTurn) {
+  const log = sessionLog(id, cwd, seed)
+  if (!extraTurn) return log
+  const start = BASE_TIME + seed * 26 * 3600000
+  return {
+    ...log,
+    events: log.events.concat([
+      contextEvent(7, start + 7000, 'deepseek', 'deepseek-chat', 3, 1),
+      messageEvent(8, start + 8000, 3, 1, { inputTokens: 30, outputTokens: 4 }, 'deepseek', 'deepseek-chat'),
+      turnEndEvent(9, start + 9000, 3),
+    ]),
+  }
 }
 
 async function restoredRecords(fixture, sessionIds) {
@@ -421,6 +458,65 @@ test('a ledger without an archive directory reads as before and pays one listing
     assert.deepEqual([...cold.state.ledgerKeys].sort(), FIXTURE.map((row) => row.id).sort())
     const restored = await restoredRecords(cold, FIXTURE.map((row) => row.id))
     assert.deepEqual(fold(cold, restored), before)
+  } finally {
+    await removeTempRoot(root)
+  }
+})
+
+// Runtime writes deliberately do not take the maintenance lock (a write must never
+// wait on a migration), so a session can publish a newer revision between the moment
+// the archive plans its key and the moment it deletes the document. The delete has to
+// re-read and notice, or it would throw away the only copy of that revision.
+test('a record rewritten between the plan and the delete keeps its tree document', async () => {
+  const root = await createTempRoot()
+  try {
+    const sid = 's-race'
+    const builder = createInvariantHost().ledger
+    const rev5 = { ...builder.buildLedgerRecord(raceLog(sid, 'C:/work/beta', 5, false), 'w-beta', 'scan', 'rev-5'), updatedAt: Date.parse('2026-06-05T04:00:00Z') }
+    const rev6 = { ...builder.buildLedgerRecord(raceLog(sid, 'C:/work/beta', 5, true), 'w-beta', 'scan', 'rev-6'), updatedAt: Date.parse('2026-06-20T04:00:00Z') }
+    assert.equal(rev6.usage.length, rev5.usage.length + 1, 'rev6 has to carry usage rev5 does not')
+    await seedTree(root, [rev5])
+    const doc = join(treeDir(root, sid), sid + '.json')
+    const planned = JSON.parse(await readFile(doc, 'utf8')).record
+
+    const cold = await coldStart(root)
+    // The live write lands after the planning read and before the delete.
+    await writeFile(doc, JSON.stringify({ version: 0, record: serializeLedgerRecord(rev6) }), 'utf8')
+
+    // The store the ledger exports refuses on its own: the document no longer holds
+    // the row that was archived.
+    assert.equal(await cold.state.ledgerUnit.deleteRecord(sid, planned), false)
+    assert.equal((await treeIds(root)).includes(sid), true, 'the newer revision keeps its document')
+    const restored = await cold.ledger.recordFor(sid)
+    assert.equal(restored.updatedAt, rev6.updatedAt, 'the read path answers with the revision in the tree')
+    assert.equal(restored.usage.length, rev6.usage.length)
+
+    // The same interleaving through a whole run: the plan read answers rev5 while
+    // the document on disk already holds rev6.
+    const plain = await treeStore(root)
+    const racing = {
+      listKeys: () => plain.listKeys(),
+      readRecord: async (key) => (key === sid ? planned : plain.readRecord(key)),
+      deleteRecord: (key, expected) => plain.deleteRecord(key, expected),
+    }
+    const first = await archiveRecords({ root, store: racing, cutoffMs: OLD_CUTOFF })
+    assert.deepEqual(first.errors, [])
+    assert.equal(first.archived, 1)
+    assert.deepEqual(await treeIds(root), [sid], 'the newer revision still sits in its tree')
+    assert.equal((await archivedRow(root, '2026-06', sid)).updatedAt, rev5.updatedAt, 'the archive holds the revision it planned')
+    const fresh = await coldStart(root)
+    assert.equal((await fresh.ledger.recordFor(sid)).updatedAt, rev6.updatedAt, 'and a cold read still prefers the tree')
+
+    // The next run files rev6 and only then removes the document.
+    const second = await archiveRecords({ root, store: await treeStore(root), cutoffMs: OLD_CUTOFF })
+    assert.deepEqual(second.errors, [])
+    assert.equal(second.archived, 1)
+    assert.deepEqual(await treeIds(root), [], 'the document leaves once the archive holds its revision')
+    const filed = await archivedRow(root, '2026-06', sid)
+    assert.equal(filed.updatedAt, rev6.updatedAt, 'the archive caught up to rev6')
+    assert.equal(filed.usage.length, rev6.usage.length)
+    const archivedOnly = await coldStart(root)
+    assert.equal((await archivedOnly.ledger.recordFor(sid)).usage.length, rev6.usage.length, 'a cold read now folds rev6 from the archive')
   } finally {
     await removeTempRoot(root)
   }

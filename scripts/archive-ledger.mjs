@@ -80,9 +80,20 @@ async function openTreeStore(root) {
       if (doc === null || typeof doc !== 'object' || doc.version !== 0 || doc.record === undefined) return undefined
       return doc.record
     },
-    async deleteRecord(key) {
+    async deleteRecord(key, expected) {
       const path = paths.get(key)
       if (path === undefined) return false
+      // Same optimistic check as the ledger's own store: a session that published a
+      // newer revision while this run was planning keeps its document, and the next
+      // run archives that revision instead of losing it.
+      if (expected !== undefined) {
+        if (expected === null || typeof expected !== 'object') return false
+        let doc = null
+        try { doc = JSON.parse(await readFile(path, 'utf8')) } catch (error) { return false }
+        if (doc === null || typeof doc !== 'object' || doc.record === null || typeof doc.record !== 'object') return false
+        if (doc.record.updatedAt !== expected.updatedAt) return false
+        if (JSON.stringify(doc.record) !== JSON.stringify(expected)) return false
+      }
       paths.delete(key)
       return unlink(path).then(() => true, () => false)
     },
