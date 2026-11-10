@@ -17,6 +17,7 @@
     "fixture:check": "node scripts/replay-fixture.mjs fixtures/usage-events.json",
     "test:runtime": "node --test test/dsh-runtime.test.js",
     "check:pack": "node scripts/check-package.mjs",
+    "ledger:archive": "node scripts/archive-ledger.mjs",
     "prepack": "npm run build:client"
   },
   "main": "lib/index.js",
@@ -50,6 +51,7 @@
     "lib/index.js",
     "lib/plugin.js",
     "lib/aggregation.js",
+    "lib/archive.js",
     "lib/records-cache.js",
     "lib/ledger.js",
     "lib/session-sync.js",
@@ -68,6 +70,7 @@
     "screenshots.json",
     "fixtures/usage-events.json",
     "scripts/replay-fixture.mjs",
+    "scripts/archive-ledger.mjs",
     "assets"
   ],
   "keywords": [

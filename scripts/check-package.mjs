@@ -69,6 +69,7 @@ const expected = [
   'assets/readme-sync-zh.svg',
   'cordis.patch.yml',
   'lib/aggregation.js',
+  'lib/archive.js',
   'lib/records-cache.js',
   'lib/balance.js',
   'lib/client.js',
@@ -86,6 +87,7 @@ const expected = [
   'screenshots.json',
   'fixtures/usage-events.json',
   'scripts/replay-fixture.mjs',
+  'scripts/archive-ledger.mjs',
 ]
 const expectedSet = new Set(expected)
 const actual = metadata.files.map((entry) => String(entry.path).replaceAll('\\\\', '/')).sort()
