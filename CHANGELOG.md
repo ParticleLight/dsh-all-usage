@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.2.4（未发布）
+### 新功能
+- **界面语言跟随 DSH 自带的八种语言** —— 中文、English、日本語、Español、Français、Deutsch、Русский、Português 都可选；首次打开跟随宿主语言并记住选择，中文以外的界面按 UTC 显示日期与日历。
+- **旧记录可以压缩归档** —— 手动执行 `npm run ledger:archive -- --root <数据目录> --older-than-days 90 --apply` 把更早的会话压成按月 gzip，总量、明细与筛选结果不变；不加 `--apply` 只打印计划。默认不归档。
+### 修复
+- **两个 DSH 进程共用一个数据目录时可能丢历史** —— 启动迁移与旧文件清理现在共用一把跨进程锁；抢不到锁的进程只读不删，留到下一次启动再完成。
+- **宿主使用插件未内置的界面语言时，面板被浏览器语言带偏** —— 现在跟随宿主回落到英文，与 DSH 自己的回落一致。
+### Features
+- **The panel follows all eight DSH interface languages** — 中文, English, 日本語, Español, Français, Deutsch, Русский and Português; it follows the host language on first open, remembers the choice, and outside Chinese the dates and the calendar follow UTC.
+- **Old records can be archived** — run `npm run ledger:archive -- --root <data folder> --older-than-days 90 --apply` to fold older sessions into monthly gzip files; totals, detail and filters stay identical, and without `--apply` it only prints the plan. Nothing is archived by default.
+### Fixes
+- **Two DSH processes sharing one data folder could lose history** — startup migration and legacy-file cleanup now share one cross-process lock; a process that cannot take it reads only, and the next start finishes the job.
+- **A host language the panel does not ship used to fall back to the browser language** — it now falls back to English, the same place DSH itself falls back to.
+
 ## v1.2.3（2026-11-08）
 ### 修复
 - **柱状图最左柱压住纵轴刻度** —— 柱子不再越出绘图区，刻度与悬停位置不变；折线视图不受影响。
