@@ -291,13 +291,15 @@ npm run check:pack
 
 ## Status and Updates
 
-The latest published release is `v1.2.3` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.3) | npm: `npm i dsh-all-usage@1.2.3`). See [CHANGELOG.md](CHANGELOG.md) for the complete development and release history.
+The latest published release is `v1.2.4` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.4) | npm: `npm i dsh-all-usage@1.2.4`). See [CHANGELOG.md](CHANGELOG.md) for the complete development and release history.
 
-### Latest published: v1.2.3
+### Latest published: v1.2.4
 
-- **Four display fixes**: the leftmost bar no longer covers the value-axis ticks, heatmap weekday labels line up with their cell rows again, hover cards are no longer clipped by the panel, and charts and the calendar stay readable in the light theme.
-- **The panel is a floating rounded card**: 24 px corners with a margin on all sides, so narrow windows no longer fall back to square corners.
-- **The title bar is its own rounded card**: its bottom border became a soft shadow, and it stays under the drag handle while the sheet scrolls.
+- **Eight interface languages**: the panel follows the language DSH ships, on first open and after you choose.
+- **A This Month range**: from the first of the month through today.
+- **Dates follow this machine's time zone**: the calendar no longer changes with the interface language, and dates name their UTC offset.
+- **Old records can be archived**: the CLI or the Maintenance panel folds older sessions into monthly gzip files; totals and filters stay the same, and nothing is archived by default.
+- **Three fixes**: today's heatmap cell wears a green ring, two DSH processes sharing one data folder no longer lose history, and a host language the panel does not ship falls back to English.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 

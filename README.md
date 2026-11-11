@@ -290,13 +290,15 @@ npm run check:pack
 
 ## 状态与更新
 
-当前最新发布版本为 `v1.2.3`（[GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.3)｜npm：`npm i dsh-all-usage@1.2.3`）。完整开发与版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+当前最新发布版本为 `v1.2.4`（[GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.4)｜npm：`npm i dsh-all-usage@1.2.4`）。完整开发与版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
-### 最近发布：v1.2.3
+### 最近发布：v1.2.4
 
-- **四处显示问题**：柱状图最左柱不再压住纵轴刻度；热力图星期标签重新对齐格子行；悬停提示不会再被面板裁掉；浅色主题下图表与日历看得清了。
-- **面板改为浮动圆角卡片**：四角 24px 圆角、四周留边，窄窗口不再退化成直角。
-- **标题栏独立成圆角卡片**：下边框换成柔和阴影，滚动时停在拖拽条下方。
+- **界面语言扩到八种**：跟随 DSH 自带的语言，首次打开自动跟随，选择会记住。
+- **新增「当月」范围**：本月 1 号到今天。
+- **日期统一按本机时区**：不再随界面语言切换，日期旁标出 UTC 偏移。
+- **旧记录可冷归档**：命令行或面板「数据维护」把旧会话压成按月 gzip，统计与筛选不变，默认不归档。
+- **三处修复**：热力图的今天改绿色描边；两个 DSH 进程共用数据目录不再丢历史；宿主用了插件没有的语言时回落到英文。
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 

@@ -291,13 +291,15 @@ npm run check:pack
 
 ## Estado y actualizaciones
 
-La última versión publicada es `v1.2.3` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.3) | npm: `npm i dsh-all-usage@1.2.3`). Consulta [CHANGELOG.md](CHANGELOG.md) para el historial completo de desarrollo y versiones.
+La última versión publicada es `v1.2.4` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.4) | npm: `npm i dsh-all-usage@1.2.4`). Consulta [CHANGELOG.md](CHANGELOG.md) para el historial completo de desarrollo y versiones.
 
-### Última publicada: v1.2.3
+### Última versión publicada: v1.2.4
 
-- **Cuatro correcciones de visualización**: la barra más a la izquierda ya no tapa las marcas del eje de valores, las etiquetas de los días del mapa de calor vuelven a alinearse con sus filas, las tarjetas al pasar el cursor ya no quedan recortadas por el panel, y los gráficos y el calendario se leen bien en el tema claro.
-- **El panel es una tarjeta flotante de esquinas redondeadas**: esquinas de 24 px y margen en los cuatro lados, así que las ventanas estrechas ya no vuelven a las esquinas rectas.
-- **La barra de título es su propia tarjeta redondeada**: su borde inferior pasa a ser una sombra suave y permanece bajo el asa de arrastre mientras la hoja se desplaza.
+- **Ocho idiomas de interfaz**: el panel sigue el idioma que trae DSH, tanto al abrirse por primera vez como después de elegirlo.
+- **Nuevo rango «Este mes»**: del día 1 del mes hasta hoy.
+- **Las fechas siguen la zona horaria de esta máquina**: el calendario ya no cambia con el idioma de la interfaz y las fechas muestran su desfase UTC.
+- **Los registros antiguos se pueden archivar**: la CLI o el panel «Mantenimiento» agrupan las sesiones antiguas en gzip mensuales; los totales y los filtros no cambian y, por defecto, no se archiva nada.
+- **Tres correcciones**: la celda de hoy del mapa de calor lleva un anillo verde, dos procesos de DSH que comparten carpeta de datos ya no pierden historial, y un idioma del host que el panel no incluye recurre al inglés.
 
 Consulta [CHANGELOG.md](CHANGELOG.md) para el historial completo de versiones.
 

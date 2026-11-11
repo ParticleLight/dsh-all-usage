@@ -291,13 +291,15 @@ npm run check:pack
 
 ## Status und Updates
 
-Die neueste veröffentlichte Version ist `v1.2.3` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.3) | npm: `npm i dsh-all-usage@1.2.3`). Die vollständige Entwicklungs- und Versionshistorie steht in [CHANGELOG.md](CHANGELOG.md).
+Die neueste veröffentlichte Version ist `v1.2.4` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.4) | npm: `npm i dsh-all-usage@1.2.4`). Die vollständige Entwicklungs- und Versionshistorie steht in [CHANGELOG.md](CHANGELOG.md).
 
-### Zuletzt veröffentlicht: v1.2.3
+### Zuletzt veröffentlicht: v1.2.4
 
-- **Vier Anzeigefehler behoben**: der linke Balken verdeckt die Achsenbeschriftung nicht mehr, die Wochentagslabels der Heatmap liegen wieder auf ihren Zellenzeilen, Hover-Karten werden nicht mehr vom Panel abgeschnitten, und Diagramme wie Kalender bleiben im hellen Theme lesbar.
-- **Das Panel ist eine schwebende Karte mit runden Ecken**: 24 px Ecken und rundum Abstand, sodass schmale Fenster nicht mehr auf rechte Winkel zurückfallen.
-- **Die Titelleiste ist eine eigene runde Karte**: die Unterkante wurde zu einem weichen Schatten, und sie bleibt beim Scrollen unter dem Ziehgriff.
+- **Acht Oberflächensprachen**: das Panel folgt der Sprache, die DSH mitbringt – beim ersten Öffnen und nach deiner Wahl.
+- **Neuer Bereich „Dieser Monat“**: vom 1. des Monats bis heute.
+- **Datumsangaben folgen der Zeitzone dieses Rechners**: der Kalender wechselt nicht mehr mit der Oberflächensprache, und Datumsangaben nennen ihren UTC-Versatz.
+- **Alte Datensätze lassen sich archivieren**: CLI oder „Wartung“ im Panel bündeln ältere Sitzungen in monatliche gzip-Dateien; Summen und Filter bleiben gleich, standardmäßig wird nichts archiviert.
+- **Drei Korrekturen**: die heutige Heatmap-Zelle trägt einen grünen Ring, zwei DSH-Prozesse mit gemeinsamem Datenordner verlieren keine Historie mehr, und eine Hostsprache, die das Panel nicht mitbringt, fällt auf Englisch zurück.
 
 Die vollständige Versionshistorie steht in [CHANGELOG.md](CHANGELOG.md).
 

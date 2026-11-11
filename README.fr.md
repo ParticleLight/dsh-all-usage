@@ -291,13 +291,15 @@ npm run check:pack
 
 ## État et mises à jour
 
-La dernière version publiée est `v1.2.3` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.3) | npm : `npm i dsh-all-usage@1.2.3`). Voir [CHANGELOG.md](CHANGELOG.md) pour l'historique complet du développement et des versions.
+La dernière version publiée est `v1.2.4` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.4) | npm : `npm i dsh-all-usage@1.2.4`). Voir [CHANGELOG.md](CHANGELOG.md) pour l'historique complet du développement et des versions.
 
-### Dernière version publiée : v1.2.3
+### Dernière version publiée : v1.2.4
 
-- **Quatre corrections d'affichage** : la barre la plus à gauche ne recouvre plus les graduations de l'axe des valeurs, les libellés des jours de la carte de chaleur se réalignent sur leurs lignes, les infobulles ne sont plus rognées par le panneau, et les graphiques comme le calendrier restent lisibles en thème clair.
-- **Le panneau devient une carte flottante aux coins arrondis** : coins de 24 px et marge sur les quatre côtés, les fenêtres étroites ne retombent plus sur des angles droits.
-- **La barre de titre forme sa propre carte arrondie** : sa bordure inférieure devient une ombre douce et elle reste sous la poignée de déplacement pendant le défilement.
+- **Huit langues d'interface** : le panneau suit la langue fournie par DSH, au premier affichage comme après votre choix.
+- **Nouvelle plage « Ce mois-ci »** : du 1er du mois à aujourd'hui.
+- **Les dates suivent le fuseau horaire de cette machine** : le calendrier ne change plus avec la langue de l'interface et les dates indiquent leur décalage UTC.
+- **Les anciens enregistrements peuvent être archivés** : la CLI ou le panneau « Maintenance » regroupe les anciennes sessions en gzip mensuels ; les totaux et les filtres restent identiques et rien n'est archivé par défaut.
+- **Trois correctifs** : la case du jour dans la carte de chaleur porte un anneau vert, deux processus DSH partageant un dossier de données ne perdent plus l'historique, et une langue de l'hôte absente du panneau retombe sur l'anglais.
 
 Voir [CHANGELOG.md](CHANGELOG.md) pour l'historique complet des versions.
 

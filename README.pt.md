@@ -291,13 +291,15 @@ npm run check:pack
 
 ## Status e atualizações
 
-A versão publicada mais recente é `v1.2.3` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.3) | npm: `npm i dsh-all-usage@1.2.3`). Veja [CHANGELOG.md](CHANGELOG.md) para o histórico completo de desenvolvimento e versões.
+A versão publicada mais recente é `v1.2.4` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.4) | npm: `npm i dsh-all-usage@1.2.4`). Veja [CHANGELOG.md](CHANGELOG.md) para o histórico completo de desenvolvimento e versões.
 
-### Última publicação: v1.2.3
+### Última publicação: v1.2.4
 
-- **Quatro correções de exibição**: a barra mais à esquerda não cobre mais as marcas do eixo de valores, os rótulos dos dias da semana no mapa de calor voltam a alinhar com suas linhas, os cartões de hover não são mais cortados pelo painel, e gráficos e calendário continuam legíveis no tema claro.
-- **O painel virou um cartão flutuante de cantos arredondados**: cantos de 24 px e margem nos quatro lados, então janelas estreitas não voltam mais aos cantos retos.
-- **A barra de título é um cartão arredondado próprio**: a borda inferior virou uma sombra suave, e ela permanece sob a alça de arraste durante a rolagem.
+- **Oito idiomas de interface**: o painel segue o idioma que o DSH traz, na primeira abertura e depois da sua escolha.
+- **Novo intervalo “Este mês”**: do dia 1 do mês até hoje.
+- **As datas seguem o fuso horário desta máquina**: o calendário não muda mais com o idioma da interface, e as datas mostram o deslocamento UTC.
+- **Registros antigos podem ser arquivados**: a CLI ou o painel “Manutenção” agrupam sessões antigas em gzip mensais; totais e filtros não mudam, e nada é arquivado por padrão.
+- **Três correções**: a célula de hoje no mapa de calor ganha um anel verde, dois processos do DSH com a mesma pasta de dados não perdem mais histórico, e um idioma do host que o painel não traz cai para o inglês.
 
 Veja [CHANGELOG.md](CHANGELOG.md) para o histórico completo de versões.
 
