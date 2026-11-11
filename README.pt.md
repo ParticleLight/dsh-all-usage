@@ -289,14 +289,13 @@ npm run check:pack
 
 ## Status e atualizações
 
-A versão publicada mais recente é `v1.2.2` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.2) | npm: `npm i dsh-all-usage@1.2.2`). Veja [CHANGELOG.md](CHANGELOG.md) para o histórico completo de desenvolvimento e lançamentos.
+A versão publicada mais recente é `v1.2.3` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.3) | npm: `npm i dsh-all-usage@1.2.3`). Veja [CHANGELOG.md](CHANGELOG.md) para o histórico completo de desenvolvimento e versões.
 
-### Última publicação: v1.2.2
+### Última publicação: v1.2.3
 
-- **O gráfico de tendência pode alternar para barras**: um seletor Linha / Barras fica no canto superior direito; as barras empilham uma coluna por linha por tipo de token com o total no topo, crescem a partir da linha de base (sem crescimento com movimento reduzido), e a escolha é lembrada.
-- **Suporte a DSH `0.2.2-alpha.3` e `0.2.2-rc.1`**: ambas as versões exatas são verificadas no runtime real.
-- **“Hoje” mantém sua curva horária**: alternar para Hoje mostra a tendência horária do dia sem atualização manual.
-- **Um painel mais barato e um poll ocioso**: o brilho sempre ativo e três desfoques de fundo foram removidos, e o poll ocioso não renderiza mais o painel quando o payload não mudou.
+- **Quatro correções de exibição**: a barra mais à esquerda não cobre mais as marcas do eixo de valores, os rótulos dos dias da semana no mapa de calor voltam a alinhar com suas linhas, os cartões de hover não são mais cortados pelo painel, e gráficos e calendário continuam legíveis no tema claro.
+- **O painel virou um cartão flutuante de cantos arredondados**: cantos de 24 px e margem nos quatro lados, então janelas estreitas não voltam mais aos cantos retos.
+- **A barra de título é um cartão arredondado próprio**: a borda inferior virou uma sombra suave, e ela permanece sob a alça de arraste durante a rolagem.
 
 Veja [CHANGELOG.md](CHANGELOG.md) para o histórico completo de versões.
 

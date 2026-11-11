@@ -289,14 +289,13 @@ npm run check:pack
 
 ## État et mises à jour
 
-La dernière version publiée est `v1.2.2` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.2) | npm : `npm i dsh-all-usage@1.2.2`). Voir [CHANGELOG.md](CHANGELOG.md) pour l'historique complet de développement et de publication.
+La dernière version publiée est `v1.2.3` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.3) | npm : `npm i dsh-all-usage@1.2.3`). Voir [CHANGELOG.md](CHANGELOG.md) pour l'historique complet du développement et des versions.
 
-### Dernière version publiée : v1.2.2
+### Dernière version publiée : v1.2.3
 
-- **Le graphique de tendance peut passer en barres** : un sélecteur Ligne / Barres se trouve en haut à droite ; les barres empilent une colonne par ligne selon le type de tokens, avec le total au sommet, croissent depuis la ligne de base (aucune animation lorsque le mouvement réduit est activé), et le choix est mémorisé.
-- **Prise en charge de DSH `0.2.2-alpha.3` et `0.2.2-rc.1`** : les deux versions exactes sont vérifiées sur la runtime réelle.
-- **« Aujourd'hui » conserve sa courbe horaire** : basculer sur Aujourd'hui affiche la tendance horaire de la journée sans rafraîchissement manuel.
-- **Un panneau plus léger et une interrogation au repos plus économe** : le halo permanent et les trois flous d'arrière-plan ont disparu, et l'interrogation périodique au repos ne redessine plus le tableau de bord lorsque la charge utile n'a pas changé.
+- **Quatre corrections d'affichage** : la barre la plus à gauche ne recouvre plus les graduations de l'axe des valeurs, les libellés des jours de la carte de chaleur se réalignent sur leurs lignes, les infobulles ne sont plus rognées par le panneau, et les graphiques comme le calendrier restent lisibles en thème clair.
+- **Le panneau devient une carte flottante aux coins arrondis** : coins de 24 px et marge sur les quatre côtés, les fenêtres étroites ne retombent plus sur des angles droits.
+- **La barre de titre forme sa propre carte arrondie** : sa bordure inférieure devient une ombre douce et elle reste sous la poignée de déplacement pendant le défilement.
 
 Voir [CHANGELOG.md](CHANGELOG.md) pour l'historique complet des versions.
 

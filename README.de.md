@@ -289,14 +289,13 @@ npm run check:pack
 
 ## Status und Updates
 
-Das neueste veröffentlichte Release ist `v1.2.2` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.2) | npm: `npm i dsh-all-usage@1.2.2`). Die vollständige Entwicklungs- und Release-Historie steht in [CHANGELOG.md](CHANGELOG.md).
+Die neueste veröffentlichte Version ist `v1.2.3` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.3) | npm: `npm i dsh-all-usage@1.2.3`). Die vollständige Entwicklungs- und Versionshistorie steht in [CHANGELOG.md](CHANGELOG.md).
 
-### Zuletzt veröffentlicht: v1.2.2
+### Zuletzt veröffentlicht: v1.2.3
 
-- **Das Trenddiagramm lässt sich auf Balken umschalten**: Oben rechts befindet sich ein Umschalter Linie / Balken; Balken stapeln je Zeile eine Säule nach Token-Typ, mit der Summe oben, wachsen von der Grundlinie (kein Wachstum bei reduzierter Bewegung), und die Wahl wird gemerkt.
-- **Unterstützung für DSH `0.2.2-alpha.3` und `0.2.2-rc.1`**: Beide exakten Versionen sind auf der echten Runtime verifiziert.
-- **„Heute“ behält seine Stundenkurve**: Der Wechsel auf Heute zeigt den Stundenverlauf des Tages ohne manuellen Refresh.
-- **Ein günstigeres Panel und Idle-Polling**: Der dauerhafte Glow und drei Backdrop-Blur-Effekte sind entfallen, und das Idle-Polling rendert das Dashboard nicht mehr neu, wenn sich die Payload nicht geändert hat.
+- **Vier Anzeigefehler behoben**: der linke Balken verdeckt die Achsenbeschriftung nicht mehr, die Wochentagslabels der Heatmap liegen wieder auf ihren Zellenzeilen, Hover-Karten werden nicht mehr vom Panel abgeschnitten, und Diagramme wie Kalender bleiben im hellen Theme lesbar.
+- **Das Panel ist eine schwebende Karte mit runden Ecken**: 24 px Ecken und rundum Abstand, sodass schmale Fenster nicht mehr auf rechte Winkel zurückfallen.
+- **Die Titelleiste ist eine eigene runde Karte**: die Unterkante wurde zu einem weichen Schatten, und sie bleibt beim Scrollen unter dem Ziehgriff.
 
 Die vollständige Versionshistorie steht in [CHANGELOG.md](CHANGELOG.md).
 

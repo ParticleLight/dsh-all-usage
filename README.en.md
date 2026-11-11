@@ -289,14 +289,13 @@ npm run check:pack
 
 ## Status and Updates
 
-The latest published release is `v1.2.2` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.2) | npm: `npm i dsh-all-usage@1.2.2`). See [CHANGELOG.md](CHANGELOG.md) for the complete development and release history.
+The latest published release is `v1.2.3` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.3) | npm: `npm i dsh-all-usage@1.2.3`). See [CHANGELOG.md](CHANGELOG.md) for the complete development and release history.
 
-### Latest published: v1.2.2
+### Latest published: v1.2.3
 
-- **The trend chart can switch to bars**: a Line / Bars switch sits at the top right; bars stack one column per row by token type with the total on top, grow from the baseline (no growth with reduced motion), and the choice is remembered.
-- **DSH `0.2.2-alpha.3` and `0.2.2-rc.1` support**: both exact versions are verified on the real runtime.
-- **"Today" keeps its hourly curve**: switching to Today shows the day's hourly trend without a manual refresh.
-- **A cheaper panel and idle poll**: the always-on glow and three backdrop blurs are gone, and the idle poll no longer re-renders the dashboard when the payload has not changed.
+- **Four display fixes**: the leftmost bar no longer covers the value-axis ticks, heatmap weekday labels line up with their cell rows again, hover cards are no longer clipped by the panel, and charts and the calendar stay readable in the light theme.
+- **The panel is a floating rounded card**: 24 px corners with a margin on all sides, so narrow windows no longer fall back to square corners.
+- **The title bar is its own rounded card**: its bottom border became a soft shadow, and it stays under the drag handle while the sheet scrolls.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 

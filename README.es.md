@@ -289,14 +289,13 @@ npm run check:pack
 
 ## Estado y actualizaciones
 
-La última versión publicada es `v1.2.2` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.2) | npm: `npm i dsh-all-usage@1.2.2`). Consulta [CHANGELOG.md](CHANGELOG.md) para el historial completo de desarrollo y de publicaciones.
+La última versión publicada es `v1.2.3` ([GitHub Release](https://github.com/ParticleLight/dsh-all-usage/releases/tag/v1.2.3) | npm: `npm i dsh-all-usage@1.2.3`). Consulta [CHANGELOG.md](CHANGELOG.md) para el historial completo de desarrollo y versiones.
 
-### Última publicada: v1.2.2
+### Última publicada: v1.2.3
 
-- **El gráfico de tendencia puede cambiar a barras**: hay un interruptor Línea / Barras arriba a la derecha; las barras apilan una columna por fila por tipo de token con el total arriba, crecen desde la línea base (sin crecimiento con movimiento reducido) y la elección se recuerda.
-- **Compatibilidad con DSH `0.2.2-alpha.3` y `0.2.2-rc.1`**: ambas versiones exactas están verificadas en el runtime real.
-- **«Hoy» conserva su curva horaria**: al cambiar a Hoy se muestra la tendencia horaria del día sin refrescar a mano.
-- **Un panel más económico y un sondeo inactivo**: el brillo permanente y los tres desenfoques de fondo han desaparecido, y el sondeo inactivo ya no vuelve a renderizar el panel cuando la carga útil no ha cambiado.
+- **Cuatro correcciones de visualización**: la barra más a la izquierda ya no tapa las marcas del eje de valores, las etiquetas de los días del mapa de calor vuelven a alinearse con sus filas, las tarjetas al pasar el cursor ya no quedan recortadas por el panel, y los gráficos y el calendario se leen bien en el tema claro.
+- **El panel es una tarjeta flotante de esquinas redondeadas**: esquinas de 24 px y margen en los cuatro lados, así que las ventanas estrechas ya no vuelven a las esquinas rectas.
+- **La barra de título es su propia tarjeta redondeada**: su borde inferior pasa a ser una sombra suave y permanece bajo el asa de arrastre mientras la hoja se desplaza.
 
 Consulta [CHANGELOG.md](CHANGELOG.md) para el historial completo de versiones.
 
