@@ -2945,6 +2945,21 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
 .uh-pricing-tier-empty { padding:5px 0; color:var(--dsw-alias-label-secondary); font-size:10px; }
 .uh-pricing-error { color:var(--dsw-alias-warning, #a55b00); font-size:12px; line-height:1.45; }
 .uh-pricing-foot { padding-top:4px; }
+.uh-archive-panel { display:flex; flex-direction:column; gap:10px; }
+.uh-archive-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.uh-archive-head .uh-title-with-icon { color:var(--dsw-alias-label-primary); font-size:13px; font-weight:600; }
+.uh-archive-note { color:var(--dsw-alias-label-secondary); font-size:12px; line-height:1.55; }
+.uh-archive-controls { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 10px; padding:10px 0; border-top:1px solid var(--dsw-alias-border-l1); border-bottom:1px solid var(--dsw-alias-border-l1); }
+.uh-archive-days { display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px 6px; min-width:0; color:var(--dsw-alias-label-primary); font-size:12px; }
+.uh-archive-days-input { flex:none; width:78px; min-height:30px; box-sizing:border-box; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; padding:3px 7px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; font-size:12px; font-variant-numeric:tabular-nums; outline:none; transition:border-color .15s ease; }
+.uh-archive-days-input:focus { border-color:var(--dsw-alias-brand-primary); }
+.uh-archive-plan { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 10px; }
+.uh-archive-plan-text { flex:1 1 220px; min-width:0; color:var(--dsw-alias-label-primary); font-size:12px; line-height:1.5; }
+.uh-archive-apply { border-color:var(--dsw-alias-brand-primary); background:color-mix(in srgb, var(--dsw-alias-brand-primary) 16%, transparent); }
+.uh-archive-confirm { display:flex; flex-direction:column; gap:8px; padding:10px; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 60%, transparent); color:var(--dsw-alias-label-primary); font-size:12px; line-height:1.5; }
+.uh-archive-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.uh-archive-result { color:var(--dsw-alias-label-secondary); font-size:12px; line-height:1.45; }
+.uh-archive-error { color:var(--dsw-alias-warning, #a55b00); font-size:12px; line-height:1.45; }
 
 .uh-pricing-table-note { color:var(--dsw-alias-label-secondary); font-size:11px; line-height:1.5; }
 .uh-pricing-price-table { width:100%; min-width:0; }
@@ -3465,6 +3480,112 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       return { ok: false, message: 'HTTP ' + r.status }
     }))
 
+    // ---------- archive ----------
+    // Cold-ledger maintenance. The host folds sessions that have not changed for a
+    // while into monthly gzip files (lib/archive.js); this page only ever asks for a
+    // plan, prints it, and applies it after an explicit confirmation. Every helper
+    // here is pure so the wording and the number rules can be tested without a
+    // browser: test/client-archive.test.js slices this block out of the source.
+    const ARCHIVE_DAYS_MIN = 1
+    const ARCHIVE_DAYS_MAX = 3650
+    // The field is an <input type="number">, so the value arrives as a string: a
+    // cleared box hands back '', and a box the browser already refused hands back
+    // ''. Parsing a float would accept '1.5'; the rule is an integer in the range.
+    function validArchiveDays(raw) {
+      if (typeof raw === 'number') {
+        return Number.isSafeInteger(raw) && raw >= ARCHIVE_DAYS_MIN && raw <= ARCHIVE_DAYS_MAX ? raw : null
+      }
+      if (typeof raw !== 'string') return null
+      const text = raw.trim()
+      if (!/^[0-9]+$/.test(text)) return null
+      const days = Number(text)
+      return days >= ARCHIVE_DAYS_MIN && days <= ARCHIVE_DAYS_MAX ? days : null
+    }
+    // One definition of the wire shape: the dry run and the real run send the same
+    // body, and only the flag decides whether the host writes anything.
+    function archivePayload(days, dryRun) {
+      return { days, dryRun: dryRun === true }
+    }
+    // The ledger counts bytes; the panel shows the unit people read. The archive is
+    // a file on disk, so the units are binary (1024), and everything from KB up gets
+    // one decimal so the line does not jitter between '820 B' and '12.4 KB'.
+    function archiveSizeText(bytes) {
+      const value = typeof bytes === 'number' && Number.isFinite(bytes) && bytes > 0 ? bytes : 0
+      if (value < 1024) return Math.round(value) + ' B'
+      if (value < 1024 * 1024) return (value / 1024).toFixed(1) + ' KB'
+      if (value < 1024 * 1024 * 1024) return (value / (1024 * 1024)).toFixed(1) + ' MB'
+      return (value / (1024 * 1024 * 1024)).toFixed(1) + ' GB'
+    }
+    // A dry run answers with the same payload as the real run (records, bytes and the
+    // months they fall into): the panel turns it into one line, and the record count
+    // is what makes the apply button exist at all.
+    function archivePlanSummary(plan, language) {
+      const source = plan !== null && typeof plan === 'object' ? plan : {}
+      // The payload names the count 'archived' (lib/archive.js), while this page calls it
+      // 'records' because that is what the panel counts and what the wire means.
+      const records = typeof source.archived === 'number' && Number.isFinite(source.archived) ? source.archived : 0
+      // Month keys are 'YYYY-MM', so a plain string sort is chronological.
+      const months = Array.isArray(source.months) ? source.months.filter((month) => typeof month === 'string' && month !== '').sort() : []
+      const size = archiveSizeText(typeof source.bytes === 'number' ? source.bytes : 0)
+      const text = records === 0
+        ? pick(language, '没有需要归档的旧记录', 'No records are old enough to archive')
+        : pickFormat(language, '将归档 {count} 条记录（{size}），涉及 {months} 个月份：{list}', 'Archive {count} records ({size}) across {months} months: {list}', { count: records, size, months: months.length, list: months.join(pick(language, '、', ', ')) })
+      return { records, size, months, text }
+    }
+    // The applied run reports what landed on disk. A month that failed is part of the
+    // same line rather than a second dialog: its records are still in the tree, the
+    // next run picks them up again, and the rest of the run already happened.
+    function archiveResultSummary(result, language) {
+      const source = result !== null && typeof result === 'object' ? result : {}
+      const records = typeof source.archived === 'number' && Number.isFinite(source.archived) ? source.archived : 0
+      const size = archiveSizeText(typeof source.bytes === 'number' ? source.bytes : 0)
+      const compressed = archiveSizeText(typeof source.compressed === 'number' ? source.compressed : 0)
+      const errors = Array.isArray(source.errors) ? source.errors.filter((error) => error !== null && typeof error === 'object') : []
+      const text = pickFormat(language, '已归档 {count} 条记录，压缩后 {compressed}（原 {size}）', 'Archived {count} records: {compressed} on disk (was {size})', { count: records, compressed, size })
+      if (errors.length === 0) return text
+      const list = errors.map((error) => error.month || error.key || '?').join(pick(language, '、', ', '))
+      return text + ' · ' + pickFormat(language, '部分月份归档失败：{list}', 'Some months could not be archived: {list}', { list })
+    }
+    // The archive RPC answers a refusal with a message code in its body; a body that
+    // could not be read leaves only the status, so the status names the same codes and
+    // the panel never shows a transport detail it cannot explain.
+    function archiveErrorCodeOf(reason) {
+      if (reason === null || reason === undefined) return 'token'
+      if (typeof reason !== 'object') return 'archive-failed'
+      if (typeof reason.code === 'string' && reason.code !== '') return reason.code
+      if (reason.status === 403) return 'forbidden'
+      if (reason.status === 409) return 'busy'
+      if (reason.status === 503) return 'ledger-unavailable'
+      return 'archive-failed'
+    }
+    // Each code gets its own wording, so a permission problem never reads like a broken
+    // ledger and a second DSH process reads as "try again" rather than as a failure.
+    function archiveErrorMessage(code, language) {
+      if (code === 'busy') return pick(language, '另一个 DSH 进程正在维护账本，请稍后再试', 'Another DSH process is maintaining the ledger; try again in a moment')
+      if (code === 'no-root') return pick(language, '当前存储不支持归档', 'This storage does not support archiving')
+      if (code === 'ledger-unavailable') return pick(language, '账本尚未就绪，请稍后再试', 'The ledger is not ready yet; try again in a moment')
+      if (code === 'days') return pick(language, '请输入 1 到 3650 之间的天数', 'Enter a number of days between 1 and 3650')
+      // One write capability for the whole plugin: these two lines are the cost
+      // panel's own wording, so a rotated capability reads the same in both places.
+      if (code === 'token') return pick(language, '当前进程令牌不可用，请刷新看板', 'The process capability is unavailable; refresh the dashboard')
+      if (code === 'forbidden') return pick(language, '写入被拒绝：权限校验未通过（也可能是进程令牌已失效），请刷新看板后重试', 'Write rejected: the permission check failed (a stale process capability is also possible); refresh the dashboard and retry')
+      return pick(language, '归档失败，请重试', 'Archiving failed; try again.')
+    }
+    // The host's rejection body is the only place the code lives, so the error this
+    // throws carries both the status and the message code the panel names.
+    const archiveLedgerRpc = (days, dryRun, writeToken) => fetch('/api/all-usage/archive', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-all-usage-request-token': writeToken },
+      body: JSON.stringify(archivePayload(days, dryRun)),
+    }).then((r) => r.json().catch(() => ({ ok: false })).then((data) => {
+      if (data !== null && typeof data === 'object' && data.ok === true) return data
+      const error = new Error('archive')
+      error.status = r.status
+      error.code = data !== null && typeof data === 'object' && typeof data.message === 'string' ? data.message : ''
+      throw error
+    }))
+    // ---------- archive end ----------
+
     const LANGUAGE_STORAGE_KEY = 'dsh-all-usage.language'
     // A choice made inside the panel is marked; without the mark the panel follows
     // DSH's own Language row (Settings → General → Language). The host locale runtime
@@ -3601,6 +3722,16 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       const [aliasOpen, setAliasOpen] = React.useState(false)
       const [aliasDrafts, setAliasDrafts] = React.useState({})
       const [pricingOpen, setPricingOpen] = React.useState(false)
+      // Cold-ledger maintenance: the panel shows the plan of the last dry run, and a
+      // destructive run needs a second click, so the state is kept apart from the
+      // cost editor's (the two panels never open together).
+      const [archiveOpen, setArchiveOpen] = React.useState(false)
+      const [archiveDays, setArchiveDays] = React.useState('90')
+      const [archivePlan, setArchivePlan] = React.useState(null)
+      const [archiveBusy, setArchiveBusy] = React.useState(false)
+      const [archiveError, setArchiveError] = React.useState('')
+      const [archiveResult, setArchiveResult] = React.useState(null)
+      const [archiveConfirm, setArchiveConfirm] = React.useState(false)
       const [pricingDetails, setPricingDetails] = React.useState(null)
       const [pricingDraft, setPricingDraft] = React.useState(null)
       const [pricingLoading, setPricingLoading] = React.useState(false)
@@ -4286,6 +4417,11 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         setPricingError('')
       }
       const openPricingPanel = () => {
+        // Maintenance counts a plan from the ledger and then rewrites it, so a running
+        // apply is never covered by the cost dialog; otherwise the two panels are mutual
+        // exclusive the same way the alias panel and the cost panel already are.
+        if (archiveBusy) return
+        closeArchivePanel()
         const seq = pricingGate.next()
         setPricingDetails(null)
         setPricingDraft(null)
@@ -4552,6 +4688,83 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         setPricingError('')
       }
       const closeRowEditor = () => setPricingOpenEditor(null)
+      // ---------- cold-ledger maintenance: a plan, then one explicit confirmation ----------
+      // A plan belongs to one input value and one confirmation: any new attempt drops
+      // the old plan so the apply button never describes records nobody just counted.
+      const resetArchiveTransients = () => {
+        setArchivePlan(null)
+        setArchiveResult(null)
+        setArchiveError('')
+        setArchiveConfirm(false)
+      }
+      const closeArchivePanel = () => {
+        // An apply rewrites the ledger; the panel stays until it answers, the same rule
+        // the cost panel follows while it is saving.
+        if (archiveBusy) return
+        setArchiveOpen(false)
+        resetArchiveTransients()
+      }
+      const openArchivePanel = () => {
+        // The cost panel holds itself open while it saves (closePricingPanel refuses
+        // then), so maintenance waits for that write instead of stacking two panels.
+        if (pricingSaving || pricingSyncing || pricingSyncSaving) return
+        closePricingPanel()
+        setAliasOpen(false)
+        resetArchiveTransients()
+        setArchiveOpen(true)
+      }
+      const updateArchiveDays = (value) => {
+        setArchiveDays(value)
+        // A plan counted for another day count cannot describe this one, so the apply
+        // button can only ever run a plan the host just counted for the value on screen.
+        setArchivePlan(null)
+        setArchiveConfirm(false)
+        setArchiveError('')
+      }
+      const previewArchive = () => {
+        if (archiveBusy) return
+        const days = validArchiveDays(archiveDays)
+        if (days === null) { setArchiveError('days'); return }
+        if (requestTokenRef.current === '') { setArchiveError('token'); return }
+        setArchiveBusy(true)
+        setArchiveError('')
+        setArchiveConfirm(false)
+        setArchivePlan(null)
+        setArchiveResult(null)
+        writeWithFreshToken(
+          (token) => archiveLedgerRpc(days, true, token),
+          (data) => setArchivePlan(data),
+          (reason) => setArchiveError(archiveErrorCodeOf(reason))
+        ).finally(() => setArchiveBusy(false))
+      }
+      const requestArchive = () => {
+        if (archiveBusy || archiveConfirm) return
+        // Nothing to archive is not a question worth asking.
+        if (archivePlanSummary(archivePlan, language).records <= 0) return
+        setArchiveError('')
+        setArchiveConfirm(true)
+      }
+      const applyArchive = () => {
+        if (archiveBusy) return
+        const days = validArchiveDays(archiveDays)
+        if (days === null) { setArchiveError('days'); return }
+        if (requestTokenRef.current === '') { setArchiveError('token'); return }
+        setArchiveBusy(true)
+        setArchiveError('')
+        setArchiveResult(null)
+        writeWithFreshToken(
+          (token) => archiveLedgerRpc(days, false, token),
+          (data) => {
+            setArchiveResult(data)
+            setArchivePlan(null)
+            setArchiveConfirm(false)
+            // Records left the session trees, so totals, trend and the record list all
+            // have to be read again.
+            refreshRef.current()
+          },
+          (reason) => setArchiveError(archiveErrorCodeOf(reason))
+        ).finally(() => setArchiveBusy(false))
+      }
 
 
       const totalTokens = agg.totals.input + agg.totals.output + agg.totals.cacheRead + agg.totals.cacheWrite + agg.totals.reasoning
@@ -5138,6 +5351,39 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         ),
       )
       const pricingPanel = pricingOpen ? React.createElement(MemoUsagePricingDialog, { revision: pricingRenderRevision, render: renderPricingPanel }) : null
+      // Maintenance rides in the page flow like the alias panel, and both the plan line
+      // and the confirmation are derived from the last dry run, so a reader always sees
+      // the count the host has just reported and never a stale guess.
+      const archivePlanView = archivePlan === null ? null : archivePlanSummary(archivePlan, language)
+      const archiveRecords = archivePlanView === null ? 0 : archivePlanView.records
+      const archivePanel = archiveOpen ? React.createElement('div', { className: 'uh-panel uh-archive-panel uh-anim-panel' },
+        React.createElement('div', { className: 'uh-archive-head' },
+          React.createElement('div', { className: 'uh-title-with-icon' }, React.createElement(LineIcon, { name: 'cache', size: 16 }), React.createElement('strong', {}, tr('数据维护', 'Maintenance'))),
+          React.createElement('button', { type: 'button', className: 'uh-refresh uh-icon-button', title: tr('关闭数据维护', 'Close maintenance'), 'aria-label': tr('关闭数据维护', 'Close maintenance'), disabled: archiveBusy, onClick: closeArchivePanel }, React.createElement(LineIcon, { name: 'close', size: 16 })),
+        ),
+        React.createElement('div', { className: 'uh-archive-note' }, tr('把久未更新的会话记录压成按月的压缩包。面板里的总量、明细与筛选都不变，归档后的记录仍然可以查看。', 'Sessions that have not changed for a while are folded into monthly compressed files. Totals, detail and filters stay the same, and archived records remain readable.')),
+        React.createElement('div', { className: 'uh-archive-controls' },
+          React.createElement('label', { className: 'uh-archive-days' },
+            React.createElement('span', {}, tr('归档超过', 'Archive records older than')),
+            React.createElement('input', { className: 'uh-archive-days-input', type: 'number', min: 1, max: 3650, step: 1, value: archiveDays, disabled: archiveBusy, 'aria-label': tr('天数', 'Days'), onChange: (event) => updateArchiveDays(event.target.value) }),
+            React.createElement('span', {}, tr('天未更新的记录', 'days without updates')),
+          ),
+          React.createElement('button', { type: 'button', className: 'uh-refresh', disabled: archiveBusy, onClick: previewArchive }, React.createElement(LineIcon, { name: 'refresh', size: 14 }), archiveBusy ? tr('预览中…', 'Planning…') : tr('预览', 'Preview')),
+        ),
+        archivePlanView === null ? null : React.createElement('div', { className: 'uh-archive-plan' },
+          React.createElement('span', { className: 'uh-archive-plan-text' }, archivePlanView.text),
+          archiveRecords > 0 && !archiveConfirm ? React.createElement('button', { type: 'button', className: 'uh-refresh uh-archive-apply', onClick: requestArchive }, tr('开始归档', 'Start archiving')) : null,
+        ),
+        archiveConfirm ? React.createElement('div', { className: 'uh-archive-confirm' },
+          React.createElement('div', {}, pickFormat(language, '确认归档 {count} 条记录？归档后仍可在面板查看，但这一步无法撤销。', 'Archive {count} records? They stay readable in the panel, but this cannot be undone.', { count: archiveRecords })),
+          React.createElement('div', { className: 'uh-archive-actions' },
+            React.createElement('button', { type: 'button', className: 'uh-refresh', disabled: archiveBusy, onClick: () => setArchiveConfirm(false) }, tr('取消', 'Cancel')),
+            React.createElement('button', { type: 'button', className: 'uh-refresh uh-archive-apply', disabled: archiveBusy, onClick: applyArchive }, tr('确认归档', 'Yes, archive')),
+          ),
+        ) : null,
+        archiveResult === null ? null : React.createElement('div', { className: 'uh-archive-result', role: 'status' }, archiveResultSummary(archiveResult, language)),
+        archiveError === '' ? null : React.createElement('div', { className: 'uh-archive-error', role: 'alert' }, archiveErrorMessage(archiveError, language)),
+      ) : null
 
       const versionView = versionSummaryOf(stats !== null && typeof stats.pluginVersion === 'string' ? stats.pluginVersion : clientPluginVersion, versionInfo)
       const versionStatusText = versionView.status === 'latest'
@@ -5330,9 +5576,15 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
             React.createElement('button', {
               className: 'uh-refresh',
               title: tr('配置模型价格与同步', 'Configure model prices and sync'),
-              disabled: pricingSaving || pricingSyncing || pricingSyncSaving,
+              disabled: pricingSaving || pricingSyncing || pricingSyncSaving || archiveBusy,
               onClick: () => { if (pricingOpen) closePricingPanel(); else openPricingPanel() },
             }, React.createElement(LineIcon, { name: 'wallet', size: 14 }), tr('成本设置', 'Cost Settings')),
+            React.createElement('button', {
+              className: 'uh-refresh',
+              title: tr('压缩归档旧记录', 'Archive old records'),
+              disabled: archiveBusy || pricingSaving || pricingSyncing || pricingSyncSaving,
+              onClick: () => { if (archiveOpen) closeArchivePanel(); else openArchivePanel() },
+            }, React.createElement(LineIcon, { name: 'cache', size: 14 }), tr('数据维护', 'Maintenance')),
             React.createElement('div', {
               className: 'uh-language-menu' + (languageMenuOpen ? ' uh-open' : ''),
               ref: languageMenuRef,
@@ -5413,6 +5665,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         ),
         aliasOpen ? aliasPanel : null,
         pricingPanel,
+        archivePanel,
         customRangePanel,
         scanning ? React.createElement('div', { className: 'uh-progress' },
           React.createElement('span', {}, pickFormat(language, '正在统计历史会话 {scanned} / {total}{failed}', 'Scanning historical sessions: {scanned} / {total}{failed}', { scanned: scan.scanned, total: scan.total, failed: scan.failed > 0 ? pickFormat(language, '（{count} 个读取失败）', ' ({count} failed to read)', { count: scan.failed }) : '' })),
