@@ -2,25 +2,25 @@
 
 ## v1.2.4（未发布）
 ### 新功能
-- **界面语言跟随 DSH 自带的八种语言** —— 中文、English、日本語、Español、Français、Deutsch、Русский、Português 都可选；首次打开跟随宿主语言并记住选择。
-- **新增「当月」快捷范围** —— 时间范围里在「近 90 天」与「全部」之间加一项「当月」，从本月 1 号算到今天。
-- **日期与日历统一跟随本机时区** —— 不再按界面语言切换日历（此前中文按本地、其他语言按 UTC）：日界、热力图、趋势桶、范围筛选与导出时间戳都以运行 DSH 这台机器的时区为准，切换语言不会移动日期，也不会改取另一份快照；日期旁会标出当时的 UTC 偏移（如 `UTC+08:00`），自定义范围与热力图口径注记也写明了这一点。
-- **旧记录可以压缩归档** —— 手动执行 `npm run ledger:archive -- --root <数据目录> --older-than-days 90 --apply` 把更早的会话压成按月 gzip，总量、明细与筛选结果不变；不加 `--apply` 只打印计划。默认不归档。
-- **归档也能在面板里做** —— 「数据维护」按钮先出计划（条数、涉及月份、压缩前后大小），再点「开始归档」并二次确认才真正写入；动手前提示一句：归档后的记录仍能查看与统计，但一个月的记录第一次被读时要解压整月文件，之后常驻内存。与 CLI 共用同一把维护锁，另一个 DSH 进程正在维护时面板提示稍后再试。
+- **界面语言跟随 DSH 自带的八种语言** —— 首次打开跟随宿主语言，手动选择后记住。
+- **新增「当月」快捷范围** —— 本月 1 号到今天。
+- **日期一律按本机时区** —— 日历不再随界面语言切换，日期旁标出 UTC 偏移。
+- **旧记录可以压缩归档** —— `npm run ledger:archive -- --root <数据目录> --apply`；不加参数只打印计划。
+- **面板里也能归档** —— 「数据维护」先出计划，二次确认才写入。
 ### 修复
-- **热力图的「今天」改成绿色描边** —— 高亮环不再和热力格子同样偏蓝，一眼能分出哪一格是今天。
-- **两个 DSH 进程共用一个数据目录时可能丢历史** —— 启动迁移与旧文件清理现在共用一把跨进程锁；抢不到锁的进程只读不删，留到下一次启动再完成。
-- **宿主使用插件未内置的界面语言时，面板被浏览器语言带偏** —— 现在跟随宿主回落到英文，与 DSH 自己的回落一致。
+- **热力图的今天改成绿色描边** —— 不再和蓝色格子混在一起。
+- **两个 DSH 进程共用一个数据目录可能丢历史** —— 启动迁移与清理共用一把跨进程锁。
+- **宿主用了插件没有的界面语言时，面板会退回浏览器语言** —— 现在跟宿主一起回落到英文。
 ### Features
-- **The panel follows all eight DSH interface languages** — 中文, English, 日本語, Español, Français, Deutsch, Русский and Português; it follows the host language on first open and remembers the choice.
-- **A This Month shortcut** — the range row gains This Month between Last 90 Days and All Time, counting from the first of the current month through today.
-- **Dates and calendars follow this machine's time zone** — the panel no longer swaps calendars with the interface language (Chinese used local dates, every other language UTC): day boundaries, the heatmap, trend buckets, range filters and export timestamps all use the time zone of the machine running DSH, so switching the language never moves a date or refetches another snapshot; dates now carry their UTC offset (for example `UTC+08:00`), and the range note and the heatmap methodology say so as well.
-- **Old records can be archived** — run `npm run ledger:archive -- --root <data folder> --older-than-days 90 --apply` to fold older sessions into monthly gzip files; totals, detail and filters stay identical, and without `--apply` it only prints the plan. Nothing is archived by default.
-- **Archiving from the panel too** — the Maintenance button plans first (records, months, size before and after compression), and only Start archiving plus a second confirmation writes; before you act it notes that archived records stay readable and countable, but the first read of a month unpacks the whole month file and afterwards it stays in memory, and it takes the same maintenance lock as the CLI, so a panel blocked by another DSH process asks you to try again in a moment.
+- **The panel follows DSH's eight interface languages** — it follows the host language on first open and remembers your choice.
+- **A This Month shortcut** — from the first of the month through today.
+- **Dates follow this machine's time zone** — the calendar no longer changes with the interface language, and dates name their UTC offset.
+- **Old records can be archived** — `npm run ledger:archive -- --root <data folder> --apply`; without it only the plan is printed.
+- **Archiving from the panel too** — Maintenance plans first and writes only after a second confirmation.
 ### Fixes
-- **Today's heatmap cell now wears a green ring** — the highlight no longer blends into the blue heat cells, so the current day stands out at a glance.
-- **Two DSH processes sharing one data folder could lose history** — startup migration and legacy-file cleanup now share one cross-process lock; a process that cannot take it reads only, and the next start finishes the job.
-- **A host language the panel does not ship used to fall back to the browser language** — it now falls back to English, the same place DSH itself falls back to.
+- **Today's heatmap cell wears a green ring** — it no longer blends into the blue cells.
+- **Two DSH processes sharing one data folder could lose history** — startup migration and cleanup now share one cross-process lock.
+- **A host language the panel does not ship fell back to the browser language** — it now falls back to English with the host.
 
 ## v1.2.3（2026-11-08）
 ### 修复
