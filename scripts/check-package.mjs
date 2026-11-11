@@ -57,6 +57,8 @@ const expected = [
   'README.ru.md',
   'README.pt.md',
   ...iconFiles,
+  'assets/cover-zh.png',
+  'assets/cover-en.png',
   'assets/screenshots/zh/01-overview.png',
   'assets/screenshots/zh/02-trend.png',
   'assets/screenshots/zh/02-trend-bars.png',

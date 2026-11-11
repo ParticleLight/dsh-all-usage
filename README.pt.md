@@ -12,6 +12,8 @@
 
 [中文](README.md) · [English](README.en.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Русский](README.ru.md) · [Português](README.pt.md)
 
+![Painel de uso e custos do All Usage](assets/cover-en.png)
+
 ## Introdução
 
 Um painel completo de uso para o DeepSeek Harness. Analise tokens, comportamento de cache, custo estimado, saldo da conta e atividade por modelo, provedor, workspace e intervalo de tempo.

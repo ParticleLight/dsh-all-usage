@@ -12,6 +12,8 @@
 
 [中文](README.md) · [English](README.en.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Русский](README.ru.md) · [Português](README.pt.md)
 
+![Tableau de bord d'usage et de coûts All Usage](assets/cover-en.png)
+
 ## Introduction
 
 Un tableau de bord complet de l'utilisation pour DeepSeek Harness. Analysez les tokens, le comportement du cache, le coût estimé, le solde du compte et l'activité par modèle, fournisseur, espace de travail et plage de dates.

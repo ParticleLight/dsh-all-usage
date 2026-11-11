@@ -12,6 +12,8 @@
 
 [中文](README.md) · [English](README.en.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Русский](README.ru.md) · [Português](README.pt.md)
 
+![All Usage Nutzungs- und Kosten-Dashboard](assets/cover-en.png)
+
 ## Einleitung
 
 Ein vollständiges Nutzungs-Dashboard für DeepSeek Harness. Analysiert Token, Cache-Verhalten, geschätzte Kosten, Kontostand und Aktivität nach Modell, Anbieter, Workspace und Zeitraum.

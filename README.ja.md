@@ -12,6 +12,8 @@
 
 [中文](README.md) · [English](README.en.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Русский](README.ru.md) · [Português](README.pt.md)
 
+![All Usage 使用量とコストのダッシュボード](assets/cover-en.png)
+
 ## はじめに
 
 DeepSeek Harness のための包括的な使用量ダッシュボードです。Token、キャッシュの挙動、推定コスト、アカウント残高、そしてモデル・プロバイダー・ワークスペース・期間ごとのアクティビティを分析できます。
