@@ -139,7 +139,7 @@ test('declares every theme token for the light sheet and repeats it for the dark
   assert.equal(series.length, 7, 'the trend chart paints 7 series (total, input, cache read, cache write, output, reasoning, other), found: ' + series.join(', '))
   const donut = tokenNames.filter((name) => /^--uh-donut-[1-6]$/.test(name))
   assert.equal(donut.length, 6, 'the donut paints 6 segments, found: ' + donut.join(', '))
-  const scalars = ['--uh-heat', '--uh-cell-empty', '--uh-scrim', '--uh-dialog-shadow', '--uh-scrollbar-thumb', '--uh-scrollbar-track']
+  const scalars = ['--uh-heat', '--uh-today', '--uh-cell-empty', '--uh-scrim', '--uh-dialog-shadow', '--uh-scrollbar-thumb', '--uh-scrollbar-track']
   const missingScalars = scalars.filter((name) => !tokens.has(name))
   assert.equal(missingScalars.length, 0, 'these non-series tokens are missing from the theme layer: ' + missingScalars.join(', '))
 })

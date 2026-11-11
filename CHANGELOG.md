@@ -8,6 +8,7 @@
 - **旧记录可以压缩归档** —— 手动执行 `npm run ledger:archive -- --root <数据目录> --older-than-days 90 --apply` 把更早的会话压成按月 gzip，总量、明细与筛选结果不变；不加 `--apply` 只打印计划。默认不归档。
 - **归档也能在面板里做** —— 「数据维护」按钮先出计划（条数、涉及月份、压缩前后大小），再点「开始归档」并二次确认才真正写入；动手前提示一句：归档后的记录仍能查看与统计，但一个月的记录第一次被读时要解压整月文件，之后常驻内存。与 CLI 共用同一把维护锁，另一个 DSH 进程正在维护时面板提示稍后再试。
 ### 修复
+- **热力图的「今天」改成绿色描边** —— 高亮环不再和热力格子同样偏蓝，一眼能分出哪一格是今天。
 - **两个 DSH 进程共用一个数据目录时可能丢历史** —— 启动迁移与旧文件清理现在共用一把跨进程锁；抢不到锁的进程只读不删，留到下一次启动再完成。
 - **宿主使用插件未内置的界面语言时，面板被浏览器语言带偏** —— 现在跟随宿主回落到英文，与 DSH 自己的回落一致。
 ### Features
@@ -17,6 +18,7 @@
 - **Old records can be archived** — run `npm run ledger:archive -- --root <data folder> --older-than-days 90 --apply` to fold older sessions into monthly gzip files; totals, detail and filters stay identical, and without `--apply` it only prints the plan. Nothing is archived by default.
 - **Archiving from the panel too** — the Maintenance button plans first (records, months, size before and after compression), and only Start archiving plus a second confirmation writes; before you act it notes that archived records stay readable and countable, but the first read of a month unpacks the whole month file and afterwards it stays in memory, and it takes the same maintenance lock as the CLI, so a panel blocked by another DSH process asks you to try again in a moment.
 ### Fixes
+- **Today's heatmap cell now wears a green ring** — the highlight no longer blends into the blue heat cells, so the current day stands out at a glance.
 - **Two DSH processes sharing one data folder could lose history** — startup migration and legacy-file cleanup now share one cross-process lock; a process that cannot take it reads only, and the next start finishes the job.
 - **A host language the panel does not ship used to fall back to the browser language** — it now falls back to English, the same place DSH itself falls back to.
 

@@ -2796,6 +2796,7 @@ window.__ModuleLoader__.load({
   --uh-donut-6:#0d7b93;
   --uh-donut-track:color-mix(in srgb, var(--dsw-alias-label-primary) 9%, var(--dsw-alias-bg-layer-2));
   --uh-heat:#0969da;
+  --uh-today:#17703a;
   --uh-cell-empty:color-mix(in srgb, var(--dsw-alias-label-primary) 7%, var(--dsw-alias-bg-layer-2));
   --uh-scrim:var(--dsw-alias-bg-mask-1, rgba(0,0,0,.24));
   --uh-dialog-shadow:0 -10px 44px rgba(0,0,0,.12);
@@ -2820,6 +2821,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
   --uh-donut-6:#64d2ff;
   --uh-donut-track:var(--dsw-alias-bg-layer-2);
   --uh-heat:#0969da;
+  --uh-today:#44d483;
   --uh-cell-empty:var(--dsw-alias-bg-layer-2);
   --uh-scrim:rgba(0,0,0,.34);
   --uh-dialog-shadow:0 -10px 44px rgba(0,0,0,.25);
@@ -3205,7 +3207,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
 .uh-grid { flex:1 1 auto; min-width:686px; display:grid; grid-auto-flow:column; grid-template-columns:repeat(53,minmax(10px,1fr)); grid-template-rows:repeat(7,minmax(10px,auto)); gap:3px; }
 .uh-cell { width:100%; height:auto; min-width:10px; aspect-ratio:1; border-radius:2px; background:var(--dsw-alias-bg-layer-2); animation:uh-cell-in .45s ease both; transition:transform .12s ease, box-shadow .12s ease; }
 .uh-cell:hover { transform:scale(1.35); box-shadow:0 1px 6px rgba(0,0,0,.28); position:relative; z-index:2; }
-.uh-cell.uh-today { box-shadow:0 0 0 2px rgba(9,105,218,.5); }
+.uh-cell.uh-today { box-shadow:0 0 0 2px var(--uh-today); }
 .uh-tip { position:fixed; z-index:1200; background:var(--dsw-alias-bg-overlay); border:1px solid var(--dsw-alias-border-l2); border-radius:10px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.18); pointer-events:auto; min-width:200px; max-width:290px; animation:uh-tip-in .16s ease both; }
 .uh-tip-date { font-size:12px; font-weight:600; color:var(--dsw-alias-label-primary); margin-bottom:6px; }
 .uh-tip-row { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--dsw-alias-label-primary); padding:3px 6px; margin:0 -6px; border-radius:6px; cursor:pointer; transition:background-color .12s ease; }

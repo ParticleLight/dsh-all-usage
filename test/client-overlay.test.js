@@ -288,7 +288,7 @@ test('the dashboard leaves no always-on paint work behind', () => {
   for (const prefix of ['.uh-head { position:sticky', '.uh-trend-tooltip { position:absolute', '.uh-donut-tooltip { position:absolute']) {
     assert.doesNotMatch(ruleAt(prefix), /backdrop-filter/, 'no per-frame backdrop blur: ' + prefix)
   }
-  assert.ok(source.includes('.uh-cell.uh-today { box-shadow:0 0 0 2px rgba(9,105,218,.5); }'), 'today keeps a static ring instead of a pulse')
+  assert.ok(source.includes('.uh-cell.uh-today { box-shadow:0 0 0 2px var(--uh-today); }'), 'today keeps a static ring instead of a pulse')
   assert.ok(source.includes("const cellClass = cell.date === props.todayKey ? 'uh-cell uh-today' : 'uh-cell'"), 'only today wears the ring')
   assert.equal(source.includes('uh-glow'), false, 'the endless box-shadow keyframes must be gone')
   assert.equal((source.match(/infinite/g) || []).length, 1, 'the spinner is the only endless animation left')
