@@ -10,7 +10,7 @@
 [![DSH runtime compatibility](https://img.shields.io/badge/DSH%20runtime-11%20verified-4D6BFE)](#兼容性与已知限制)
 [![status](https://img.shields.io/badge/status-stable-brightgreen)](https://github.com/ParticleLight/dsh-all-usage/releases)
 
-[中文](README.md) · [English](README.en.md)
+[中文](README.md) · [English](README.en.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Русский](README.ru.md) · [Português](README.pt.md)
 
 ## 简介
 
@@ -48,7 +48,11 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 逐日的折线 / 柱状两种视图，点击数据点查看当日明细。区间拉长后自动降采样到 3 天一点，再按需要扩到周、月、季、年，单图最多 180 个点。
 
-![用量趋势](assets/screenshots/zh/02-trend.png)
+![用量趋势（折线）](assets/screenshots/zh/02-trend.png)
+
+同一份数据切成柱状后，单日的高低与占比更直观，悬停提示与明细不变。
+
+![用量趋势（柱状）](assets/screenshots/zh/02-trend-bars.png)
 
 ### 使用热力图
 
@@ -74,7 +78,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 ![成本设置](assets/screenshots/zh/06-cost-settings.png)
 
-### 数据维护（v1.2.4 起）
+### 数据维护
 
 把久未更新的会话记录压成按月压缩包：先预览受影响的记录数、体积与月份，确认后才执行；归档后的记录仍然可以查看与统计。
 

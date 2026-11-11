@@ -10,7 +10,7 @@
 [![DSH runtime compatibility](https://img.shields.io/badge/DSH%20runtime-11%20verified-4D6BFE)](#compatibility-and-known-limitations)
 [![status](https://img.shields.io/badge/status-stable-brightgreen)](https://github.com/ParticleLight/dsh-all-usage/releases)
 
-[中文](README.md) · [English](README.en.md)
+[中文](README.md) · [English](README.en.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Русский](README.ru.md) · [Português](README.pt.md)
 
 ## Introduction
 
@@ -48,7 +48,11 @@ The header holds the version status and the tools (workspace aliases, cost setti
 
 A per-day trend in line or bar form; click a data point to read that day. Long ranges are downsampled to three-day points and then to weeks, months, quarters, or years, capped at 180 points per chart.
 
-![Usage trend](assets/screenshots/en/02-trend.png)
+![Usage trend (line)](assets/screenshots/en/02-trend.png)
+
+Switched to bars, the same data reads per day, with the same hover card and day detail.
+
+![Usage trend (bars)](assets/screenshots/en/02-trend-bars.png)
 
 ### Usage heatmap
 
@@ -74,7 +78,7 @@ Cost is estimated across four token buckets: official model mapping, manual pric
 
 ![Cost settings](assets/screenshots/en/06-cost-settings.png)
 
-### Maintenance (v1.2.4 and later)
+### Maintenance
 
 Sessions that have not changed for a while fold into monthly compressed files: preview the affected records, size, and months first, and only then run it; archived records stay readable and countable.
 
