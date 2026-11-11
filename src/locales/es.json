@@ -414,5 +414,14 @@
   "Start archiving": "Iniciar archivado",
   "Archive {count} records? They stay readable in the panel, but this cannot be undone.": "¿Archivar {count} registros? Seguirán siendo legibles en el panel, pero esto no se puede deshacer.",
   "Yes, archive": "Sí, archivar",
-  "Archive old records": "Archivar registros antiguos"
+  "Archive old records": "Archivar registros antiguos",
+  "What it costs": "Lo que cuesta",
+  "No undo": "No se puede deshacer",
+  "The hot documents are deleted and there is no undo and no restore command; if you want a way back, copy the data folder before you run.": "Los documentos de la zona caliente se eliminan y no hay deshacer ni comando de restauración; si quieres un camino de vuelta, copia la carpeta de datos antes de ejecutar.",
+  "Slower reads": "Lecturas más lentas",
+  "Archived records stay readable and countable, but the first read of a month unpacks the whole month file, and it stays in memory afterwards.": "Los registros archivados se pueden leer y contar, pero la primera lectura de un mes descomprime todo el archivo mensual, y este permanece en memoria después.",
+  "One copy": "Una sola copia",
+  "After the run those records live only in the archive folder of the data directory as monthly gzip files, and a damaged month is treated as missing.": "Tras la ejecución, esos registros solo existen como archivos gzip mensuales en la carpeta archive del directorio de datos, y un mes dañado se trata como ausente.",
+  "Ledger lock": "Bloqueo del registro",
+  "While the run is in flight, another DSH process is held out by the maintenance lock and has to try again in a moment.": "Mientras la ejecución está en curso, el bloqueo de mantenimiento deja fuera a otro proceso de DSH, que tendrá que intentarlo de nuevo en un momento."
 }

@@ -414,5 +414,14 @@
   "Start archiving": "Начать архивацию",
   "Archive {count} records? They stay readable in the panel, but this cannot be undone.": "Архивировать {count} записей? Они останутся доступными в панели, но это действие нельзя отменить.",
   "Yes, archive": "Да, архивировать",
-  "Archive old records": "Архивировать старые записи"
+  "Archive old records": "Архивировать старые записи",
+  "What it costs": "Чего это стоит",
+  "No undo": "Отменить нельзя",
+  "The hot documents are deleted and there is no undo and no restore command; if you want a way back, copy the data folder before you run.": "Документы горячей зоны удаляются, отмены и команды восстановления нет; если нужен путь назад, перед запуском скопируйте каталог данных.",
+  "Slower reads": "Чтение медленнее",
+  "Archived records stay readable and countable, but the first read of a month unpacks the whole month file, and it stays in memory afterwards.": "Архивные записи остаются доступными для чтения и подсчёта, но при первом чтении месяца распаковывается весь файл месяца и остаётся в памяти.",
+  "One copy": "Одна копия",
+  "After the run those records live only in the archive folder of the data directory as monthly gzip files, and a damaged month is treated as missing.": "После запуска эти записи остаются только в виде помесячных gzip-файлов в папке archive каталога данных, а повреждённый месяц считается отсутствующим.",
+  "Ledger lock": "Блокировка реестра",
+  "While the run is in flight, another DSH process is held out by the maintenance lock and has to try again in a moment.": "Пока выполнение идёт, другой процесс DSH удерживается блокировкой обслуживания и должен повторить попытку через минуту."
 }

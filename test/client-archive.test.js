@@ -292,3 +292,57 @@ test('renders the maintenance panel in the page flow, not in a dialog', () => {
   assert.ok(source.includes("className: 'uh-panel uh-archive-panel uh-anim-panel'"), 'the panel reuses the shared panel classes')
   assert.ok(source.includes("React.createElement(LineIcon, { name: 'cache', size: 16 })"), 'the panel head carries the cache mark')
 })
+
+// The panel used to offer a button before saying what it costs. Four consequences are
+// now printed above the controls, and the wording is pinned here: the dictionaries are
+// keyed by the English sentence, so a reworded line would silently lose its translation.
+const COST_LINES = [
+  ['不可撤销', 'No undo'],
+  ['热区的原文档会被删除，面板没有撤销，也没有还原命令；要留退路就在执行前把数据目录整体拷走。', 'The hot documents are deleted and there is no undo and no restore command; if you want a way back, copy the data folder before you run.'],
+  ['读取变慢', 'Slower reads'],
+  ['归档后的记录仍能查看与统计，但一个月的记录第一次被读时要解压整月文件，之后常驻内存。', 'Archived records stay readable and countable, but the first read of a month unpacks the whole month file, and it stays in memory afterwards.'],
+  ['单份副本', 'One copy'],
+  ['归档后这些记录只存在于数据目录的 archive 文件夹（按月 gzip），月文件损坏时该月记录按缺失处理。', 'After the run those records live only in the archive folder of the data directory as monthly gzip files, and a damaged month is treated as missing.'],
+  ['独占账本', 'Ledger lock'],
+  ['归档期间另一个 DSH 进程会被维护锁挡在外面，需要稍后再试。', 'While the run is in flight, another DSH process is held out by the maintenance lock and has to try again in a moment.'],
+]
+
+test('says what an archive costs before the reader can start one', () => {
+  const panelAt = source.indexOf('      const archivePanel = archiveOpen ?')
+  const panelEnd = source.indexOf('\n      ) : null', panelAt)
+  const noteAt = source.indexOf("className: 'uh-archive-note'")
+  const costAt = source.indexOf("className: 'uh-archive-cost'")
+  const controlsAt = source.indexOf("className: 'uh-archive-controls'")
+  assert.ok(panelAt > 0 && panelEnd > panelAt, 'the panel definition must exist as one statement')
+  assert.ok(noteAt > panelAt && costAt > noteAt, 'the cost block follows the note')
+  assert.ok(controlsAt > costAt && controlsAt < panelEnd, 'the cost block sits before any button')
+
+  // Title, then four labelled rows in the order the reader should take them in.
+  assert.ok(source.includes("tr('代价', 'What it costs')"), 'the block carries its title')
+  const costSlice = source.slice(costAt, controlsAt)
+  assert.ok(costSlice.includes("React.createElement('ul', { className: 'uh-archive-cost-list' }"), 'the four rows are one list')
+  assert.equal((source.match(/'uh-archive-cost-row'/g) || []).length, 4, 'exactly four cost rows')
+  for (const [zh, en] of COST_LINES) {
+    assert.ok(costSlice.includes("tr('" + zh + "', '" + en + "')"), 'the cost line must keep its exact wording: ' + en)
+  }
+  // Nothing about the cost may be built at runtime: the collector keys on the English
+  // literal, and the dictionaries are written from the same list.
+  assert.ok(!/pick\(language, '[^']*' \+/.test(costSlice), 'the cost lines are literals, not concatenations')
+})
+
+test('styles the cost block as a small note card, not a warning banner', () => {
+  for (const selector of ['.uh-archive-cost', '.uh-archive-cost-title', '.uh-archive-cost-list', '.uh-archive-cost-row', '.uh-archive-cost-label', '.uh-archive-cost-text']) {
+    assert.ok(source.includes(selector + ' {'), 'the stylesheet must declare ' + selector)
+  }
+  const rules = source.split(/\r?\n/).filter((line) => line.startsWith('.uh-archive-cost'))
+  const listRule = rules.find((line) => line.startsWith('.uh-archive-cost-list {'))
+  assert.ok(listRule.includes('list-style:none'), 'the semantic list drops its markers')
+  const rowRule = rules.find((line) => line.startsWith('.uh-archive-cost-row {'))
+  assert.ok(rowRule.includes('flex-wrap:wrap'), 'a narrow panel wraps the sentence under its label instead of breaking a word')
+  // No warning colour and no new theme token: this is an explanation, not an alarm, and
+  // the light/dark split keeps coming from the host tokens for free.
+  for (const line of rules) {
+    assert.ok(!/#[0-9a-f]{3,8}/i.test(line), 'the cost card paints through the host tokens only: ' + line)
+    assert.ok(!line.includes('--uh-'), 'the cost card declares no new theme token: ' + line)
+  }
+})

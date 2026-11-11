@@ -2960,6 +2960,12 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
 .uh-archive-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .uh-archive-result { color:var(--dsw-alias-label-secondary); font-size:12px; line-height:1.45; }
 .uh-archive-error { color:var(--dsw-alias-warning, #a55b00); font-size:12px; line-height:1.45; }
+.uh-archive-cost { display:flex; flex-direction:column; gap:6px; padding:10px 12px; border:1px solid var(--dsw-alias-border-l1); border-radius:8px; background:var(--dsw-alias-bg-layer-2); }
+.uh-archive-cost-title { color:var(--dsw-alias-label-primary); font-size:12px; font-weight:600; }
+.uh-archive-cost-list { display:flex; flex-direction:column; gap:5px; margin:0; padding:0; list-style:none; }
+.uh-archive-cost-row { display:flex; align-items:baseline; flex-wrap:wrap; gap:2px 8px; min-width:0; font-size:11px; line-height:1.55; }
+.uh-archive-cost-label { flex:none; color:var(--dsw-alias-label-primary); font-weight:650; }
+.uh-archive-cost-text { flex:1 1 200px; min-width:0; color:var(--dsw-alias-label-secondary); }
 
 .uh-pricing-table-note { color:var(--dsw-alias-label-secondary); font-size:11px; line-height:1.5; }
 .uh-pricing-price-table { width:100%; min-width:0; }
@@ -5362,6 +5368,29 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
           React.createElement('button', { type: 'button', className: 'uh-refresh uh-icon-button', title: tr('关闭数据维护', 'Close maintenance'), 'aria-label': tr('关闭数据维护', 'Close maintenance'), disabled: archiveBusy, onClick: closeArchivePanel }, React.createElement(LineIcon, { name: 'close', size: 16 })),
         ),
         React.createElement('div', { className: 'uh-archive-note' }, tr('把久未更新的会话记录压成按月的压缩包。面板里的总量、明细与筛选都不变，归档后的记录仍然可以查看。', 'Sessions that have not changed for a while are folded into monthly compressed files. Totals, detail and filters stay the same, and archived records remain readable.')),
+        // The cost comes before the button: the four consequences the archive ADR
+        // names, so nobody starts a run without knowing what it takes.
+        React.createElement('div', { className: 'uh-archive-cost' },
+          React.createElement('div', { className: 'uh-archive-cost-title' }, tr('代价', 'What it costs')),
+          React.createElement('ul', { className: 'uh-archive-cost-list' },
+            React.createElement('li', { className: 'uh-archive-cost-row' },
+              React.createElement('strong', { className: 'uh-archive-cost-label' }, tr('不可撤销', 'No undo')),
+              React.createElement('span', { className: 'uh-archive-cost-text' }, tr('热区的原文档会被删除，面板没有撤销，也没有还原命令；要留退路就在执行前把数据目录整体拷走。', 'The hot documents are deleted and there is no undo and no restore command; if you want a way back, copy the data folder before you run.')),
+            ),
+            React.createElement('li', { className: 'uh-archive-cost-row' },
+              React.createElement('strong', { className: 'uh-archive-cost-label' }, tr('读取变慢', 'Slower reads')),
+              React.createElement('span', { className: 'uh-archive-cost-text' }, tr('归档后的记录仍能查看与统计，但一个月的记录第一次被读时要解压整月文件，之后常驻内存。', 'Archived records stay readable and countable, but the first read of a month unpacks the whole month file, and it stays in memory afterwards.')),
+            ),
+            React.createElement('li', { className: 'uh-archive-cost-row' },
+              React.createElement('strong', { className: 'uh-archive-cost-label' }, tr('单份副本', 'One copy')),
+              React.createElement('span', { className: 'uh-archive-cost-text' }, tr('归档后这些记录只存在于数据目录的 archive 文件夹（按月 gzip），月文件损坏时该月记录按缺失处理。', 'After the run those records live only in the archive folder of the data directory as monthly gzip files, and a damaged month is treated as missing.')),
+            ),
+            React.createElement('li', { className: 'uh-archive-cost-row' },
+              React.createElement('strong', { className: 'uh-archive-cost-label' }, tr('独占账本', 'Ledger lock')),
+              React.createElement('span', { className: 'uh-archive-cost-text' }, tr('归档期间另一个 DSH 进程会被维护锁挡在外面，需要稍后再试。', 'While the run is in flight, another DSH process is held out by the maintenance lock and has to try again in a moment.')),
+            ),
+          ),
+        ),
         React.createElement('div', { className: 'uh-archive-controls' },
           React.createElement('label', { className: 'uh-archive-days' },
             React.createElement('span', {}, tr('归档超过', 'Archive records older than')),
