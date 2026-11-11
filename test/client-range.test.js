@@ -851,6 +851,24 @@ test('stretches the weekday column to the height of the heatmap grid', () => {
   }
 })
 
+test('keeps room around the heatmap grid so the today ring is never clipped', () => {
+  // The ring is a 2px box-shadow painted outside the cell box. The grid spans the full
+  // width of the scroll container, so a ring on today in the last column (always the
+  // case in the 12-month span) lost its right edge to overflow-x:auto. The container
+  // has to leave that 2px on every painted side.
+  const bodies = cssRuleBodies('.uh-hm-scroll')
+  assert.ok(bodies.length > 0, '.uh-hm-scroll rule is missing: the heatmap lost its scroll container')
+  for (const side of ['padding-top', 'padding-right', 'padding-bottom', 'padding-left']) {
+    const values = cssDeclarations(bodies, side)
+    assert.ok(values.length > 0, '.uh-hm-scroll must declare ' + side + ' so the today ring has room outside the grid')
+    for (const value of values) {
+      const px = Number(String(value).replace(/px$/, ''))
+      assert.ok(Number.isFinite(px) && px >= 2, '.uh-hm-scroll ' + side + ' must leave at least 2px, the ring width, got: ' + value)
+    }
+  }
+  assert.ok(source.includes('.uh-cell.uh-today { box-shadow:0 0 0 2px var(--uh-today); }'), 'today ring width and this guard must move together')
+})
+
 test('centres each weekday label in its row instead of pinning a line height', () => {
   const bodies = cssRuleBodies('.uh-wdays span')
   assert.ok(bodies.length > 0, '.uh-wdays span rule is missing: the weekday labels lost their styles')

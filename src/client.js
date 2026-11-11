@@ -3198,7 +3198,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
 .uh-dot { width:8px; height:8px; border-radius:50%; flex:none; }
 .uh-legend { display:flex; align-items:center; gap:4px; font-size:11px; color:var(--dsw-alias-label-secondary); }
 .uh-legend .uh-cell { width:10px; height:10px; border-radius:2px; animation:none; }
-.uh-hm-scroll { overflow-x:auto; padding-bottom:2px; }
+.uh-hm-scroll { overflow-x:auto; padding-top:2px; padding-right:2px; padding-bottom:3px; padding-left:2px; }
 .uh-months { position:relative; height:16px; margin-left:30px; width:calc(100% - 30px); min-width:686px; font-size:10px; color:var(--dsw-alias-label-secondary); }
 .uh-months span { position:absolute; top:0; }
 .uh-hm-body { display:flex; gap:6px; min-width:0; align-items:stretch; }
