@@ -34,21 +34,51 @@ The installation command assembles the bundle. Usually, refreshing the browser p
 - **Sync complete history incrementally**: scan readable sessions, reuse unchanged per-session ledger data using persisted revisions, read only changed logs, and follow DSH workspace-registry changes.
 - **Audit routine operation**: inspect scan health, reads, ledger restores, and failures; switch interface language, manage workspace aliases, and check the running plugin version.
 
-## Screenshots
+## Interface Tour
+
+These screenshots were captured on 2026-11-11 from a running install (host 1.2.3 with the 1.2.4 client): Chinese and English interfaces, dark theme. The usage and workspace data shown belong to that capture environment.
+
+### Dashboard overview
+
+The header holds the version status and the tools (workspace aliases, cost settings, maintenance, interface language); below it are the time range (Today / Last 7 Days / Last 30 Days / Last 90 Days / This Month / All Time / Custom) and the workspace, provider, and model filters. The hero card gives the token total, request count, and estimated cost for the range, followed by account balance, total uses, current streak, workspace distribution, and cache hit rate.
 
 ![Dashboard overview](assets/screenshots/en/01-overview.png)
 
-![Token usage trend as stacked bars (Line / Bars toggle)](assets/screenshots/en/02-trend-bars.png)
+### Usage trend
+
+A per-day trend in line or bar form; click a data point to read that day. Long ranges are downsampled to three-day points and then to weeks, months, quarters, or years, capped at 180 points per chart.
+
+![Usage trend](assets/screenshots/en/02-trend.png)
+
+### Usage heatmap
+
+Three spans — 30 days, 90 days, and 12 months — with weekdays aligned per row and colour depth showing the token volume of each day.
 
 ![Usage heatmap](assets/screenshots/en/03-heatmap.png)
 
-![Model usage](assets/screenshots/en/04-model-usage.png)
+### Model and workspace stats
 
-![Request logs and audit](assets/screenshots/en/05-request-logs.png)
+The detail area offers request logs, model stats, and workspace stats. Model stats can merge by combined view, by model, or by provider, with calls, input, cache hits, output, reasoning, total, cost, and hit rate per row; workspace stats aggregate per workspace and honour your aliases.
+
+![Model stats](assets/screenshots/en/04-model-stats.png)
+
+### Request logs
+
+Each request is listed newest first with its model, tokens, and cost, and the current filtered view exports to CSV; audit counters such as revision reuse, reads, and ledger restores sit in the sync line at the top of the page.
+
+![Request logs](assets/screenshots/en/05-request-logs.png)
+
+### Cost settings
+
+Cost is estimated across four token buckets: official model mapping, manual prices, context tiers, and peak windows, plus an account balance lookup.
 
 ![Cost settings](assets/screenshots/en/06-cost-settings.png)
 
-The first five screenshots above were captured on 2026-10-14 from the v1.2.0 client UI; the host plugin shown is v1.1.18. The bar trend view was captured on 2026-11-07 from the v1.2.1 client and shows the Line / Bars toggle added in 1.2.2. The live usage and workspace data belong to that capture environment, and the version-mismatch warning in Cost settings is intentionally preserved.
+### Maintenance (v1.2.4 and later)
+
+Sessions that have not changed for a while fold into monthly compressed files: preview the affected records, size, and months first, and only then run it; archived records stay readable and countable.
+
+![Maintenance](assets/screenshots/en/07-maintenance.png)
 
 ## Technology Stack and Architecture
 

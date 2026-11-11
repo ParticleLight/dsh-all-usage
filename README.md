@@ -34,21 +34,51 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - **完整历史与增量同步**：首次扫描可读会话，后续按会话账本与持久化 revision 复用未变化数据，只增量读取变化，并跟随 DSH 工作区注册表更新。
 - **可审计的日常操作**：显示扫描健康、实际读取、账本恢复和失败状态；支持中英文界面切换、工作区别名及版本状态提示。
 
-## 截图
+## 界面导览
 
-![dsh-all-usage 看板总览](assets/screenshots/zh/01-overview.png)
+以下截图取自 2026-11-11 运行中的界面（宿主 1.2.3 + 客户端 1.2.4）：中文界面、深色主题，图中的用量与工作区数据属于该截图环境。
 
-![dsh-all-usage 柱状趋势视图（折线 / 柱状可切换）](assets/screenshots/zh/02-trend-bars.png)
+### 看板总览
 
-![dsh-all-usage 使用热力图](assets/screenshots/zh/03-heatmap.png)
+顶部是版本状态与工具入口（工作区别名、成本设置、数据维护、界面语言），下面是时间范围（今日 / 近 7 天 / 近 30 天 / 近 90 天 / 当月 / 全部 / 自定义）与工作区、供应商、模型三个筛选器。主卡给出区间内的 Token 总量、请求数和估算成本，下方是账户余额、总用量、连续使用、工作区分布与缓存命中率。
 
-![dsh-all-usage 模型用量](assets/screenshots/zh/04-model-usage.png)
+![看板总览](assets/screenshots/zh/01-overview.png)
 
-![dsh-all-usage 请求日志与审计](assets/screenshots/zh/05-request-logs.png)
+### 用量趋势
 
-![dsh-all-usage 成本设置](assets/screenshots/zh/06-cost-settings.png)
+逐日的折线 / 柱状两种视图，点击数据点查看当日明细。区间拉长后自动降采样到 3 天一点，再按需要扩到周、月、季、年，单图最多 180 个点。
 
-以上六张截图中，前五张于 2026-10-14 从 v1.2.0 客户端界面截取，图中宿主插件版本为 v1.1.18；柱状趋势视图截于 2026-11-07（v1.2.1 客户端，展示 1.2.2 新增的折线 / 柱状切换）。图中的实际用量与工作区数据属于该截图环境；成本设置中的版本不一致警告为有意保留。
+![用量趋势](assets/screenshots/zh/02-trend.png)
+
+### 使用热力图
+
+30 天 / 90 天 / 12 个月三档，按星期对齐成行，颜色深浅是当天的 Token 量。
+
+![使用热力图](assets/screenshots/zh/03-heatmap.png)
+
+### 模型与工作区统计
+
+详情区分请求日志、模型统计、工作区统计三个视图。模型视图支持混合、按模型合并、按供应商三种归并方式，表格列出调用次数、输入、缓存命中、输出、推理、总量、成本与命中率；工作区视图按工作区聚合，工作区别名会直接生效。
+
+![模型统计](assets/screenshots/zh/04-model-stats.png)
+
+### 请求日志
+
+按时间倒序分页列出每条请求的模型、Token 与成本，可把当前筛选结果导出为 CSV；复用、读取、账本恢复等审计信息显示在页面顶部的同步状态行。
+
+![请求日志](assets/screenshots/zh/05-request-logs.png)
+
+### 成本设置
+
+按四类 Token 桶估算成本：官方模型映射、手工价格、上下文档位、峰谷时段，并可查询账户余额。
+
+![成本设置](assets/screenshots/zh/06-cost-settings.png)
+
+### 数据维护（v1.2.4 起）
+
+把久未更新的会话记录压成按月压缩包：先预览受影响的记录数、体积与月份，确认后才执行；归档后的记录仍然可以查看与统计。
+
+![数据维护](assets/screenshots/zh/07-maintenance.png)
 
 ## 技术栈与架构
 
