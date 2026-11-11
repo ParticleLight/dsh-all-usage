@@ -415,5 +415,6 @@
   "Archive {count} records? They stay readable in the panel, but this cannot be undone.": "¿Archivar {count} registros? Seguirán siendo legibles en el panel, pero esto no se puede deshacer.",
   "Yes, archive": "Sí, archivar",
   "Archive old records": "Archivar registros antiguos",
-  "Note: archived records stay readable and countable, but the first read of a month unpacks the whole month file, so the first start is slower; afterwards it stays in memory.": "Nota: los registros archivados se pueden leer y contar, pero la primera lectura de un mes descomprime todo el archivo mensual, así que el primer arranque es más lento; después permanece en memoria."
+  "Note: archived records stay readable and countable, but the first read of a month unpacks the whole month file, so the first start is slower; afterwards it stays in memory.": "Nota: los registros archivados se pueden leer y contar, pero la primera lectura de un mes descomprime todo el archivo mensual, así que el primer arranque es más lento; después permanece en memoria.",
+  "This Month": "Este mes"
 }

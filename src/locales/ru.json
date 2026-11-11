@@ -415,5 +415,6 @@
   "Archive {count} records? They stay readable in the panel, but this cannot be undone.": "Архивировать {count} записей? Они останутся доступными в панели, но это действие нельзя отменить.",
   "Yes, archive": "Да, архивировать",
   "Archive old records": "Архивировать старые записи",
-  "Note: archived records stay readable and countable, but the first read of a month unpacks the whole month file, so the first start is slower; afterwards it stays in memory.": "Примечание: архивные записи остаются доступными для чтения и подсчёта, но при первом чтении месяца распаковывается весь файл месяца, поэтому первый запуск идёт медленнее; затем он остаётся в памяти."
+  "Note: archived records stay readable and countable, but the first read of a month unpacks the whole month file, so the first start is slower; afterwards it stays in memory.": "Примечание: архивные записи остаются доступными для чтения и подсчёта, но при первом чтении месяца распаковывается весь файл месяца, поэтому первый запуск идёт медленнее; затем он остаётся в памяти.",
+  "This Month": "Этот месяц"
 }

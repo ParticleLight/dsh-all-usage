@@ -415,5 +415,6 @@
   "Archive {count} records? They stay readable in the panel, but this cannot be undone.": "{count} 件の記録をアーカイブしますか？パネルでは引き続き閲覧できますが、この操作は元に戻せません。",
   "Yes, archive": "はい、アーカイブする",
   "Archive old records": "古い記録をアーカイブ",
-  "Note: archived records stay readable and countable, but the first read of a month unpacks the whole month file, so the first start is slower; afterwards it stays in memory.": "注意：アーカイブした記録は引き続き閲覧・集計できますが、ある月を最初に読むときに月ファイル全体が解凍されるため、初回の起動が遅くなります。その後はメモリに残ります。"
+  "Note: archived records stay readable and countable, but the first read of a month unpacks the whole month file, so the first start is slower; afterwards it stays in memory.": "注意：アーカイブした記録は引き続き閲覧・集計できますが、ある月を最初に読むときに月ファイル全体が解凍されるため、初回の起動が遅くなります。その後はメモリに残ります。",
+  "This Month": "今月"
 }

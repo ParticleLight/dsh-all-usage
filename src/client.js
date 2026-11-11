@@ -178,6 +178,10 @@ window.__ModuleLoader__.load({
       if (utc) return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + days))
       return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days)
     }
+    function startOfCalendarMonth(now, utc) {
+      const d = now instanceof Date ? now : new Date()
+      return utc ? new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)) : new Date(d.getFullYear(), d.getMonth(), 1)
+    }
     function isCalendarDate(value, utc) {
       if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
       const year = Number(value.slice(0, 4))
@@ -1510,6 +1514,8 @@ window.__ModuleLoader__.load({
         start = fmtDate(shiftCalendarDate(new Date(), -6, utc), utc)
       } else if (range === '30d') {
         start = fmtDate(shiftCalendarDate(new Date(), -29, utc), utc)
+      } else if (range === 'month') {
+        start = fmtDate(startOfCalendarMonth(new Date(), utc), utc)
       } else {
         start = fmtDate(shiftCalendarDate(new Date(), -89, utc), utc)
       }
@@ -1566,6 +1572,7 @@ window.__ModuleLoader__.load({
       if (range === '7d') return { start: fmtDate(shiftCalendarDate(new Date(), -6, utc), utc), end: latest }
       if (range === '30d') return { start: fmtDate(shiftCalendarDate(new Date(), -29, utc), utc), end: latest }
       if (range === '90d') return { start: fmtDate(shiftCalendarDate(new Date(), -89, utc), utc), end: latest }
+      if (range === 'month') return { start: fmtDate(startOfCalendarMonth(new Date(), utc), utc), end: latest }
       const bounds = availableDateBounds(days, latest)
       return { start: bounds.min, end: bounds.max }
     }
@@ -3663,7 +3670,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         const state = {}
         if (['logs', 'model', 'workspace'].includes(value.detailView)) state.detailView = value.detailView
         if (['route', 'model', 'provider'].includes(value.modelView)) state.modelView = value.modelView
-        if (['today', '7d', '30d', '90d', 'all'].includes(value.range)) state.range = value.range
+        if (['today', '7d', '30d', '90d', 'month', 'all'].includes(value.range)) state.range = value.range
         if (HEATMAP_SPAN_KEYS.includes(value.heatmapSpan)) state.heatmapSpan = value.heatmapSpan
         if (value.trendChart === 'bar' || value.trendChart === 'line') state.trendChart = value.trendChart
         if (typeof value.pricingAutoSync === 'boolean') state.pricingAutoSync = value.pricingAutoSync
@@ -5438,7 +5445,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       )
       const rangeLabel = range === 'custom' && activeCustomRange !== null
         ? (pickFormat(language, '{start} 至 {end}', '{start} to {end} (UTC)', { start: activeCustomRange.start, end: activeCustomRange.end }))
-        : range === 'today' ? tr('今日', 'Today') : range === '7d' ? tr('近 7 天', 'Last 7 Days') : range === '30d' ? tr('近 30 天', 'Last 30 Days') : range === '90d' ? tr('近 90 天', 'Last 90 Days') : tr('全部', 'All Time')
+        : range === 'today' ? tr('今日', 'Today') : range === '7d' ? tr('近 7 天', 'Last 7 Days') : range === '30d' ? tr('近 30 天', 'Last 30 Days') : range === '90d' ? tr('近 90 天', 'Last 90 Days') : range === 'month' ? tr('当月', 'This Month') : tr('全部', 'All Time')
       const rangeFilePart = rangeFilenamePart(range, activeCustomRange, useUtc)
       const customRangeErrorText = customDraftIssue === 'invalid'
         ? tr('请选择有效的开始日期和结束日期', 'Choose valid start and end dates')
@@ -5623,13 +5630,13 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
               ) : null,
             ),
             React.createElement('div', { className: 'uh-range' },
-              ['today', '7d', '30d', '90d', 'all', 'custom'].map((r) => React.createElement('button', {
+              ['today', '7d', '30d', '90d', 'month', 'all', 'custom'].map((r) => React.createElement('button', {
                 key: r,
                 type: 'button',
                 className: range === r ? 'uh-on' : '',
                 title: r === 'custom' && range === 'custom' ? rangeLabel : undefined,
                 onClick: () => { if (r === 'custom') openCustomRange(); else chooseRange(r) },
-              }, r === 'today' ? tr('今日', 'Today') : r === '7d' ? tr('近 7 天', 'Last 7 Days') : r === '30d' ? tr('近 30 天', 'Last 30 Days') : r === '90d' ? tr('近 90 天', 'Last 90 Days') : r === 'all' ? tr('全部', 'All Time') : tr('自定义', 'Custom'))),
+              }, r === 'today' ? tr('今日', 'Today') : r === '7d' ? tr('近 7 天', 'Last 7 Days') : r === '30d' ? tr('近 30 天', 'Last 30 Days') : r === '90d' ? tr('近 90 天', 'Last 90 Days') : r === 'month' ? tr('当月', 'This Month') : r === 'all' ? tr('全部', 'All Time') : tr('自定义', 'Custom'))),
             ),
             React.createElement('button', { className: 'uh-refresh', title: tr('导出当前时间范围与模型查看模式的 CSV 数据', 'Export CSV data for the current time range and model view'), onClick: exportCsv }, React.createElement(LineIcon, { name: 'export', size: 14 }), tr('导出数据', 'Export Data')),
             React.createElement('button', { className: 'uh-refresh uh-icon-button', title: tr('刷新统计数据', 'Refresh usage statistics'), 'aria-label': tr('刷新统计数据', 'Refresh usage statistics'), onClick: onRefresh }, React.createElement(LineIcon, { name: 'refresh', size: 16 })),

@@ -11,8 +11,8 @@ assert.notEqual(start, -1, 'client date helpers must exist')
 assert.notEqual(end, -1, 'client range helper boundary must exist')
 
 const context = {}
-vm.runInNewContext(localeHelperSource(source) + '\n' + source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, buildTrendBars, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate }', context)
-const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, buildTrendBars, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate } = context.__rangeHelpers
+vm.runInNewContext(localeHelperSource(source) + '\n' + source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, startOfCalendarMonth, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, buildTrendBars, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate }', context)
+const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, startOfCalendarMonth, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, buildTrendBars, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate } = context.__rangeHelpers
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
   return {
@@ -140,8 +140,49 @@ test('offers a seven-day range next to the existing presets', () => {
   // The neighbouring presets keep their own windows.
   assert.equal(resolveRangeBounds(stats, '30d', false, { start: '', end: '' }).start, keyFor(-29))
   assert.equal(resolveRangeBounds(stats, '90d', false, { start: '', end: '' }).start, keyFor(-89))
-  assert.match(source, /\['today', '7d', '30d', '90d', 'all', 'custom'\]/)
+  assert.match(source, /\['today', '7d', '30d', '90d', 'month', 'all', 'custom'\]/)
   assert.match(source, /range === '7d' \? tr\('近 7 天', 'Last 7 Days'\)/)
+})
+
+test('offers the current calendar month between the 90-day window and all time', () => {
+  const now = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  const localKey = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+  const utcKey = (d) => d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate())
+  const localStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const localBefore = new Date(now.getFullYear(), now.getMonth(), 0)
+  const utcStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+  const utcBefore = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0))
+
+  // The window opens on the first of the calendar month, not on today minus a count.
+  assert.equal(resolveRangeBounds({}, 'month', false, { start: '', end: '' }).start, localKey(localStart))
+  assert.equal(resolveRangeBounds({}, 'month', true, { start: '', end: '' }).start, utcKey(utcStart))
+  assert.equal(resolveRangeBounds({}, 'month', false, { start: '', end: '' }).end, localKey(now))
+  assert.equal(resolveRangeBounds({}, 'month', true, { start: '', end: '' }).end, utcKey(now))
+
+  // Rows on the first of the month and on today count; the last day of the previous
+  // month does not, in either calendar.
+  const localStats = {
+    byDay: [day(localKey(localStart), 1, 10), day(localKey(now), 2, 20), day(localKey(localBefore), 4, 40)],
+    byDayUtc: [],
+  }
+  const localScoped = rangeAgg(localStats, 'month', false, { start: '', end: '' })
+  assert.equal(localScoped.totals.turns, 3)
+  assert.equal(localScoped.totals.input, 30)
+  const utcStats = {
+    byDay: [],
+    byDayUtc: [day(utcKey(utcStart), 1, 10), day(utcKey(now), 2, 20), day(utcKey(utcBefore), 4, 40)],
+  }
+  const utcScoped = rangeAgg(utcStats, 'month', true, { start: '', end: '' })
+  assert.equal(utcScoped.totals.turns, 3)
+  assert.equal(utcScoped.totals.input, 30)
+
+  // The preset sits immediately before all time in the pill row, and both label chains
+  // know it; the stored-state whitelist keeps it across reloads.
+  assert.match(source, /\['today', '7d', '30d', '90d', 'month', 'all', 'custom'\]/)
+  assert.match(source, /: range === 'month' \? tr\('当月', 'This Month'\) : tr\('全部', 'All Time'\)/)
+  assert.equal((source.match(/'month' \? tr\('当月', 'This Month'\)/g) || []).length, 2)
+  assert.match(source, /if \(\['today', '7d', '30d', '90d', 'month', 'all'\]\.includes\(value\.range\)\)/)
 })
 
 test('builds a shorter heatmap calendar for a shorter span', () => {
