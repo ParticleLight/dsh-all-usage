@@ -101,7 +101,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 - **一个会话一条记录**：账本把每个会话写成独立文档（按 session ID 稳定 hash 到 32 个目录），一次更新只发布一个文件。实测同一份数据下，单次更新的落盘成本从「重写整个 13.27 MB 分片 / 273 ms」降到「写一条记录 / 中位 4.6 ms」。
 - **同一路由只存一次身份**：记录里的用量条目只引用身份与价格定义，相同的供应商 / 模型不再逐条重复；实测本机 1059 条记录体积 **91.3 → 74.7 MB（−18%）**
-- **快照只为当前时区买单**：`GET /api/all-usage?utc=0|1` 只返回一份日历（此前两份各占一半载荷），每个日期只保留最近 **180 天**的会话 ID 明细，更早的日期保留数量与聚合
+- **快照只为一份日历买单**：`GET /api/all-usage?utc=0|1` 只返回一份日历（此前两份各占一半载荷）；面板固定请求 `utc=0`，也就是运行 DSH 这台机器的本地日历，每个日期只保留最近 **180 天**的会话 ID 明细，更早的日期保留数量与聚合
 - **趋势点数封顶 180**：超过半年自动降到 3 天一点，再按需要扩到周 / 月 / 季 / 年，图表不随历史无限变长
 - **预算写进代码**：查询与记录缓存各 20 条、定价解析缓存 5000、每会话上下文归档 512、价格行 500、分片 32、单图点数 180、快照会话 ID 窗口 180 天 —— 由 `test/perf-budgets.test.js` 守着，放开任何一项都必须显式修改那张表
 - **可复现的基准**：`node bench/ledger.mjs`（账本体积与单次重写成本）、`node bench/ledger-layout.mjs`（两种存储布局对比，在真实分片的副本上跑）、`node bench/endpoints.mjs`（5 个读接口的中位延迟与载荷）、`node scripts/dead-code.mjs`（死代码体检：无人引用的导出、客户端里没被调用的函数、样式表里再也渲染不出的 class）
@@ -116,7 +116,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - **DSH 兼容**：`package.json` 声明 DSH runtime `>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0 || >=0.1.7-rc.2 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || 0.2.1-alpha.2 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.2-alpha.3 || 0.2.2-rc.1`，已在本机用真实 Cordis 服务链验证 `0.2.1-rc.1` / `0.2.1-rc.2`（Node 24 严格 smoke；这两条把 Cordis 提升为稳定版 4.0.5 / loader 1.0.6 / timer 1.1.7）、`0.2.1-alpha.2` 以及 `0.2.0-rc.2`、`0.1.7-rc.2`、`0.1.5-rc.2`、`0.1.5-rc.1`、`0.1.1-rc.2`、`0.1.1-rc.1`；全部已声明版本都进了 CI smoke 矩阵（Node 22/24 双档），但 `0.2.1` 那两条因上游从未发布对应版本的 `@deepseek-ai/dsh-invariants`，CI 会**如实标记 SKIPPED，不等于通过**；`0.1.2-rc.1` 已通过实际使用验证兼容，但未纳入 CI smoke 矩阵。声明按元组逐条拆开而非写成单一区间，是因为 node-semver 只有在范围里存在与目标版本同 `major.minor.patch` 且自身带预发布标签的比较符时，才会放行该预发布版本 —— 例如必须写成 `>=0.2.0-rc.2` 才能让 `0.2.0-rc.2` 进入范围。
 - **桌面客户端（Electron，Windows）**：本插件在 DSH 桌面客户端上实测运行正常（实测 `@deepseek-ai/dsh-desktop` `0.1.7-rc.2`）。桌面客户端会在窗口顶部为自身的最小化 / 最大化 / 关闭按钮保留一条 40px 顶栏，并在文档上标记 `data-windows-titlebar` 与 `--dsh-windows-titlebar-height`；面板据此从该条**下方**开始绘制，所以桌面端自己的关闭按钮永远不会被面板盖住。浏览器端没有该标记，不留白。顶栏高度优先取宿主声明，其次取 Window Controls Overlay 矩形，最后退回 UA；需要微调时可在 DevTools 执行 `localStorage.setItem('dsh-all-usage:topInset', '48')` 后刷新（`0` 表示不留白），无需重新构建。桌面客户端自带运行时，实测版本 `0.1.7-rc.2` 已纳入声明区间与 CI smoke 矩阵（见下表）。
 - **Web 服务依赖**：Host 将 `webServer` 声明为必需依赖，确保服务晚挂载时由 DSH 等待后再执行插件；该包面向 DSH Web profile，不提供无 WebServer 的 headless 路由。HTTP 守卫还会检查真实 socket peer，反向代理只有在连接本身来自 loopback 时才会被接受。写接口（价格保存、立即同步、节假日抓取、别名）以**进程令牌**为授权凭据，不强制要求 `Origin`：DSH 桌面端把 UI 跑在自定义协议上、请求由 Electron 主进程转发，转发时会删掉 `Origin`（连同 `Host`/`Cookie`/`Sec-Fetch-*`），强制 Origin 会让桌面端所有写入 403；而 `Origin` 若存在仍必须是 loopback 或桌面端自身 scheme，`Host` 仍必须是 loopback（防 DNS rebinding）。
-- **界面语言**：首次进入时面板跟随 DSH 的 **Language 设置**（`Settings → General → Language`，经宿主的 `locale` 服务读取）；宿主未提供该服务时退回浏览器语言，最后退回英语。在面板里手动选过语言之后以面板的选择为准，宿主设置不再覆盖它。语言同时决定时区口径——中文按本地时区，英文按 UTC——所以切换语言会重新取一份对应时区的快照。
+- **界面语言**：首次进入时面板跟随 DSH 的 **Language 设置**（`Settings → General → Language`，经宿主的 `locale` 服务读取）；宿主未提供该服务时退回浏览器语言，最后退回英语。在面板里手动选过语言之后以面板的选择为准，宿主设置不再覆盖它。日期与日历一律按本机时区（运行 DSH 的这台机器）计算，与界面语言无关；切换语言不会移动日界，也不会改取另一份日历。
 
 | DSH runtime | Node.js 支持 | 真实 Cordis smoke | 结论 |
 | --- | --- | --- | --- |

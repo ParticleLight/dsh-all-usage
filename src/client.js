@@ -174,6 +174,24 @@ window.__ModuleLoader__.load({
       const day = utc ? d.getUTCDate() : d.getDate()
       return year + '-' + pad2(month + 1) + '-' + pad2(day)
     }
+    // 1.2.4: the calendar follows the machine's time zone instead of the panel language.
+    // The panel is served by DSH on the same machine, so the browser's resolved zone is
+    // the zone the host bucketed days in (local time in lib/aggregation.js). `utc` stays
+    // as the internal switch so an explicit selector can still opt into UTC.
+    const CALENDAR_ZONE = (() => {
+      try { return Intl.DateTimeFormat().resolvedOptions().timeZone || '' } catch (_) { return '' }
+    })()
+    /** The UTC offset text that belongs to one calendar date (DST-aware). */
+    function calendarOffsetLabel(date) {
+      const d = date instanceof Date && Number.isFinite(date.getTime()) ? date : new Date()
+      const minutes = -d.getTimezoneOffset()
+      if (minutes === 0) return 'UTC'
+      const abs = Math.abs(minutes)
+      return 'UTC' + (minutes < 0 ? '-' : '+') + pad2(Math.floor(abs / 60)) + ':' + pad2(abs % 60)
+    }
+    function calendarZoneName() {
+      return CALENDAR_ZONE || calendarOffsetLabel(null)
+    }
     function shiftCalendarDate(d, days, utc) {
       if (utc) return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + days))
       return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days)
@@ -1325,21 +1343,22 @@ window.__ModuleLoader__.load({
     }
     function humanDate(date, language) {
       const parts = date.split('-')
-      const utc = language !== 'zh'
-      const d = utc ? new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))) : new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
-      const monthIndex = utc ? d.getUTCMonth() : d.getMonth()
-      const weekIndex = utc ? d.getUTCDay() : d.getDay()
+      const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
+      const monthIndex = d.getMonth()
+      const weekIndex = d.getDay()
+      // The calendar is the machine's, so the tooltip names the offset it was read in.
+      const zone = calendarOffsetLabel(d)
       if (language === 'en') {
         const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][monthIndex]
         const week = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][weekIndex]
-        return month + ' ' + Number(parts[2]) + ', ' + parts[0] + ' (' + week + ', UTC)'
+        return month + ' ' + Number(parts[2]) + ', ' + parts[0] + ' (' + week + ', ' + zone + ')'
       }
       if (language !== 'zh') {
-        const day = new Intl.DateTimeFormat(intlLocale(language), { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' }).format(d)
-        return day + ' · ' + weekdayLabels(language, false)[weekIndex] + ' · UTC'
+        const day = new Intl.DateTimeFormat(intlLocale(language), { year: 'numeric', month: 'short', day: 'numeric' }).format(d)
+        return day + ' · ' + weekdayLabels(language, false)[weekIndex] + ' · ' + zone
       }
       const week = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][weekIndex]
-      return parts[0] + '年' + Number(parts[1]) + '月' + Number(parts[2]) + '日 ' + week
+      return parts[0] + '年' + Number(parts[1]) + '月' + Number(parts[2]) + '日 ' + week + '（' + zone + '）'
     }
     /** The accessible name of one heatmap cell: the same fact the tooltip shows. */
     /** Total processed tokens of an aggregate row: the same sum the summary shows. */
@@ -1378,8 +1397,9 @@ window.__ModuleLoader__.load({
         ? queryDaily.find((entry) => entry !== null && typeof entry === 'object' && entry.date === date)
         : undefined
       // A snapshot carries only the calendar it was asked for (lib/http.js): a UTC
-      // snapshot answers byDayUtc and leaves byDay empty, so the fallback has to read the
-      // same calendar the scope used — otherwise English loses every hourly curve.
+      // snapshot answers byDayUtc and leaves byDay empty, so the fallback reads the
+      // same calendar the scope used. 1.2.4 always asks for the local one, but the
+      // flag keeps this honest if a UTC opt-in ever returns.
       const snapshotDays = stats === null || stats === undefined
         ? []
         : (utc === true
@@ -1714,7 +1734,6 @@ window.__ModuleLoader__.load({
       const options = detailed
         ? { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }
         : { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }
-      if (language !== 'zh') options.timeZone = 'UTC'
       return new Date(time).toLocaleString(intlLocale(language), options)
     }
     function trendRowLabel(row, language, detailed) {
@@ -2544,7 +2563,7 @@ window.__ModuleLoader__.load({
             }, cellElements),
           ),
         ),
-        React.createElement('div', { className: 'uh-note', style: { marginTop: 10 } }, tr('口径：每完成一个回合点亮一次（含子代理会话）；悬停查看按工作区明细，点击工作区可筛选热力图与明细表；键盘可用方向键浏览、回车查看当日明细。日期按本地时区。', 'Methodology: one cell lights up for each completed turn, including subagent sessions. Hover to view workspace details; click a workspace to filter the heatmap and detail tables. Dates and day boundaries follow UTC; Chinese uses local dates.')),
+        React.createElement('div', { className: 'uh-note', style: { marginTop: 10 } }, tr('口径：每完成一个回合点亮一次（含子代理会话）；悬停查看按工作区明细，点击工作区可筛选热力图与明细表；键盘可用方向键浏览、回车查看当日明细。日期按本机时区。', 'Methodology: one cell lights up for each completed turn, including subagent sessions. Hover to view workspace details; click a workspace to filter the heatmap and detail tables. Dates and day boundaries follow this machine\'s time zone.')),
         hoverDate !== null ? uhFixedLayer(React.createElement(MemoUsageHeatmapTooltip, { date: hoverDate, day: hoverDay, language, tooltipRef, workspaceTitles: workspaceLookup.titles, workspaceIndexes: workspaceLookup.indexes, onWorkspaceSelect: selectWorkspace })) : null,
       )
     }
@@ -2616,7 +2635,7 @@ window.__ModuleLoader__.load({
         if (element.scrollHeight <= element.clientHeight + 4) pullNextPage()
       }, [rows, props.hasMore, props.loading])
       const auditSource = (row) => row && row.materialization === 'ledger-recovery' ? tr('账本恢复', 'Ledger recovery') : row && row.materialization === 'ledger-reuse' ? tr('账本复用', 'Ledger reuse') : row && row.materialization === 'scan' ? tr('扫描', 'Scan') : row && row.materialization === 'live' ? tr('实时', 'Live') : tr('未知', 'Unknown')
-      const auditTime = (row, detailed) => row && Number.isFinite(row.time) ? new Date(row.time).toLocaleString(intlLocale(language), language !== 'zh' ? (detailed ? { timeZone: 'UTC' } : { timeZone: 'UTC', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : (detailed ? undefined : { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })) : '—'
+      const auditTime = (row, detailed) => row && Number.isFinite(row.time) ? new Date(row.time).toLocaleString(intlLocale(language), detailed ? undefined : { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'
       const select = (rowId) => { if (typeof props.onSelect === 'function') props.onSelect(rowId) }
       return React.createElement('div', { className: 'uh-panel uh-records-panel', ref: props.panelRef, style: { display: props.visible ? 'block' : 'none' } },
         React.createElement('div', { className: 'uh-records-head' },
@@ -3393,12 +3412,10 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       tag.textContent = CSS
     }
 
-    // The snapshot carries one timezone calendar per request: the panel reads its
-    // language from storage here (the same key the language switch writes) and
-    // asks for that copy, because shipping both doubled the payload.
-    const snapshotUtcFlag = () => {
-      try { return storedLanguage() === 'zh' ? '?utc=0' : '?utc=1' } catch (_) { return '' }
-    }
+    // The snapshot carries one timezone calendar per request (lib/http.js). 1.2.4 always
+    // asks for the machine calendar: the UI language no longer chooses the calendar, and
+    // shipping both copies would still double the payload.
+    const snapshotUtcFlag = () => '?utc=0'
     // 与 Host 半的数据接口（webServer 路由）
     const getStats = () => fetch('/api/all-usage' + snapshotUtcFlag(), { headers: { accept: 'application/json' } }).then((r) => {
       if (!r.ok) throw new Error('HTTP ' + r.status)
@@ -3606,8 +3623,8 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
     // is also the host's own fallback.
     //
     // It resolves once per page load: the sidebar entry keeps one language for the whole
-    // session, and a flag that moved under a mounted panel would send it looking for the
-    // other timezone calendar — the mismatch that blanked the dashboard.
+    // session, and a language that flipped under a mounted panel would re-render it in
+    // one language while the snapshot, filters and form state came from another.
     const LANGUAGE_CHOSEN_KEY = 'dsh-all-usage.language.chosen'
     let localeScope = null
     let hostLocaleLanguage
@@ -3691,7 +3708,9 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       const timer = props.timerCtx
       const language = normalizeLanguage(props.language) || 'en'
       const tr = (zh, en) => pick(language, zh, en)
-      const useUtc = language !== 'zh'
+      // 1.2.4: the calendar follows the machine's time zone for every language; the
+      // `utc` plumbing below stays so an explicit UTC opt-in can come back later.
+      const useUtc = false
       const usageUiStateRef = React.useRef(null)
       if (usageUiStateRef.current === null) usageUiStateRef.current = storedUsageUiState()
       const usageUiState = usageUiStateRef.current
@@ -3805,8 +3824,8 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       const recordsGate = recordsGateRef.current
       const pricingGate = pricingGateRef.current
       const refreshRef = React.useRef(() => {})
-      // The snapshot loader is reachable outside its mount effect, so a language
-      // switch can ask for the other timezone calendar (see the effect below).
+      // The snapshot loader is reachable outside its mount effect; the calendar-switch
+      // seam below is the caller that needs it.
       const refreshStatsRef = React.useRef(() => {})
   // Latest write capability seen by the poller: the host rotates it on every
   // plugin apply, and writes must not keep using the one the page loaded with.
@@ -3996,13 +4015,12 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       }, [])
 
       // The snapshot carries exactly one timezone calendar per request: the host
-      // halves the payload by serving either byDay or byDayUtc (lib/http.js), and
-      // the URL asks for the copy matching the stored language. That fetch lives in
-      // the mount effect above and only repeats when the host revision changes, so a
-      // language switch has to ask for the other calendar itself — English reads
-      // stats.byDayUtc, which a snapshot fetched in Chinese leaves empty, and the
-      // dashboard then renders empty until a reload. Keeping this separate from the
-      // mount effect leaves its polling timers and applied-snapshot baseline alone.
+      // halves the payload by serving either byDay or byDayUtc (lib/http.js). Since
+      // 1.2.4 the request always asks for the local calendar, so this is a seam rather
+      // than a live path: if the flag ever moves again, the mount effect above only
+      // repeats on a host revision change, so the fetch has to be reissued here instead
+      // of leaving the dashboard on the other calendar's empty array. Keeping it apart
+      // from the mount effect also leaves its polling timers and baseline alone.
       const snapshotUtcRef = React.useRef(useUtc)
       React.useEffect(() => {
         if (snapshotUtcRef.current === useUtc) return
@@ -4921,9 +4939,9 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         const tokenHeaders = [tr('输入 Token', 'Input Tokens'), tr('缓存命中 Token', 'Cache-Hit Tokens'), tr('缓存写入 Token', 'Cache-Write Tokens'), tr('输出 Token', 'Output Tokens'), tr('推理 Token', 'Reasoning Tokens'), tr('总处理 Token', 'Total Tokens Processed'), tr('成本', 'Cost'), tr('缓存命中率', 'Cache Hit Rate')]
         const output = [
           line([tr('DSH 用量统计导出', 'DSH Usage Statistics Export')]),
-          line([tr('导出时间', 'Exported At'), new Date().toLocaleString(intlLocale(language), useUtc ? { timeZone: 'UTC', timeZoneName: 'short' } : undefined)]),
+          line([tr('导出时间', 'Exported At'), new Date().toLocaleString(intlLocale(language), useUtc ? { timeZone: 'UTC', timeZoneName: 'short' } : { timeZoneName: 'short' })]),
           line([tr('时间范围', 'Time Range'), rangeLabel]),
-          line([tr('时区', 'Timezone'), useUtc ? 'UTC' : tr('本地', 'Local')]),
+          line([tr('时区', 'Timezone'), useUtc ? 'UTC' : calendarZoneName()]),
           line([tr('工作区筛选', 'Workspace Filter'), wsFilter || tr('全部', 'All')]),
           line([tr('供应商筛选', 'Provider Filter'), providerFilter || tr('全部', 'All')]),
           line([tr('模型筛选', 'Model Filter'), modelFilter === null ? tr('全部', 'All') : modelDisplayLabel(modelFilter)]),
@@ -5460,7 +5478,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       const customRangePanel = customRangeOpen ? React.createElement('div', { className: 'uh-custom-range', role: 'group', 'aria-label': tr('自定义时间范围', 'Custom date range') },
         React.createElement('div', { className: 'uh-custom-range-meta' },
           React.createElement('div', { className: 'uh-custom-range-title' }, React.createElement(LineIcon, { name: 'calendar', size: 15 }), tr('自定义时间范围', 'Custom date range')),
-          React.createElement('div', { className: 'uh-custom-range-note' }, tr('可查看全部可扫描历史日数据；中文按本地日期，其他语言按 UTC。热力图可切换最近 30 天 / 90 天 / 12 个月。', 'All available historical daily data can be selected. Chinese uses local dates; every other language follows UTC. The heatmap switches between the last 30 days, 90 days and 12 months.')),
+          React.createElement('div', { className: 'uh-custom-range-note' }, pickFormat(language, '可查看全部可扫描历史日数据；日期一律按本机时区（{zone}）。热力图可切换最近 30 天 / 90 天 / 12 个月。', 'All available historical daily data can be selected. Dates follow this machine\'s time zone ({zone}). The heatmap switches between the last 30 days, 90 days and 12 months.', { zone: calendarZoneName() })),
         ),
         React.createElement('div', { className: 'uh-custom-range-fields' },
           React.createElement('label', { className: 'uh-custom-range-field' },

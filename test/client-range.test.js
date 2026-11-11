@@ -14,6 +14,16 @@ const context = {}
 vm.runInNewContext(localeHelperSource(source) + '\n' + source.slice(start, end) + '\nglobalThis.__rangeHelpers = { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, startOfCalendarMonth, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, buildTrendBars, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate }', context)
 const { isCalendarDate, normalizeCustomRange, customRangeIssue, availableDateBounds, startOfCalendarMonth, createRequestGate, rangeFilenamePart, rangeAgg, resolveRangeBounds, makeUsageScope, usageScopeKey, buildTrendRows, buildTrendHourlyRows, trustedHourlyRows, buildTrendSeries, trendRowLabel, trendRowIsRange, trendRowLabelRange, trendStrideLabel, buildTrendGeometry, buildTrendBars, smoothTrendPath, aggregateModelRows, streaks, buildDonutSegments, donutArcLinePath, buildCalendarModel, heatmapWeeksOf, normalizeHeatmapSpan, versionSummaryOf, modelDisplayLabel, pricingTemporalShift, pricingTemporalShiftRules, pricingTemporalDraftOfPlan, pricingTemporalPlanFromDraft, pricingDateTextToUtc, pricingUtcToDateText, heatCellLabel, humanDate } = context.__rangeHelpers
 
+// humanDate names the machine's time zone, and the machine that runs the suite is
+// whatever TZ the shell hands it, so the expected suffix is derived from the same
+// clock instead of assuming UTC.
+function zoneOf(dateText) {
+  const part = new Intl.DateTimeFormat('en-US', { timeZoneName: 'longOffset' })
+    .formatToParts(new Date(dateText + 'T00:00:00'))
+    .find((entry) => entry.type === 'timeZoneName')
+  return part.value === 'GMT' ? 'UTC' : part.value.replace('GMT', 'UTC')
+}
+
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
   return {
     date,
@@ -374,11 +384,11 @@ test('labels a summarised point with its stride and never pretends it is one day
   assert.equal(trendStrideLabel(rows, 'en'), 'Weekly')
   assert.equal(trendRowIsRange(rows[0]), true)
   // The span is named with the same date style as a single day, weekday included.
-  assert.equal(trendRowLabelRange(rows[0], 'en', true), 'Oct 13, 2023 (Fri, UTC) – Oct 15, 2023 (Sun, UTC)')
+  assert.equal(trendRowLabelRange(rows[0], 'en', true), 'Oct 13, 2023 (Fri, ' + zoneOf('2023-10-13') + ') – Oct 15, 2023 (Sun, ' + zoneOf('2023-10-15') + ')')
   assert.equal(trendRowLabelRange(rows[0], 'en', false), '10-13')
   const dailyRows = buildTrendRows(trendSeries('2026-10-01', '2026-10-03'), { start: '2026-10-01', end: '2026-10-03' }, true)
   assert.equal(trendRowIsRange(dailyRows[0]), false)
-  assert.equal(trendRowLabel(dailyRows[0], 'en', true), 'Oct 1, 2026 (Thu, UTC)')
+  assert.equal(trendRowLabel(dailyRows[0], 'en', true), 'Oct 1, 2026 (Thu, ' + zoneOf('2026-10-01') + ')')
 })
 
 test('normalizes hourly trend rows with unique time points', () => {

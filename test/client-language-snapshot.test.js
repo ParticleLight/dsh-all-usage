@@ -4,17 +4,17 @@ import test from 'node:test'
 import vm from 'node:vm'
 import { localeHelperSource } from './support/locale-helpers.js'
 
-// The host serves one timezone calendar per snapshot request — byDay or byDayUtc,
-// chosen by the utc flag the client derives from the panel language — and the fetch
-// sits in a mount effect that only repeats when the host revision changes. Switching
-// the language only rewrites storage, so the panel used to keep reading the calendar
-// of the previous language: English reads stats.byDayUtc, which a snapshot fetched in
-// Chinese leaves empty, and the dashboard stayed empty until a reload.
+// The host serves one timezone calendar per snapshot request — byDay or byDayUtc —
+// and the fetch sits in a mount effect that only repeats when the host revision
+// changes. Until 1.2.4 the utc flag followed the panel language, so switching the
+// language left the panel reading the calendar of the previous language: English
+// reads stats.byDayUtc, which a snapshot fetched in Chinese leaves empty, and the
+// dashboard stayed empty until a reload. 1.2.4 pins the flag to the machine calendar
+// for every language, so the language can no longer disagree with the data.
 //
 // The language itself resolves in a fixed order: an explicit choice made in the panel,
 // then DSH's own Language row (the host locale runtime), then the browser, then
-// English — and only once per page load, so the request flag can never disagree with
-// the language the panel is rendering in.
+// English — and only once per page load.
 const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
 
 const languageStart = source.indexOf('    const snapshotUtcFlag')
@@ -55,13 +55,13 @@ test("the language follows DSH's Language row until the panel chooses one", () =
 
   const englishHost = loadLanguage({ navigatorLanguage: 'zh-CN', hostLocale: 'en' })
   assert.equal(englishHost.api.storedLanguage(), 'en', 'an English host opens the panel in English')
-  assert.equal(englishHost.api.snapshotUtcFlag(), '?utc=1', 'and asks for the UTC calendar')
+  assert.equal(englishHost.api.snapshotUtcFlag(), '?utc=0', 'and still reads the machine calendar')
 
   const chineseHost = loadLanguage({ hostLocale: 'zh' })
   assert.equal(chineseHost.api.storedLanguage(), 'zh')
   assert.equal(chineseHost.api.snapshotUtcFlag(), '?utc=0')
 
-  assert.equal(loadLanguage({ hostLocale: 'ja' }).api.snapshotUtcFlag(), '?utc=1', 'every non-Chinese language reads the UTC calendar')
+  assert.equal(loadLanguage({ hostLocale: 'ja' }).api.snapshotUtcFlag(), '?utc=0', 'every language reads the machine calendar')
 
   const chosen = loadLanguage({ stored: 'zh', chosen: true, hostLocale: 'en' })
   assert.equal(chosen.api.storedLanguage(), 'zh', 'a panel choice outranks the host language')
@@ -92,9 +92,11 @@ test("the language follows DSH's Language row until the panel chooses one", () =
   assert.equal(persisted.api.storedLanguage(), 'en', 'the mark keeps the choice across host changes')
 })
 
-test('the snapshot request asks for the calendar matching that language', () => {
+test('the snapshot request always asks for the machine calendar', () => {
   assert.match(source, /fetch\('\/api\/all-usage' \+ snapshotUtcFlag\(\)/, 'the full snapshot is the request that carries the calendar flag')
-  assert.equal(loadLanguage({ hostLocale: 'en' }).api.snapshotUtcFlag(), '?utc=1')
+  for (const hostLocale of ['zh', 'en', 'ja', 'de', 'ru']) {
+    assert.equal(loadLanguage({ hostLocale }).api.snapshotUtcFlag(), '?utc=0', 'the language never moves the calendar: ' + hostLocale)
+  }
 })
 
 test('a language switch refetches the snapshot instead of reusing the other calendar', () => {
