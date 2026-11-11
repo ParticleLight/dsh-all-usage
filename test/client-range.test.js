@@ -21,7 +21,10 @@ function zoneOf(dateText) {
   const part = new Intl.DateTimeFormat('en-US', { timeZoneName: 'longOffset' })
     .formatToParts(new Date(dateText + 'T00:00:00'))
     .find((entry) => entry.type === 'timeZoneName')
-  return part.value === 'GMT' ? 'UTC' : part.value.replace('GMT', 'UTC')
+  // The panel prints a zero offset as plain "UTC" (see calendarOffsetLabel), while
+  // longOffset spells the same zone "GMT" on some hosts and "GMT+00:00" on others.
+  const offset = part.value.replace('GMT', '')
+  return offset === '' || offset === '+00:00' || offset === '-00:00' ? 'UTC' : 'UTC' + offset
 }
 
 function day(date, turns, input, workspaceId = 'ws-main', model = 'deepseek/deepseek-chat') {
