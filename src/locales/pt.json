@@ -415,13 +415,5 @@
   "Archive {count} records? They stay readable in the panel, but this cannot be undone.": "Arquivar {count} registros? Eles continuam legíveis no painel, mas isso não pode ser desfeito.",
   "Yes, archive": "Sim, arquivar",
   "Archive old records": "Arquivar registros antigos",
-  "What it costs": "O que custa",
-  "No undo": "Não dá para desfazer",
-  "The hot documents are deleted and there is no undo and no restore command; if you want a way back, copy the data folder before you run.": "Os documentos da zona quente são excluídos, e não há desfazer nem comando de restauração; se quiser uma forma de voltar atrás, copie a pasta de dados antes de executar.",
-  "Slower reads": "Leituras mais lentas",
-  "Archived records stay readable and countable, but the first read of a month unpacks the whole month file, and it stays in memory afterwards.": "Os registros arquivados continuam legíveis e contáveis, mas a primeira leitura de um mês descompacta o arquivo mensal inteiro, que permanece na memória depois.",
-  "One copy": "Cópia única",
-  "After the run those records live only in the archive folder of the data directory as monthly gzip files, and a damaged month is treated as missing.": "Depois da execução, esses registros existem apenas como arquivos gzip mensais na pasta archive do diretório de dados, e um mês danificado é tratado como ausente.",
-  "Ledger lock": "Bloqueio do registro",
-  "While the run is in flight, another DSH process is held out by the maintenance lock and has to try again in a moment.": "Enquanto a execução está em andamento, outro processo do DSH fica de fora pelo bloqueio de manutenção e precisa tentar novamente em instantes."
+  "Note: archived records stay readable and countable, but the first read of a month unpacks the whole month file, so the first start is slower; afterwards it stays in memory.": "Observação: os registros arquivados continuam legíveis e contáveis, mas a primeira leitura de um mês descompacta o arquivo mensal inteiro, então a primeira inicialização fica mais lenta; depois ele permanece na memória."
 }

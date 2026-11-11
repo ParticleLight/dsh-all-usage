@@ -415,13 +415,5 @@
   "Archive {count} records? They stay readable in the panel, but this cannot be undone.": "{count} Datensätze archivieren? Sie bleiben im Panel lesbar, aber das lässt sich nicht rückgängig machen.",
   "Yes, archive": "Ja, archivieren",
   "Archive old records": "Alte Datensätze archivieren",
-  "What it costs": "Was es kostet",
-  "No undo": "Kein Rückgängig",
-  "The hot documents are deleted and there is no undo and no restore command; if you want a way back, copy the data folder before you run.": "Die Dokumente im heißen Bereich werden gelöscht, und es gibt weder Rückgängig noch einen Wiederherstellungsbefehl; wer einen Rückweg möchte, kopiert das Datenverzeichnis vor dem Lauf.",
-  "Slower reads": "Langsameres Lesen",
-  "Archived records stay readable and countable, but the first read of a month unpacks the whole month file, and it stays in memory afterwards.": "Archivierte Datensätze bleiben lesbar und zählbar, aber beim ersten Lesen eines Monats wird die gesamte Monatsdatei entpackt, die danach im Speicher bleibt.",
-  "One copy": "Nur eine Kopie",
-  "After the run those records live only in the archive folder of the data directory as monthly gzip files, and a damaged month is treated as missing.": "Nach dem Lauf existieren diese Datensätze nur noch als monatliche gzip-Dateien im Ordner archive des Datenverzeichnisses, und ein beschädigter Monat gilt als fehlend.",
-  "Ledger lock": "Ledger-Sperre",
-  "While the run is in flight, another DSH process is held out by the maintenance lock and has to try again in a moment.": "Während der Lauf läuft, wird ein anderer DSH-Prozess durch die Wartungssperre ferngehalten und muss es in einem Moment erneut versuchen."
+  "Note: archived records stay readable and countable, but the first read of a month unpacks the whole month file, so the first start is slower; afterwards it stays in memory.": "Hinweis: Archivierte Datensätze bleiben lesbar und zählbar, aber beim ersten Lesen eines Monats wird die gesamte Monatsdatei entpackt, weshalb der erste Start länger dauert; danach bleibt sie im Speicher."
 }

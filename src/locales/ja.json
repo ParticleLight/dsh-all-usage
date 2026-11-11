@@ -415,13 +415,5 @@
   "Archive {count} records? They stay readable in the panel, but this cannot be undone.": "{count} 件の記録をアーカイブしますか？パネルでは引き続き閲覧できますが、この操作は元に戻せません。",
   "Yes, archive": "はい、アーカイブする",
   "Archive old records": "古い記録をアーカイブ",
-  "What it costs": "かかるコスト",
-  "No undo": "取り消し不可",
-  "The hot documents are deleted and there is no undo and no restore command; if you want a way back, copy the data folder before you run.": "ホット側のドキュメントは削除され、取り消しも復元コマンドもありません。戻せるようにしておきたい場合は、実行前にデータディレクトリを丸ごとコピーしてください。",
-  "Slower reads": "読み込みが遅くなる",
-  "Archived records stay readable and countable, but the first read of a month unpacks the whole month file, and it stays in memory afterwards.": "アーカイブした記録は引き続き閲覧・集計できますが、ある月を最初に読むときに月ファイル全体が解凍され、その後はメモリに残ります。",
-  "One copy": "コピーは 1 部のみ",
-  "After the run those records live only in the archive folder of the data directory as monthly gzip files, and a damaged month is treated as missing.": "実行後、これらの記録はデータディレクトリの archive フォルダーに月次の gzip ファイルとしてのみ残り、月ファイルが壊れている場合は欠損として扱われます。",
-  "Ledger lock": "台帳ロック",
-  "While the run is in flight, another DSH process is held out by the maintenance lock and has to try again in a moment.": "実行中は、別の DSH プロセスはメンテナンスロックで締め出され、しばらくしてから再試行する必要があります。"
+  "Note: archived records stay readable and countable, but the first read of a month unpacks the whole month file, so the first start is slower; afterwards it stays in memory.": "注意：アーカイブした記録は引き続き閲覧・集計できますが、ある月を最初に読むときに月ファイル全体が解凍されるため、初回の起動が遅くなります。その後はメモリに残ります。"
 }
