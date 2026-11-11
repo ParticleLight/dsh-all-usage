@@ -2826,6 +2826,9 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
 .uh-gh-mark { flex:none; fill:var(--dsw-alias-label-primary); }
 .uh-gh-label { color:var(--dsw-alias-label-primary); font-weight:600; letter-spacing:0; }
 .uh-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+/* When the toolbar wraps, the action row lands on a line of its own; without this the
+   row starts at the left edge and the buttons look detached from the right side. */
+.uh-head > .uh-actions { margin-left:auto; }
 .uh-language-menu, .uh-filter-menu { position:relative; z-index:12; }
 .uh-filter-menu { flex:0 1 auto; min-width:0; }
 .uh-filter-workspace { width:180px; }

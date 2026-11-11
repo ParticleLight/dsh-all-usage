@@ -173,6 +173,13 @@ test('the toolbar is a rounded card instead of a full-bleed square strip', () =>
   assert.doesNotMatch(headRule, /border-bottom:/, 'the straight bottom border is gone')
   assert.match(headRule, /top:16px;/, 'the sticky toolbar parks below the 22px drag strip (measured at y=78 with the sheet top at y=40)')
   assert.match(headRule, /box-shadow:/, 'the card needs an edge once the border is gone')
+  // Measured in the running app at the panel's own width: the action row is wider than
+  // the space left beside the title, so it wraps onto a second line and used to start at
+  // the left edge, leaving a gap on the right. The auto margin keeps it right-aligned.
+  assert.ok(
+    source.includes('.uh-head > .uh-actions { margin-left:auto; }'),
+    'a wrapped action row stays flush with the right edge of the toolbar',
+  )
 })
 
 // The glass theme puts backdrop-filter on .uh-side-modal and .uh-side-dialog, and a
