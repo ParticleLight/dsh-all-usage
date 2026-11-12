@@ -22,11 +22,15 @@ For DSH users who need to inspect token usage, model costs, and workspace activi
 
 ## Quick Start
 
+In DSH, open the Plugins page and choose Add plugin, then enter the package name `dsh-all-usage` or the repository `https://github.com/ParticleLight/dsh-all-usage`.
+
+You can also install from a shell (web profile):
+
 ~~~bash
 dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 ~~~
 
-The installation command assembles the bundle. Usually, refreshing the browser page loads the client; no manual profile edits are required. If your DSH version does not dynamically assemble newly installed packages, use its supported package reload or restart, then refresh the page and open the dashboard from the DSH sidebar.
+Either route assembles the bundle; no manual profile edits are required. If your DSH version does not dynamically assemble newly installed packages, use its supported package reload or restart, then refresh the page and open the dashboard from the DSH sidebar.
 
 ## Core Features
 

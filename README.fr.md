@@ -22,11 +22,15 @@ Destiné aux utilisateurs de DSH qui souhaitent examiner la consommation de toke
 
 ## Démarrage rapide
 
+Dans DSH, ouvrez la page Plugins et choisissez Ajouter un plugin, puis saisissez le nom du paquet `dsh-all-usage` ou le dépôt `https://github.com/ParticleLight/dsh-all-usage`.
+
+Vous pouvez aussi l'installer depuis un terminal (profil web) :
+
 ~~~bash
 dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 ~~~
 
-La commande d'installation assemble le bundle. En général, il suffit de rafraîchir la page du navigateur pour charger le client, sans modification manuelle du profil. Si votre version de DSH n'assemble pas dynamiquement les paquets nouvellement installés, utilisez le rechargement de paquet prévu à cet effet ou redémarrez, puis rafraîchissez la page et ouvrez le tableau de bord depuis la barre latérale de DSH.
+Les deux méthodes assemblent le bundle ; aucune modification manuelle du profil n'est nécessaire. Si votre version de DSH n'assemble pas dynamiquement les paquets fraîchement installés, rechargez le paquet ou redémarrez le processus comme DSH l'indique, puis rafraîchissez la page et ouvrez le tableau de bord depuis la barre latérale de DSH.
 
 ## Fonctionnalités principales
 

@@ -22,11 +22,15 @@ Für DSH-Nutzer, die Token-Verbrauch, Modellkosten und Workspace-Aktivität anha
 
 ## Schnellstart
 
+Öffne in DSH die Seite Plugins und wähle Plugin hinzufügen; gib dann den Paketnamen `dsh-all-usage` oder das Repository `https://github.com/ParticleLight/dsh-all-usage` ein.
+
+Alternativ installierst du aus der Shell (Web-Profil):
+
 ~~~bash
 dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 ~~~
 
-Der Installationsbefehl stellt das Bundle zusammen. In der Regel genügt ein Neuladen der Browserseite, um den Client zu laden; manuelle Änderungen am Profil sind nicht nötig. Falls Ihre DSH-Version neu installierte Pakete nicht dynamisch zusammensetzt, verwenden Sie das von ihr unterstützte Neuladen der Pakete oder einen Neustart, laden Sie anschließend die Seite neu und öffnen Sie das Dashboard über die DSH-Seitenleiste.
+Beide Wege stellen das Bundle zusammen; das Profil muss nicht von Hand bearbeitet werden. Wenn deine DSH-Version frisch installierte Pakete nicht dynamisch zusammensetzt, lade das Paket neu oder starte den Prozess neu, wie DSH es anzeigt, und lade danach die Seite neu, um das Dashboard aus der DSH-Seitenleiste zu öffnen.
 
 ## Kernfunktionen
 

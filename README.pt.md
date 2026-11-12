@@ -22,11 +22,15 @@ Para usuários do DSH que precisam inspecionar uso de tokens, custos de modelos 
 
 ## Início rápido
 
+No DSH, abra a página Plug-ins e escolha Adicionar plug-in; depois informe o nome do pacote `dsh-all-usage` ou o repositório `https://github.com/ParticleLight/dsh-all-usage`.
+
+Você também pode instalar pelo terminal (perfil web):
+
 ~~~bash
 dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 ~~~
 
-O comando de instalação monta o bundle. Normalmente, atualizar a página do navegador carrega o cliente; nenhuma edição manual de profile é necessária. Se a sua versão do DSH não montar dinamicamente os pacotes recém-instalados, use o recarregamento de pacotes suportado ou reinicie, depois atualize a página e abra o painel pela barra lateral do DSH.
+Os dois caminhos montam o bundle; não é preciso editar o perfil à mão. Se a sua versão do DSH não monta dinamicamente pacotes recém-instalados, recarregue o pacote ou reinicie o processo como o DSH indicar, depois atualize a página e abra o painel pela barra lateral do DSH.
 
 ## Recursos principais
 

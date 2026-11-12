@@ -22,11 +22,15 @@ DeepSeek Harness 全量用量看板：按模型、供应商、工作区和时间
 
 ## 快速开始
 
+在 DSH 的「插件」页点击「添加插件」，输入包名 `dsh-all-usage` 或仓库地址 `https://github.com/ParticleLight/dsh-all-usage` 即可安装。
+
+也可以直接走命令行（Web profile）：
+
 ~~~bash
 dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 ~~~
 
-安装命令会装配 bundle；通常刷新浏览器页面即可加载 Client，无需手动修改 profile。若当前 DSH 版本未动态装配新包，请按 DSH 的提示重载包或重启进程，然后刷新页面并从 DSH 侧栏打开看板。
+两种方式都会装配 bundle，无需手动修改 profile。若当前 DSH 版本未动态装配新包，请按 DSH 的提示重载包或重启进程，然后刷新页面并从 DSH 侧栏打开看板。
 
 ## 核心功能
 
