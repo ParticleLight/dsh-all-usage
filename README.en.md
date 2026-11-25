@@ -88,6 +88,8 @@ Cost is estimated across four token buckets: official model mapping, manual pric
 
 Sessions that have not changed for a while fold into monthly compressed files: preview the affected records, size, and months first, and only then run it; archived records stay readable and countable.
 
+The panel also carries a read-only **Access control** block at the bottom: every host name this deployment answers to and where it came from (environment, `--public-url`, the listener address). A refused request no longer says only "please retry" — the empty state names the rule that failed and the address the browser used.
+
 ![Maintenance](assets/screenshots/en/07-maintenance.png)
 
 ## Technology Stack and Architecture
@@ -266,6 +268,8 @@ The plugin has no separate runtime CLI. The official install command is in Quick
 ### HTTP API
 
 Every route requires `Host` to name this deployment (see Configuration and Web service dependency); write routes also need `x-all-usage-request-token`.
+
+A refusal is always `403` with `{ ok: false, message: 'forbidden', reason }` and the same value in the `x-all-usage-forbidden-reason` header. `reason` is one of `missing-host`, `bad-host`, `host-not-trusted`, `peer-loopback-host`, `cross-site`, `missing-origin`, `origin-not-trusted`, `capability-invalid`; it names the rule that failed and never the allowlist, so a refused caller can diagnose itself without learning the deployment's names.
 
 - `GET /api/all-usage` — compatible usage snapshot
 - `GET /api/all-usage/status` — lightweight revision and sync health, plus the last client environment report (`clientEnv`), the running plugin version (`pluginVersion`) and a derived id of the write capability (`capabilityId`, changes when the capability rotates so the page can notice a plugin reload; the capability itself is only ever sent in the full snapshot), plus the `memory` residency counters: `residentRows` (resident usage detail rows), `residentRecords` (resident session records), `recordCacheMB` (session-record cache size in MiB to one decimal; an estimate derived from usage-row counts rather than a measured allocation), `sessions` (session aggregates), `recordsCache` (record query-cache stats) and `heapUsedMB` / `rssMB` (both belong to the whole Host process, not the plugin alone). The same response carries `counters` (diagnostic operation counts), `accounting` (today's aggregate consistency) and `mismatch` (the first bucket-delta inconsistency sample, or null)

@@ -88,6 +88,8 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 把久未更新的会话记录压成按月压缩包：先预览受影响的记录数、体积与月份，确认后才执行；归档后的记录仍然可以查看与统计。
 
+面板底部还有一块只读的**访问控制**：列出本部署接受的全部主机名及其来源（环境变量 / `--public-url` / 监听地址）。被拒绝的请求不会只有一句「请重试」——空状态直接说明是哪条规则没过，并带上浏览器当前用的地址。
+
 ![数据维护](assets/screenshots/zh/07-maintenance.png)
 
 ## 技术栈与架构
@@ -265,6 +267,8 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 ### HTTP API
 
 所有路由都要求 `Host` 属于本部署的主机名集合（见「配置」与「Web 服务依赖」）；写入接口另外需要 `x-all-usage-request-token`。
+
+被拒时固定返回 `403` 与 `{ ok: false, message: 'forbidden', reason }`，同时回写同名响应头 `x-all-usage-forbidden-reason`。`reason` 取值：`missing-host`、`bad-host`、`host-not-trusted`、`peer-loopback-host`、`cross-site`、`missing-origin`、`origin-not-trusted`、`capability-invalid`；它只说明失败的是哪条规则，**不包含放行名单**，所以被拒的一方能据此自查而不泄露部署拓扑。
 
 - `GET /api/all-usage` — 兼容统计快照
 - `GET /api/all-usage/status` — 轻量 revision 与同步健康状态，并附带最近一次客户端环境报告（`clientEnv`）、运行中插件的版本号（`pluginVersion`）与写入令牌的派生 ID（`capabilityId`，令牌轮换时变化，用于让页面察觉宿主被重新加载；令牌本身只在完整快照里下发），以及 `memory` 常驻计数：`residentRows`（常驻用量明细行数）、`residentRecords`（常驻会话记录数）、`recordCacheMB`（会话记录缓存占用估算，MiB，一位小数；由用量行数推算，不是实测分配）、`sessions`（会话聚合数）、`recordsCache`（记录查询缓存统计）与 `heapUsedMB` / `rssMB`（均为整个 Host 进程的堆与 RSS，不是插件单独占用）；同一响应还带 `counters`（诊断操作计数）、`accounting`（当日聚合一致性）与 `mismatch`（首个桶增量不一致样本，无则为 null）

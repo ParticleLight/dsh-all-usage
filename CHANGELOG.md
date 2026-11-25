@@ -4,13 +4,19 @@
 ### 新功能
 - **局域网 IP 与反向代理域名都能打开看板** —— HTTP 守卫改为按主机名判定：loopback、DSH 公布的 `--public-url`、监听地址本身，以及 `DSH_ALL_USAGE_TRUSTED_HOSTS` 追加的名字。此前只有 loopback 能读，DSH 一旦 `--host` 绑到网卡，面板只会显示「无法加载用量统计」。
 - **`DSH_ALL_USAGE_STRICT_LOCAL=1` 可退回 loopback-only**，供不愿把 API 暴露给网络的部署。
+- **被拒的请求现在说明原因** —— 403 带 `reason`（body 与 `x-all-usage-forbidden-reason` 头同值）：`host-not-trusted` / `peer-loopback-host` / `origin-not-trusted` / `cross-site` / `capability-invalid` 等，只说明哪条规则没过，不含放行名单。
+- **面板里能看到放行名单** —— 「数据维护」底部新增只读的「访问控制」：本部署接受的主机名及其来源（环境变量 / 公布地址 / 监听地址）。
 ### 修复
 - **经反代写入价格会 403** —— `Origin` 的主机名属于本部署即可通过（TLS 在本进程之前终止时 scheme 会从 https 变成 http），不再要求与 `Host` 逐字相同。
+- **打不开时只剩「请重试」** —— 空状态改为按 403 的原因给话：地址没被放行时直接点出当前地址与要检查的 `--public-url` / `--host` / `DSH_ALL_USAGE_TRUSTED_HOSTS`。
 ### Features
 - **The dashboard opens over a LAN address and a reverse-proxied domain** — the HTTP guard now decides from the host name: loopback, the `--public-url` DSH advertises, the listener's own address, and any name added through `DSH_ALL_USAGE_TRUSTED_HOSTS`. Previously only loopback could read, so a `--host` bound to an interface left the panel showing "Unable to load usage statistics".
 - **`DSH_ALL_USAGE_STRICT_LOCAL=1` restores loopback-only**, for deployments that would rather not publish the API.
+- **A refused request now says why** — a 403 carries `reason` (same value in the body and in `x-all-usage-forbidden-reason`): `host-not-trusted`, `peer-loopback-host`, `origin-not-trusted`, `cross-site`, `capability-invalid` and friends. It names the rule that failed and never the allowlist.
+- **The allowlist is visible in the panel** — Maintenance ends with a read-only *Access control* block: the host names this deployment answers to and where each came from (environment, advertised URL, listener address).
 ### Fixes
 - **Saving prices through a reverse proxy returned 403** — an `Origin` whose host belongs to this deployment is accepted (TLS may end before this process, turning https into http), so it no longer has to match `Host` literally.
+- **A failed load said only "please retry"** — the empty state now follows the refusal reason: a host that is not trusted names the current address and the `--public-url` / `--host` / `DSH_ALL_USAGE_TRUSTED_HOSTS` to check.
 
 ## v1.2.4（2026-11-11）
 ### 新功能
