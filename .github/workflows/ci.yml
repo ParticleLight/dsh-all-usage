@@ -45,12 +45,14 @@ jobs:
           node --check lib/client.js
           node --check src/client.js
           node --check lib/plugin.js
+          node --check lib/trusted-hosts.js
           node --check lib/aggregation.js
           node --check lib/ledger.js
           node --check lib/session-sync.js
           node --check lib/pricing-runtime.js
           node --check lib/balance.js
           node --check lib/http.js
+          node --check lib/net-address.js
           node --check lib/pricing.js
           node --check lib/usage-core.js
           node --check scripts/build-client.mjs
