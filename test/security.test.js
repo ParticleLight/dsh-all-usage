@@ -1069,3 +1069,64 @@ test('reads extra trusted hosts from the environment and can restore the loopbac
     delete process.env.DSH_ALL_USAGE_STRICT_LOCAL
   }
 })
+
+test('names the rule that refused a read and never echoes the allowlist', async () => {
+  const app = await createApp({
+    advertisedUrl: 'https://usage.example.com/',
+    boundOrigin: 'http://192.168.168.226:3080',
+  })
+  const cases = [
+    ['host-not-trusted', makeRemoteRequest('GET', { host: 'evil.example' })],
+    ['peer-loopback-host', makeRemoteRequest('GET', { host: '127.0.0.1:3080' })],
+    ['cross-site', makeRemoteRequest('GET', { host: 'usage.example.com', 'sec-fetch-site': 'cross-site' })],
+    ['origin-not-trusted', makeRemoteRequest('GET', { host: 'usage.example.com', origin: 'https://evil.example' })],
+    ['missing-host', makeRemoteRequest('GET', {})],
+  ]
+  for (const [reason, request] of cases) {
+    const response = await call(app, '/api/all-usage/status', request)
+    assert.equal(response.status, 403, reason)
+    assert.equal(response.json().reason, reason, reason)
+    assert.equal(response.headers['x-all-usage-forbidden-reason'], reason, reason)
+    const body = JSON.stringify(response.json())
+    assert.equal(body.includes('usage.example.com'), false, 'a refusal must not name the allowed hosts')
+    assert.equal(body.includes('192.168.168.226'), false, 'a refusal must not name the allowed hosts')
+  }
+})
+
+test('publishes the access boundary so an open panel can explain the rule', async () => {
+  process.env.DSH_ALL_USAGE_TRUSTED_HOSTS = 'alias.example'
+  try {
+    const app = await createApp({
+      advertisedUrl: 'https://usage.example.com/panel',
+      boundOrigin: 'http://192.168.168.226:3080',
+    })
+    const status = await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    assert.equal(status.status, 200)
+    const access = status.json().access
+    assert.equal(access.strict, false)
+    assert.deepEqual(access.hosts, ['192.168.168.226', 'alias.example', 'usage.example.com'])
+    assert.deepEqual(access.sources.env, ['alias.example'])
+    assert.equal(access.sources.advertised, 'usage.example.com')
+    assert.equal(access.sources.listener, '192.168.168.226')
+
+    // The full snapshot spreads the status payload, so the panel finds it there
+    // too — that is what it already has when the first render happens.
+    const full = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    assert.deepEqual(full.json().access, access)
+  } finally {
+    delete process.env.DSH_ALL_USAGE_TRUSTED_HOSTS
+  }
+
+  process.env.DSH_ALL_USAGE_STRICT_LOCAL = '1'
+  try {
+    const app = await createApp({
+      advertisedUrl: 'https://usage.example.com/',
+      boundOrigin: 'http://192.168.168.226:3080',
+    })
+    const status = await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    assert.equal(status.json().access.strict, true)
+    assert.deepEqual(status.json().access.hosts, [])
+  } finally {
+    delete process.env.DSH_ALL_USAGE_STRICT_LOCAL
+  }
+})

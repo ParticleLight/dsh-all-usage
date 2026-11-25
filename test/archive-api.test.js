@@ -304,16 +304,19 @@ test('the archive route requires an authorized POST', async () => {
   const get = await call(app.handler, makeRequest('GET', WITH_TOKEN))
   assert.equal(get.res.statusCode, 405)
   assert.equal(get.body(), '')
-  for (const [label, headers] of [
-    ['no capability', TRUSTED],
-    ['wrong capability', { ...TRUSTED, 'x-all-usage-request-token': 'not-the-token' }],
-    ['cross-site', { ...WITH_TOKEN, 'sec-fetch-site': 'cross-site' }],
-    ['remote host', { ...WITH_TOKEN, host: '192.0.2.10:3080' }],
-    ['foreign origin', { ...WITH_TOKEN, origin: 'https://evil.example' }],
+  for (const [label, headers, reason] of [
+    ['no capability', TRUSTED, 'capability-invalid'],
+    ['wrong capability', { ...TRUSTED, 'x-all-usage-request-token': 'not-the-token' }, 'capability-invalid'],
+    ['cross-site', { ...WITH_TOKEN, 'sec-fetch-site': 'cross-site' }, 'cross-site'],
+    ['remote host', { ...WITH_TOKEN, host: '192.0.2.10:3080' }, 'host-not-trusted'],
+    ['foreign origin', { ...WITH_TOKEN, origin: 'https://evil.example' }, 'origin-not-trusted'],
   ]) {
     const response = await call(app.handler, makeRequest('POST', headers, '{}'))
     assert.equal(response.res.statusCode, 403, label)
-    assert.deepEqual(response.json(), { ok: false, message: 'forbidden' }, label)
+    // The refusal names the rule that failed so the panel can explain it, and
+    // still never names the allowlist.
+    assert.deepEqual(response.json(), { ok: false, message: 'forbidden', reason }, label)
+    assert.equal(response.headers['x-all-usage-forbidden-reason'], reason, label)
   }
   assert.deepEqual(app.calls, [], 'a rejected request never reaches the ledger')
 })
