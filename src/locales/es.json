@@ -416,5 +416,14 @@
   "Yes, archive": "Sí, archivar",
   "Archive old records": "Archivar registros antiguos",
   "Note: archived records stay readable and countable, but the first read of a month unpacks the whole month file, so the first start is slower; afterwards it stays in memory.": "Nota: los registros archivados se pueden leer y contar, pero la primera lectura de un mes descomprime todo el archivo mensual, así que el primer arranque es más lento; después permanece en memoria.",
-  "This Month": "Este mes"
+  "This Month": "Este mes",
+  "This address ({host}) is not on the plugin allowlist: check DSH --public-url / --host, or set DSH_ALL_USAGE_TRUSTED_HOSTS and restart.": "Esta dirección ({host}) no está en la lista permitida del plugin: revisa --public-url / --host de DSH, o define DSH_ALL_USAGE_TRUSTED_HOSTS y reinicia.",
+  "The page origin and the request host disagree; a reverse proxy may be rewriting Host.": "El origen de la página y el host de la solicitud no coinciden; puede que un proxy inverso reescriba Host.",
+  "A cross-site request was refused.": "Se rechazó una solicitud entre sitios.",
+  "The write capability is stale; refresh the page.": "El token de escritura está obsoleto; actualiza la página.",
+  "Access control": "Control de acceso",
+  "Loopback only.": "Solo loopback.",
+  "Loopback always works; these host names are also accepted:": "Loopback siempre funciona; también se aceptan estos nombres de host:",
+  "(no extra host names)": "(sin nombres de host adicionales)",
+  "Sources: env {env} · advertised {advertised} · listener {listener}": "Orígenes: entorno {env} · URL publicada {advertised} · listener {listener}"
 }

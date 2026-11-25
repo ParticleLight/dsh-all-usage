@@ -416,5 +416,14 @@
   "Yes, archive": "Да, архивировать",
   "Archive old records": "Архивировать старые записи",
   "Note: archived records stay readable and countable, but the first read of a month unpacks the whole month file, so the first start is slower; afterwards it stays in memory.": "Примечание: архивные записи остаются доступными для чтения и подсчёта, но при первом чтении месяца распаковывается весь файл месяца, поэтому первый запуск идёт медленнее; затем он остаётся в памяти.",
-  "This Month": "Этот месяц"
+  "This Month": "Этот месяц",
+  "This address ({host}) is not on the plugin allowlist: check DSH --public-url / --host, or set DSH_ALL_USAGE_TRUSTED_HOSTS and restart.": "Адрес {host} отсутствует в списке разрешённых узлов плагина: проверьте --public-url / --host в DSH либо задайте DSH_ALL_USAGE_TRUSTED_HOSTS и перезапустите.",
+  "The page origin and the request host disagree; a reverse proxy may be rewriting Host.": "Источник страницы и хост запроса не совпадают; вероятно, обратный прокси переписывает Host.",
+  "A cross-site request was refused.": "Межсайтовый запрос отклонён.",
+  "The write capability is stale; refresh the page.": "Токен записи устарел; обновите страницу.",
+  "Access control": "Контроль доступа",
+  "Loopback only.": "Только loopback.",
+  "Loopback always works; these host names are also accepted:": "Loopback доступен всегда; также принимаются эти имена хостов:",
+  "(no extra host names)": "(дополнительных имён хостов нет)",
+  "Sources: env {env} · advertised {advertised} · listener {listener}": "Источники: окружение {env} · опубликованный URL {advertised} · слушатель {listener}"
 }

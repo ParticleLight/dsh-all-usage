@@ -416,5 +416,14 @@
   "Yes, archive": "はい、アーカイブする",
   "Archive old records": "古い記録をアーカイブ",
   "Note: archived records stay readable and countable, but the first read of a month unpacks the whole month file, so the first start is slower; afterwards it stays in memory.": "注意：アーカイブした記録は引き続き閲覧・集計できますが、ある月を最初に読むときに月ファイル全体が解凍されるため、初回の起動が遅くなります。その後はメモリに残ります。",
-  "This Month": "今月"
+  "This Month": "今月",
+  "This address ({host}) is not on the plugin allowlist: check DSH --public-url / --host, or set DSH_ALL_USAGE_TRUSTED_HOSTS and restart.": "{host} はプラグインの許可リストにありません。DSH の --public-url / --host を確認するか、DSH_ALL_USAGE_TRUSTED_HOSTS を設定して再起動してください。",
+  "The page origin and the request host disagree; a reverse proxy may be rewriting Host.": "ページのオリジンとリクエスト先のホストが一致しません。リバースプロキシが Host を書き換えている可能性があります。",
+  "A cross-site request was refused.": "クロスサイトのリクエストは拒否されました。",
+  "The write capability is stale; refresh the page.": "書き込みトークンが失効しています。ページを再読み込みしてください。",
+  "Access control": "アクセス制御",
+  "Loopback only.": "ループバックのみ。",
+  "Loopback always works; these host names are also accepted:": "ループバックは常に利用できます。次のホスト名も受け付けます:",
+  "(no extra host names)": "（追加のホスト名はありません）",
+  "Sources: env {env} · advertised {advertised} · listener {listener}": "ソース: 環境変数 {env} · 公開 URL {advertised} · リスナー {listener}"
 }

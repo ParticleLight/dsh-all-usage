@@ -2980,6 +2980,9 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
 .uh-archive-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
 .uh-archive-head .uh-title-with-icon { color:var(--dsw-alias-label-primary); font-size:13px; font-weight:600; }
 .uh-archive-note { color:var(--dsw-alias-label-secondary); font-size:12px; line-height:1.55; }
+.uh-access-block { display:flex; flex-direction:column; gap:8px; padding-top:12px; border-top:1px solid var(--dsw-alias-border-l1); }
+.uh-access-block .uh-title-with-icon { color:var(--dsw-alias-label-primary); font-size:13px; font-weight:600; }
+.uh-access-hosts { margin:0; padding-left:18px; color:var(--dsw-alias-label-primary); font-size:12px; line-height:1.7; font-variant-numeric:tabular-nums; }
 .uh-archive-controls { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 10px; padding:10px 0; border-top:1px solid var(--dsw-alias-border-l1); border-bottom:1px solid var(--dsw-alias-border-l1); }
 .uh-archive-days { display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px 6px; min-width:0; color:var(--dsw-alias-label-primary); font-size:12px; }
 .uh-archive-days-input { flex:none; width:78px; min-height:30px; box-sizing:border-box; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; padding:3px 7px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; font-size:12px; font-variant-numeric:tabular-nums; outline:none; transition:border-color .15s ease; }
@@ -3419,12 +3422,41 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
     // shipping both copies would still double the payload.
     const snapshotUtcFlag = () => '?utc=0'
     // 与 Host 半的数据接口（webServer 路由）
+    // A refusal carries the rule that failed (lib/http.js). Keeping it on the error
+    // is what lets the panel explain a 403 instead of showing a generic load
+    // failure, and it never contains the allowlist itself.
+    // ---------- access reason ----------
+    const responseError = (response) => {
+      const error = new Error('HTTP ' + response.status)
+      error.status = response.status
+      const header = response.headers && typeof response.headers.get === 'function' ? response.headers.get('x-all-usage-forbidden-reason') : null
+      error.reason = typeof header === 'string' ? header : ''
+      return error
+    }
+    const reasonOf = (error) => error !== null && error !== undefined && typeof error.reason === 'string' ? error.reason : ''
+    const pageHost = () => {
+      try {
+        return typeof location !== 'undefined' && location !== null && typeof location.host === 'string' ? location.host : ''
+      } catch (err) {
+        return ''
+      }
+    }
+    const accessErrorText = (reason, language) => {
+      if (reason === 'host-not-trusted' || reason === 'peer-loopback-host') {
+        return pickFormat(language, '当前地址 {host} 不在插件的放行名单里：检查 DSH 的 --public-url / --host，或在设置 DSH_ALL_USAGE_TRUSTED_HOSTS 后重启。', 'This address ({host}) is not on the plugin allowlist: check DSH --public-url / --host, or set DSH_ALL_USAGE_TRUSTED_HOSTS and restart.', { host: pageHost() })
+      }
+      if (reason === 'origin-not-trusted') return pick(language, '页面来源与请求地址不一致：反向代理可能改写了 Host。', 'The page origin and the request host disagree; a reverse proxy may be rewriting Host.')
+      if (reason === 'cross-site') return pick(language, '跨站请求被拒绝。', 'A cross-site request was refused.')
+      if (reason === 'capability-invalid') return pick(language, '写入令牌已失效，请刷新页面。', 'The write capability is stale; refresh the page.')
+      return pick(language, '无法加载用量统计。请重试。', 'Unable to load usage statistics. Please retry.')
+    }
+    // ---------- access reason end ----------
     const getStats = () => fetch('/api/all-usage' + snapshotUtcFlag(), { headers: { accept: 'application/json' } }).then((r) => {
-      if (!r.ok) throw new Error('HTTP ' + r.status)
+      if (!r.ok) throw responseError(r)
       return r.json()
     })
     const getStatus = () => fetch('/api/all-usage/status', { headers: { accept: 'application/json' } }).then((r) => {
-      if (!r.ok) throw new Error('HTTP ' + r.status)
+      if (!r.ok) throw responseError(r)
       return r.json()
     })
     // The host asks the registry (the page cannot reach it from the desktop shell)
@@ -3721,6 +3753,9 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       const [stats, setStats] = React.useState(null)
       const [status, setStatus] = React.useState(null)
       const [statsError, setStatsError] = React.useState('')
+      // Set only when the host refused the request, so the empty state can say
+      // which rule failed instead of repeating "please retry".
+      const [accessError, setAccessError] = React.useState('')
       const [lastStatsAt, setLastStatsAt] = React.useState(0)
       const [balance, setBalance] = React.useState(null)
       const [range, setRange] = React.useState(() => usageUiState.range || 'today')
@@ -3944,14 +3979,16 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
             fullFailures = 0
             clearRetry()
             setStatsError('')
+            setAccessError('')
             setLastStatsAt(Date.now())
             setStatus(data)
             lastStatusSignature = JSON.stringify(data)
             setStats(data)
             if (tokenChanged) refreshBalance(false)
-          }, () => {
+          }, (error) => {
             if (!alive || !statsGate.isCurrent(seq)) return
             setStatsError('full')
+            setAccessError(reasonOf(error))
             scheduleRetry('full')
           })
         }
@@ -3989,9 +4026,11 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
             }
             clearRetry()
             setStatsError('')
-          }, () => {
+            setAccessError('')
+          }, (error) => {
             if (!alive || !statusGate.isCurrent(seq)) return
             setStatsError('status')
+            setAccessError(reasonOf(error))
             scheduleRetry('status')
           })
         }
@@ -4365,7 +4404,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         return React.createElement('div', { className: 'uh-page' },
           React.createElement('div', { className: 'uh-panel' },
             React.createElement('div', { className: 'uh-empty' }, failed
-              ? tr('无法加载用量统计。请重试。', 'Unable to load usage statistics. Please retry.')
+              ? accessErrorText(accessError, language)
               : tr('正在加载用量统计…', 'Loading usage statistics…'),
             ),
             failed ? React.createElement('div', { style: { textAlign: 'center' } },
@@ -5387,6 +5426,17 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       // the count the host has just reported and never a stale guess.
       const archivePlanView = archivePlan === null ? null : archivePlanSummary(archivePlan, language)
       const archiveRecords = archivePlanView === null ? 0 : archivePlanView.records
+      // Which host names this deployment answers to, and where each came from: the
+      // one thing a reader needs when the panel refuses to load from a new address.
+      const accessView = statusPayload !== null && typeof statusPayload === 'object' && statusPayload.access !== null && typeof statusPayload.access === 'object' ? statusPayload.access : null
+      const accessHosts = accessView !== null && Array.isArray(accessView.hosts) ? accessView.hosts.filter((name) => typeof name === 'string' && name !== '') : []
+      const accessSources = accessView !== null && accessView.sources !== null && typeof accessView.sources === 'object' ? accessView.sources : {}
+      const accessEnvNames = Array.isArray(accessSources.env) ? accessSources.env.filter((name) => typeof name === 'string' && name !== '') : []
+      const accessSourcesText = pickFormat(language, '来源：环境变量 {env} · 公布地址 {advertised} · 监听地址 {listener}', 'Sources: env {env} · advertised {advertised} · listener {listener}', {
+        env: accessEnvNames.length === 0 ? '—' : accessEnvNames.join(', '),
+        advertised: typeof accessSources.advertised === 'string' && accessSources.advertised !== '' ? accessSources.advertised : '—',
+        listener: typeof accessSources.listener === 'string' && accessSources.listener !== '' ? accessSources.listener : '—',
+      })
       const archivePanel = archiveOpen ? React.createElement('div', { className: 'uh-panel uh-archive-panel uh-anim-panel' },
         React.createElement('div', { className: 'uh-archive-head' },
           React.createElement('div', { className: 'uh-title-with-icon' }, React.createElement(LineIcon, { name: 'cache', size: 16 }), React.createElement('strong', {}, tr('数据维护', 'Maintenance'))),
@@ -5417,6 +5467,16 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         ) : null,
         archiveResult === null ? null : React.createElement('div', { className: 'uh-archive-result', role: 'status' }, archiveResultSummary(archiveResult, language)),
         archiveError === '' ? null : React.createElement('div', { className: 'uh-archive-error', role: 'alert' }, archiveErrorMessage(archiveError, language)),
+        accessView === null ? null : React.createElement('div', { className: 'uh-access-block' },
+          React.createElement('div', { className: 'uh-title-with-icon' }, React.createElement(LineIcon, { name: 'lock', size: 16 }), React.createElement('strong', {}, tr('访问控制', 'Access control'))),
+          React.createElement('div', { className: 'uh-archive-note' }, accessView.strict === true
+            ? tr('仅接受本机（loopback）访问。', 'Loopback only.')
+            : tr('本机始终可用；另外接受以下主机名：', 'Loopback always works; these host names are also accepted:')),
+          accessHosts.length === 0
+            ? React.createElement('div', { className: 'uh-archive-note' }, tr('（暂无额外主机名）', '(no extra host names)'))
+            : React.createElement('ul', { className: 'uh-access-hosts' }, accessHosts.map((name) => React.createElement('li', { key: name }, name))),
+          React.createElement('div', { className: 'uh-archive-note' }, accessSourcesText),
+        ),
       ) : null
 
       const versionView = versionSummaryOf(stats !== null && typeof stats.pluginVersion === 'string' ? stats.pluginVersion : clientPluginVersion, versionInfo)
