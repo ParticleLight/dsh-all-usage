@@ -32,7 +32,7 @@ function makeRequest(method, headers = {}, body = '') {
   }
 }
 
-async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride, readSession: readSessionOverride, ledgerSeed = {}, storage: storageUnitOverride, timeout: timeoutOverride } = {}) {
+async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride, readSession: readSessionOverride, ledgerSeed = {}, storage: storageUnitOverride, timeout: timeoutOverride, advertisedUrl, boundOrigin } = {}) {
   const routes = new Map()
   const cleanups = []
   const listeners = {}
@@ -63,6 +63,11 @@ async function createApp({ key = 'test-key', workspaces = [], withStorage = fals
     register(route) {
       routes.set(route.path, route.handler)
       return () => routes.delete(route.path)
+    },
+    // Mirrors the real listener: the origin only exists once a port is bound.
+    getOrigin() {
+      if (boundOrigin === undefined) throw new Error('webserver: listener has not bound a port')
+      return boundOrigin
     },
   }
   const ctx = {
@@ -104,6 +109,9 @@ async function createApp({ key = 'test-key', workspaces = [], withStorage = fals
           : undefined
       }
       if (service === 'webServer') return webServer
+      if (service === 'webApp') {
+        return advertisedUrl === undefined ? undefined : { getAdvertisedUrl: () => advertisedUrl }
+      }
       if (service === 'subprocess') throw new Error('subprocess must not be requested')
       return undefined
     },
@@ -111,6 +119,14 @@ async function createApp({ key = 'test-key', workspaces = [], withStorage = fals
   apply(ctx)
   await new Promise((resolve) => setImmediate(resolve))
   return { routes, storageUnit, cleanups, listeners }
+}
+
+// A request that reached the listener from another machine on the network, which
+// is what a LAN address or a reverse proxy in front of it produces.
+function makeRemoteRequest(method, headers = {}, body = '', peer = '192.168.168.226') {
+  const request = makeRequest(method, headers, body)
+  request.socket = { remoteAddress: peer }
+  return request
 }
 
 async function call(app, path, request) {
@@ -955,4 +971,101 @@ test('full snapshot waits for the persisted pricing state before responding', as
   assert.equal(response.status, 200)
   assert.equal(response.json().pricing.catalogModelCount, 1)
   assert.equal(response.json().pricing.configured, true)
+})
+
+test('answers the dashboard on the bound LAN address and the advertised public URL', async () => {
+  const app = await createApp({
+    advertisedUrl: 'https://usage.example.com/',
+    boundOrigin: 'http://192.168.168.226:3080',
+  })
+
+  // Browsed by its interface address: the Host is the IP DSH binds.
+  const lan = await call(app, '/api/all-usage/status', makeRemoteRequest('GET', { host: '192.168.168.226:3080' }))
+  assert.equal(lan.status, 200)
+
+  // Browsed through the reverse proxy that publishes the public URL.
+  const proxied = await call(app, '/api/all-usage/status', makeRemoteRequest('GET', { host: 'usage.example.com' }))
+  assert.equal(proxied.status, 200)
+
+  // A proxy on this machine connects from loopback while forwarding its own Host.
+  const localProxy = await call(app, '/api/all-usage/status', makeRequest('GET', { host: 'usage.example.com' }))
+  assert.equal(localProxy.status, 200)
+
+  // A name this deployment does not answer to is refused, so a rebound DNS
+  // name still cannot read the API.
+  const foreignName = await call(app, '/api/all-usage/status', makeRemoteRequest('GET', { host: 'evil.example' }))
+  assert.equal(foreignName.status, 403)
+
+  // A remote socket presenting a loopback-only Host is a forged header.
+  const spoofedHost = await call(app, '/api/all-usage/status', makeRemoteRequest('GET', { host: '127.0.0.1:3080' }))
+  assert.equal(spoofedHost.status, 403)
+
+  // Loopback keeps working exactly as before.
+  const local = await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  assert.equal(local.status, 200)
+})
+
+test('accepts a proxied write whose Host and page origin name different trusted hosts', async () => {
+  const app = await createApp({
+    workspaces: [{ id: 'w1', path: '/repo', title: 'Repo' }],
+    advertisedUrl: 'https://usage.example.com/',
+    boundOrigin: 'http://192.168.168.226:3080',
+  })
+  // The lightweight status poll publishes only the derived capability id, so the
+  // capability itself comes from the full snapshot — which must also answer here.
+  const full = await call(app, '/api/all-usage', makeRemoteRequest('GET', { host: 'usage.example.com' }))
+  assert.equal(full.status, 200)
+  const token = full.json().requestToken
+
+  // TLS ends at the proxy: the page's origin is https while this hop is http,
+  // and the proxy rewrote Host to the upstream address.
+  const proxied = await call(app, '/api/all-usage/alias', makeRemoteRequest('POST', {
+    host: '192.168.168.226:3080',
+    origin: 'https://usage.example.com',
+    'x-all-usage-request-token': token,
+  }, JSON.stringify({ workspaceId: 'w1', alias: 'Work' })))
+  assert.equal(proxied.status, 200)
+  assert.equal(proxied.json().aliases.w1, 'Work')
+
+  // The capability is still required, and an origin outside the trusted set is
+  // still refused.
+  const noToken = await call(app, '/api/all-usage/alias', makeRemoteRequest('POST', {
+    host: 'usage.example.com',
+    origin: 'https://usage.example.com',
+  }, JSON.stringify({ workspaceId: 'w1', alias: 'Work' })))
+  assert.equal(noToken.status, 403)
+  const foreignOrigin = await call(app, '/api/all-usage/alias', makeRemoteRequest('POST', {
+    host: 'usage.example.com',
+    origin: 'https://evil.example',
+    'x-all-usage-request-token': token,
+  }, JSON.stringify({ workspaceId: 'w1', alias: 'Work' })))
+  assert.equal(foreignOrigin.status, 403)
+})
+
+test('reads extra trusted hosts from the environment and can restore the loopback-only boundary', async () => {
+  process.env.DSH_ALL_USAGE_TRUSTED_HOSTS = 'usage.internal.example, http://extra.example:8443'
+  try {
+    const app = await createApp({})
+    const bare = await call(app, '/api/all-usage/status', makeRemoteRequest('GET', { host: 'usage.internal.example' }))
+    assert.equal(bare.status, 200)
+    const withOrigin = await call(app, '/api/all-usage/status', makeRemoteRequest('GET', { host: 'extra.example:8443' }))
+    assert.equal(withOrigin.status, 200)
+  } finally {
+    delete process.env.DSH_ALL_USAGE_TRUSTED_HOSTS
+  }
+
+  process.env.DSH_ALL_USAGE_STRICT_LOCAL = '1'
+  try {
+    const app = await createApp({
+      advertisedUrl: 'https://usage.example.com/',
+      boundOrigin: 'http://192.168.168.226:3080',
+    })
+    // Strict mode ignores both services: only loopback answers.
+    const proxied = await call(app, '/api/all-usage/status', makeRemoteRequest('GET', { host: 'usage.example.com' }))
+    assert.equal(proxied.status, 403)
+    const local = await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    assert.equal(local.status, 200)
+  } finally {
+    delete process.env.DSH_ALL_USAGE_STRICT_LOCAL
+  }
 })
