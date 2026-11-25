@@ -1,5 +1,17 @@
 # Changelog
 
+## 未发布
+### 新功能
+- **局域网 IP 与反向代理域名都能打开看板** —— HTTP 守卫改为按主机名判定：loopback、DSH 公布的 `--public-url`、监听地址本身，以及 `DSH_ALL_USAGE_TRUSTED_HOSTS` 追加的名字。此前只有 loopback 能读，DSH 一旦 `--host` 绑到网卡，面板只会显示「无法加载用量统计」。
+- **`DSH_ALL_USAGE_STRICT_LOCAL=1` 可退回 loopback-only**，供不愿把 API 暴露给网络的部署。
+### 修复
+- **经反代写入价格会 403** —— `Origin` 的主机名属于本部署即可通过（TLS 在本进程之前终止时 scheme 会从 https 变成 http），不再要求与 `Host` 逐字相同。
+### Features
+- **The dashboard opens over a LAN address and a reverse-proxied domain** — the HTTP guard now decides from the host name: loopback, the `--public-url` DSH advertises, the listener's own address, and any name added through `DSH_ALL_USAGE_TRUSTED_HOSTS`. Previously only loopback could read, so a `--host` bound to an interface left the panel showing "Unable to load usage statistics".
+- **`DSH_ALL_USAGE_STRICT_LOCAL=1` restores loopback-only**, for deployments that would rather not publish the API.
+### Fixes
+- **Saving prices through a reverse proxy returned 403** — an `Origin` whose host belongs to this deployment is accepted (TLS may end before this process, turning https into http), so it no longer has to match `Host` literally.
+
 ## v1.2.4（2026-11-11）
 ### 新功能
 - **界面语言跟随 DSH 自带的八种语言** —— 首次打开跟随宿主语言，手动选择后记住。

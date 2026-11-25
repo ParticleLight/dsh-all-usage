@@ -92,8 +92,8 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 
 ## 技术栈与架构
 
-- **Host 端**（入口 `lib/index.js`，组装 `lib/plugin.js`）：按职责拆分为 `aggregation.js`（聚合与查询）、`ledger.js`（持久账本）、`session-sync.js`（历史/实时同步）、`pricing-runtime.js`（运行时定价）、`balance.js`（余额）、`http.js`（安全路由）；扫描 `turn/end`、`assistant/chunk` usage 和最终 `assistant/message.usage`，监听 `session/event` 实时折叠，并通过 `webServer` 服务注册数据路由。
-- **Client 端**：可读源码位于 `src/client.js`，`npm run build:client` 使用固定版本 Terser 生成 `window.__ModuleLoader__` 工厂格式的 `lib/client.js` 浏览器 bundle，并注册侧边栏「用量统计」入口（`sidebar.footer.action` 槽位）。所有 API 仅接受本机 loopback 请求并拒绝显式跨域请求；余额读取与别名写入还要求插件启动时生成、仅在当前进程有效的令牌（余额 GET 兼容浏览器省略 Origin）。英文模式的日期分桶、范围筛选、连续使用、热力图和导出时间统一按 UTC；中文模式按本地时区。
+- **Host 端**（入口 `lib/index.js`，组装 `lib/plugin.js`）：按职责拆分为 `aggregation.js`（聚合与查询）、`ledger.js`（持久账本）、`session-sync.js`（历史/实时同步）、`pricing-runtime.js`（运行时定价）、`balance.js`（余额）、`http.js`（安全路由）、`trusted-hosts.js`（API 接受哪些主机名）与 `net-address.js`（loopback 与主机名字面量）；扫描 `turn/end`、`assistant/chunk` usage 和最终 `assistant/message.usage`，监听 `session/event` 实时折叠，并通过 `webServer` 服务注册数据路由。
+- **Client 端**：可读源码位于 `src/client.js`，`npm run build:client` 使用固定版本 Terser 生成 `window.__ModuleLoader__` 工厂格式的 `lib/client.js` 浏览器 bundle，并注册侧边栏「用量统计」入口（`sidebar.footer.action` 槽位）。API 只回应属于本部署的主机名（loopback、DSH 公布的 `--public-url`、监听地址本身，以及 `DSH_ALL_USAGE_TRUSTED_HOSTS` 追加的名字），并拒绝显式跨域请求；余额读取与别名写入还要求插件启动时生成、仅在当前进程有效的令牌（余额 GET 兼容浏览器省略 Origin）。英文模式的日期分桶、范围筛选、连续使用、热力图和导出时间统一按 UTC；中文模式按本地时区。
 
 ![用量看板系统架构图](assets/readme-architecture-zh.svg)
 
@@ -119,7 +119,7 @@ dsh plugin --profile web add github:ParticleLight/dsh-all-usage
 - **运行环境**：需要 Node.js `>=22 <25`；CI 会在 Node 22 和 Node 24 上运行测试、语法检查和 npm 包内容检查。
 - **DSH 兼容**：`package.json` 声明 DSH runtime `>=0.1.1-rc.1 <0.1.5-0 || >=0.1.5-rc.1 <0.1.6-0 || >=0.1.7-rc.2 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || 0.2.1-alpha.2 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.2-alpha.3 || 0.2.2-rc.1 || 0.2.2-rc.2`，已在本机用真实 Cordis 服务链验证 `0.2.1-rc.1` / `0.2.1-rc.2`（Node 24 严格 smoke；这两条把 Cordis 提升为稳定版 4.0.5 / loader 1.0.6 / timer 1.1.7）、`0.2.2-rc.2`（同一 Cordis 稳定线 4.1.0 / loader 1.1.0 / timer 1.2.0）、`0.2.1-alpha.2` 以及 `0.2.0-rc.2`、`0.1.7-rc.2`、`0.1.5-rc.2`、`0.1.5-rc.1`、`0.1.1-rc.2`、`0.1.1-rc.1`；全部已声明版本都进了 CI smoke 矩阵（Node 22/24 双档），但 `0.2.1` 与 `0.2.2` 这几条因上游从未发布对应版本的 `@deepseek-ai/dsh-invariants`，CI 会**如实标记 SKIPPED，不等于通过**；`0.1.2-rc.1` 已通过实际使用验证兼容，但未纳入 CI smoke 矩阵。声明按元组逐条拆开而非写成单一区间，是因为 node-semver 只有在范围里存在与目标版本同 `major.minor.patch` 且自身带预发布标签的比较符时，才会放行该预发布版本 —— 例如必须写成 `>=0.2.0-rc.2` 才能让 `0.2.0-rc.2` 进入范围。
 - **桌面客户端（Electron，Windows）**：本插件在 DSH 桌面客户端上实测运行正常（实测 `@deepseek-ai/dsh-desktop` `0.1.7-rc.2`）。桌面客户端会在窗口顶部为自身的最小化 / 最大化 / 关闭按钮保留一条 40px 顶栏，并在文档上标记 `data-windows-titlebar` 与 `--dsh-windows-titlebar-height`；面板据此从该条**下方**开始绘制，所以桌面端自己的关闭按钮永远不会被面板盖住。浏览器端没有该标记，不留白。顶栏高度优先取宿主声明，其次取 Window Controls Overlay 矩形，最后退回 UA；需要微调时可在 DevTools 执行 `localStorage.setItem('dsh-all-usage:topInset', '48')` 后刷新（`0` 表示不留白），无需重新构建。桌面客户端自带运行时，实测版本 `0.1.7-rc.2` 已纳入声明区间与 CI smoke 矩阵（见下表）。
-- **Web 服务依赖**：Host 将 `webServer` 声明为必需依赖，确保服务晚挂载时由 DSH 等待后再执行插件；该包面向 DSH Web profile，不提供无 WebServer 的 headless 路由。HTTP 守卫还会检查真实 socket peer，反向代理只有在连接本身来自 loopback 时才会被接受。写接口（价格保存、立即同步、节假日抓取、别名）以**进程令牌**为授权凭据，不强制要求 `Origin`：DSH 桌面端把 UI 跑在自定义协议上、请求由 Electron 主进程转发，转发时会删掉 `Origin`（连同 `Host`/`Cookie`/`Sec-Fetch-*`），强制 Origin 会让桌面端所有写入 403；而 `Origin` 若存在仍必须是 loopback 或桌面端自身 scheme，`Host` 仍必须是 loopback（防 DNS rebinding）。
+- **Web 服务依赖**：Host 将 `webServer` 声明为必需依赖，确保服务晚挂载时由 DSH 等待后再执行插件；该包面向 DSH Web profile，不提供无 WebServer 的 headless 路由。HTTP 守卫按 `Host` 判定「这是不是本部署」：loopback、DSH 公布的 `--public-url` 主机、监听地址本身，以及 `DSH_ALL_USAGE_TRUSTED_HOSTS` 追加的名字；不在集合里的名字一律 403，所以 DNS rebinding 仍然无解。socket 对端不是 loopback 时，只允许访问集合里的非 loopback 名字——「远程 socket + 只属于 loopback 的 Host」是浏览器不会发出的组合，按伪造头处理。写接口（价格保存、立即同步、节假日抓取、别名）另以**进程令牌**为授权凭据，不强制要求 `Origin`：DSH 桌面端把 UI 跑在自定义协议上、请求由 Electron 主进程转发，转发时会删掉 `Origin`（连同 `Host`/`Cookie`/`Sec-Fetch-*`），强制 Origin 会让桌面端所有写入 403；`Origin` 若存在，其主机名必须属于同一集合（TLS 可能在本进程之前终止，scheme 会从 https 变成 http，所以只比主机名）。
 - **界面语言**：首次进入时面板跟随 DSH 的 **Language 设置**（`Settings → General → Language`，经宿主的 `locale` 服务读取）；宿主未提供该服务时退回浏览器语言，最后退回英语。在面板里手动选过语言之后以面板的选择为准，宿主设置不再覆盖它。日期与日历一律按本机时区（运行 DSH 的这台机器）计算，与界面语言无关；切换语言不会移动日界，也不会改取另一份日历。
 
 | DSH runtime | Node.js 支持 | 真实 Cordis smoke | 结论 |
@@ -253,6 +253,8 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 | 保留旧账本分片 | Host 环境变量 `DSH_ALL_USAGE_KEEP_LEGACY=1` | 默认在逐会话记录树确认写入后清理旧整体分片；设为 `1` 可保留。 |
 | 常驻用量明细行预算 | Host 环境变量 `DSH_ALL_USAGE_RESIDENT_ROWS` | 单位为「行」，默认 12000；有限数字向下取整（`Math.floor`）。负数表示全部明细行常驻内存；设为 0 时在扫描结束后交还所有可交还的行；非数字值回退默认。这是软预算：定价未定稿的行，以及正在写入 / 读取 / 重同步 / 预取的会话的行不会被交还。 |
 | 会话记录缓存上限 | Host 环境变量 `DSH_ALL_USAGE_RECORD_CACHE_MB` | 单位为 MiB，默认 16。只接受 ≥ 0 的有限数字，负数或非数字一律回退 16；设为 0 时只逐出**可逐出的干净记录**、至少保留最近一条，所以受保护的记录可以让实际常驻超过预算。这是软预算：脏 / 待写 / 写入中 / 重同步 / 预取 / 读取中的记录不会被逐出；账本存储不支持单条读回时一条都不逐出，记录全部常驻。占用由用量行数估算（不是实测分配），见 status 的 `recordCacheMB`。 |
+| 允许的访问主机名 | Host 环境变量 `DSH_ALL_USAGE_TRUSTED_HOSTS` | 逗号 / 空格 / 分号分隔；可写裸主机名、`host:port`、带方括号的 IPv6 或完整 URL。DSH 已经信任自己的 `--public-url` 与监听地址，这里用于追加额外名字（反代别名、另一个域名），loopback 条目会被忽略（loopback 始终可信）。 |
+| 恢复 loopback-only | Host 环境变量 `DSH_ALL_USAGE_STRICT_LOCAL=1` | 忽略上面两个自动来源，只接受 loopback 访问；用于不愿把 API 暴露给网络的部署。 |
 
 ## API 与 CLI
 
@@ -261,6 +263,8 @@ node scripts/replay-fixture.mjs fixtures/usage-events.json
 插件没有独立的运行时 CLI；官方安装命令见「快速开始」。开发和测试脚本见下文。
 
 ### HTTP API
+
+所有路由都要求 `Host` 属于本部署的主机名集合（见「配置」与「Web 服务依赖」）；写入接口另外需要 `x-all-usage-request-token`。
 
 - `GET /api/all-usage` — 兼容统计快照
 - `GET /api/all-usage/status` — 轻量 revision 与同步健康状态，并附带最近一次客户端环境报告（`clientEnv`）、运行中插件的版本号（`pluginVersion`）与写入令牌的派生 ID（`capabilityId`，令牌轮换时变化，用于让页面察觉宿主被重新加载；令牌本身只在完整快照里下发），以及 `memory` 常驻计数：`residentRows`（常驻用量明细行数）、`residentRecords`（常驻会话记录数）、`recordCacheMB`（会话记录缓存占用估算，MiB，一位小数；由用量行数推算，不是实测分配）、`sessions`（会话聚合数）、`recordsCache`（记录查询缓存统计）与 `heapUsedMB` / `rssMB`（均为整个 Host 进程的堆与 RSS，不是插件单独占用）；同一响应还带 `counters`（诊断操作计数）、`accounting`（当日聚合一致性）与 `mismatch`（首个桶增量不一致样本，无则为 null）
