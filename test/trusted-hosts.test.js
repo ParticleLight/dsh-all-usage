@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { hostnameFromAuthority, isLoopbackHostname, normalizeHostname } from '../lib/net-address.js'
-import { createTrustedHosts, parseTrustedHostList } from '../lib/trusted-hosts.js'
+import { createTrustedHosts, parseCmdlineHosts, parseTrustedHostList } from '../lib/trusted-hosts.js'
 
 test('normalizes host names and addresses the same way everywhere', () => {
   assert.equal(normalizeHostname('  Usage.Example.COM.  '), 'usage.example.com')
@@ -101,4 +101,66 @@ test('a host without a web server or web app still answers loopback only', () =>
   } finally {
     console.warn = originalWarn
   }
+})
+
+test('reads the Web flags DSH publishes as webStartup', () => {
+  const originalWarn = console.warn
+  console.warn = () => {}
+  try {
+    const trust = createTrustedHosts({
+      // `dsh-web-app` only reads its own config, so getAdvertisedUrl() reports the
+      // listener origin even when the CLI passed --public-url.
+      getWebApp: () => ({ getAdvertisedUrl: () => 'http://192.168.168.226:3080' }),
+      getWebServer: () => ({ getOrigin: () => 'http://192.168.168.226:3080' }),
+      getWebStartup: () => ({
+        host: '192.168.168.226',
+        port: 3080,
+        publicUrl: 'https://chat.example.com/',
+        trustedHosts: ['chat.example.com'],
+      }),
+      env: {},
+    })
+    assert.deepEqual(trust.names().sort(), ['192.168.168.226', 'chat.example.com'])
+    assert.equal(trust.has('chat.example.com'), true)
+    const view = trust.describe()
+    // The CLI public URL wins over the listener origin the web app reports.
+    assert.equal(view.sources.advertised, 'chat.example.com')
+    assert.deepEqual(view.sources.trusted, ['chat.example.com'])
+    assert.equal(view.sources.listener, '192.168.168.226')
+  } finally {
+    console.warn = originalWarn
+  }
+})
+
+test('falls back to the launcher command line when webStartup is absent', () => {
+  const originalWarn = console.warn
+  console.warn = () => {}
+  try {
+    const trust = createTrustedHosts({
+      getWebApp: () => ({ getAdvertisedUrl: () => 'http://10.0.0.5:3080' }),
+      getWebServer: () => ({ getOrigin: () => 'http://10.0.0.5:3080' }),
+      getCmdlineArgs: () => ({
+        get: () => ['web', '--host', '10.0.0.5', '--port', '3080', '--public-url=https://panel.example/', '--trusted-host', 'panel.example', '--trusted-host', 'alias.example:8443'],
+      }),
+      env: {},
+    })
+    assert.equal(trust.describe().sources.advertised, 'panel.example')
+    assert.deepEqual(trust.names().sort(), ['10.0.0.5', 'alias.example', 'panel.example'])
+  } finally {
+    console.warn = originalWarn
+  }
+})
+
+test('parses --public-url and a repeated --trusted-host out of an argument snapshot', () => {
+  assert.deepEqual(parseCmdlineHosts(['web', '--public-url', 'https://x.example/', '--trusted-host', 'x.example']), {
+    publicUrl: 'https://x.example/',
+    trustedHosts: ['x.example'],
+  })
+  assert.deepEqual(parseCmdlineHosts(['web', '--public-url=https://y.example/', '--trusted-host=a.example', '--trusted-host=b.example:8443']), {
+    publicUrl: 'https://y.example/',
+    trustedHosts: ['a.example', 'b.example:8443'],
+  })
+  // A flag with no value (or followed by another flag) contributes nothing.
+  assert.deepEqual(parseCmdlineHosts(['web', '--public-url', '--trusted-host']), { publicUrl: '', trustedHosts: [] })
+  assert.deepEqual(parseCmdlineHosts(undefined), { publicUrl: '', trustedHosts: [] })
 })
