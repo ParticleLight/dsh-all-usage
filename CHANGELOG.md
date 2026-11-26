@@ -8,6 +8,7 @@
 - **面板里能看到放行名单** —— 「数据维护」底部新增只读的「访问控制」：本部署接受的主机名及其来源（环境变量 / 公布地址 / 监听地址）。
 ### 修复
 - **经反代写入价格会 403** —— `Origin` 的主机名属于本部署即可通过（TLS 在本进程之前终止时 scheme 会从 https 变成 http），不再要求与 `Host` 逐字相同。
+- **`--public-url` 与 `--trusted-host` 没生效，域名访问仍被拒** —— 这两个参数只落到 DSH 的 `webStartup` 服务，`webApp.getAdvertisedUrl()` 读的是自己的 config，于是可信集合里只有网卡地址。现在直接读 `webStartup`（`cmdlineArgs` 兜底），反代域名无需额外配置即可访问。
 - **打不开时只剩「请重试」** —— 空状态改为按 403 的原因给话：地址没被放行时直接点出当前地址与要检查的 `--public-url` / `--host` / `DSH_ALL_USAGE_TRUSTED_HOSTS`。
 ### Features
 - **The dashboard opens over a LAN address and a reverse-proxied domain** — the HTTP guard now decides from the host name: loopback, the `--public-url` DSH advertises, the listener's own address, and any name added through `DSH_ALL_USAGE_TRUSTED_HOSTS`. Previously only loopback could read, so a `--host` bound to an interface left the panel showing "Unable to load usage statistics".
@@ -16,6 +17,7 @@
 - **The allowlist is visible in the panel** — Maintenance ends with a read-only *Access control* block: the host names this deployment answers to and where each came from (environment, advertised URL, listener address).
 ### Fixes
 - **Saving prices through a reverse proxy returned 403** — an `Origin` whose host belongs to this deployment is accepted (TLS may end before this process, turning https into http), so it no longer has to match `Host` literally.
+- **`--public-url` / `--trusted-host` were ignored, so the proxied domain still got 403** — the flags land in DSH's `webStartup` service while `webApp.getAdvertisedUrl()` reads its own config, which left only the interface address in the allowlist. The set now reads `webStartup` (with `cmdlineArgs` as a fallback), so a proxied deployment needs no extra configuration.
 - **A failed load said only "please retry"** — the empty state now follows the refusal reason: a host that is not trusted names the current address and the `--public-url` / `--host` / `DSH_ALL_USAGE_TRUSTED_HOSTS` to check.
 
 ## v1.2.4（2026-11-11）
