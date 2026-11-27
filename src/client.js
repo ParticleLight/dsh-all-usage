@@ -3464,14 +3464,28 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       if (!r.ok) throw new Error('HTTP ' + r.status)
       return r.json()
     })
+    const readWriteResponse = async (response) => {
+      let data = null
+      try { data = await response.json() } catch (error) { if (response.ok) throw error }
+      if (!response.ok) {
+        const error = new Error('HTTP ' + response.status)
+        error.status = response.status
+        if (data && typeof data === 'object') {
+          error.messageCode = typeof data.messageCode === 'string' ? data.messageCode : data.message
+          error.applied = data.applied
+          error.persisted = data.persisted
+          error.stage = data.stage
+        }
+        throw error
+      }
+      return data
+    }
+    const writeFailureCode = (reason, fallback) => reason && reason.status === 403 ? 'stale' : reason && reason.messageCode === 'persistence-failed' && reason.applied === true && reason.persisted === false ? 'persistence' : fallback
     const setAliasRpc = (workspaceId, alias, writeToken) => fetch('/api/all-usage/alias', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-all-usage-request-token': writeToken },
       body: JSON.stringify({ workspaceId, alias }),
-    }).then((r) => {
-      if (!r.ok) throw new Error('HTTP ' + r.status)
-      return r.json()
-    })
+    }).then(readWriteResponse)
     const getPricing = () => fetch('/api/all-usage/pricing', { headers: { accept: 'application/json' } }).then((r) => {
       if (!r.ok) throw new Error('HTTP ' + r.status)
       return r.json()
@@ -3487,18 +3501,12 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-all-usage-request-token': writeToken },
       body: JSON.stringify({ pricing, backfill: backfill === true }),
-    }).then((r) => {
-      if (!r.ok) { const error = new Error('HTTP ' + r.status); error.status = r.status; throw error }
-      return r.json()
-    })
+    }).then(readWriteResponse)
     const syncPricingRpc = (writeToken) => fetch('/api/all-usage/pricing/sync', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-all-usage-request-token': writeToken },
       body: '{}',
-    }).then((r) => {
-      if (!r.ok) { const error = new Error('HTTP ' + r.status); error.status = r.status; throw error }
-      return r.json()
-    })
+    }).then(readWriteResponse)
     // Fetches one year of the Chinese holiday arrangement; nothing is stored
     // until the user saves, which is what freezes the dates into the policy.
     const loadHolidayCalendarRpc = (year, writeToken) => fetch('/api/all-usage/pricing/holidays', {
@@ -3753,6 +3761,9 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       const [auditError, setAuditError] = React.useState('')
       const [aliasOpen, setAliasOpen] = React.useState(false)
       const [aliasDrafts, setAliasDrafts] = React.useState({})
+      const [aliasSaving, setAliasSaving] = React.useState(false)
+      const [aliasError, setAliasError] = React.useState('')
+      const aliasPendingRef = React.useRef(new Set())
       const [pricingOpen, setPricingOpen] = React.useState(false)
       // Cold-ledger maintenance: the panel shows the plan of the last dry run, and a
       // destructive run needs a second click, so the state is kept apart from the
@@ -3840,15 +3851,15 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         setPricingLoading(true)
         getPricing().then((pricing) => {
           if (!pricingGate.isCurrent(seq)) return
-          if (!pricing || typeof pricing !== 'object' || !pricing.config) { setPricingError('load'); setPricingLoading(false); return }
+          if (!pricing || typeof pricing !== 'object' || !pricing.config) { setPricingError((error) => error === '' ? 'load' : error); setPricingLoading(false); return }
           // A refreshed catalog invalidates searches issued against the old one.
           invalidatePricingSearches()
           setPricingDetails(pricing)
           setPricingDraft((prev) => pricingDraftAfterSync(prev, pricing))
-          setPricingError('')
+          setPricingError((error) => error === 'load' ? '' : error)
           setPricingLoading(false)
         }, () => {
-          if (pricingGate.isCurrent(seq)) { setPricingError('load'); setPricingLoading(false) }
+          if (pricingGate.isCurrent(seq)) { setPricingError((error) => error === '' ? 'load' : error); setPricingLoading(false) }
         })
       }, [pricingSaving, pricingSyncing, pricingSyncSaving])
       React.useEffect(() => { refreshPricingPanelRef.current = refreshOpenPricing })
@@ -3907,8 +3918,11 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
           const seq = balanceGate.next()
           getBalance(force === true, requestToken).then((data) => {
             if (!alive || !balanceGate.isCurrent(seq)) return
-            if (data) setBalance(data)
-          }, () => {})
+            setBalance(data && typeof data === 'object' && ['ok', 'missing-key', 'error', 'unavailable'].includes(data.status) ? data : { status: 'error', messageCode: 'lookup-failed' })
+          }, () => {
+            if (!alive || !balanceGate.isCurrent(seq)) return
+            setBalance({ status: 'error', messageCode: 'lookup-failed' })
+          })
         }
         const scheduleRetry = (kind) => {
           if (!alive || retryTimer !== null) return
@@ -4396,35 +4410,52 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
             const next = data !== null && typeof data === 'object' && typeof data.requestToken === 'string' ? data.requestToken : ''
             if (next === '' || next === token) { onFailure(reason); return undefined }
             requestTokenRef.current = next
-            return send(next).then(onSuccess, () => { onFailure(reason) })
+            return send(next).then(onSuccess, onFailure)
           }, () => { onFailure(reason) })
         }
         return send(token).then(onSuccess, retry)
       }
-      const saveAlias = (wsId, value) => {
-        if (requestTokenRef.current === '') return
-        writeWithFreshToken(
-          (token) => setAliasRpc(wsId, String(value === undefined ? '' : value).trim(), token),
-          (res) => {
-            if (res && res.ok && res.aliases) {
-              setStats((prev) => (prev === null ? prev : Object.assign({}, prev, { aliases: res.aliases })))
-            }
-          },
-          () => {}
-        )
+      const saveAliases = (entries) => {
+        if (aliasSaving) return Promise.resolve(false)
+        if (requestTokenRef.current === '') { setAliasError('token'); return Promise.resolve(false) }
+        setAliasError('')
+        if (entries.length === 0) return Promise.resolve(true)
+        setAliasSaving(true)
+        return Promise.all(entries.map(([wsId, value]) => {
+          aliasPendingRef.current.add(wsId)
+          let saved = false
+          return writeWithFreshToken(
+            (token) => setAliasRpc(wsId, String(value === undefined ? '' : value).trim(), token),
+            (res) => {
+              if (!res || res.ok !== true || !res.aliases || typeof res.aliases !== 'object') { setAliasError('save'); return }
+              saved = true
+              aliasPendingRef.current.delete(wsId)
+              // A sibling save can finish first; acknowledge only this workspace.
+              setStats((prev) => {
+                if (prev === null) return prev
+                const next = Object.assign({}, prev.aliases)
+                if (typeof res.aliases[wsId] === 'string') next[wsId] = res.aliases[wsId]
+                else delete next[wsId]
+                return Object.assign({}, prev, { aliases: next })
+              })
+            },
+            (reason) => { setAliasError(writeFailureCode(reason, 'save')) }
+          ).then(() => saved)
+        })).then((results) => results.every(Boolean)).finally(() => setAliasSaving(false))
       }
+      const saveAlias = (wsId, value) => saveAliases([[wsId, value]])
       const openAliasPanel = () => {
+        if (aliasSaving) return
         const drafts = {}
         workspaces.forEach((w) => { drafts[w.id] = typeof aliases[w.id] === 'string' ? aliases[w.id] : '' })
         setAliasDrafts(drafts)
+        setAliasError('')
         setAliasOpen(true)
       }
       const saveAllAliases = () => {
-        for (const id of Object.keys(aliasDrafts)) {
-          const current = typeof aliases[id] === 'string' ? aliases[id] : ''
-          if (aliasDrafts[id] !== current) saveAlias(id, aliasDrafts[id])
-        }
-        setAliasOpen(false)
+        // A snapshot may already include an applied write whose persistence failed.
+        const entries = Object.keys(aliasDrafts).filter((id) => aliasPendingRef.current.has(id) || aliasDrafts[id] !== (typeof aliases[id] === 'string' ? aliases[id] : '')).map((id) => [id, aliasDrafts[id]])
+        return saveAliases(entries).then((saved) => { if (saved) setAliasOpen(false) })
       }
       // ---------- cost settings: one editable price table ----------
       const resetPricingTransients = () => {
@@ -4452,6 +4483,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         // apply is never covered by the cost dialog; otherwise the two panels are mutual
         // exclusive the same way the alias panel and the cost panel already are.
         if (archiveBusy) return
+        if (aliasSaving) return
         closeArchivePanel()
         const seq = pricingGate.next()
         setPricingDetails(null)
@@ -4500,7 +4532,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
             closePricingPanel()
             refreshRef.current()
           },
-          (reason) => { if (pricingGate.isCurrent(seq)) setPricingError(reason && reason.status === 403 ? 'stale' : 'save') }
+          (reason) => { if (pricingGate.isCurrent(seq)) setPricingError(writeFailureCode(reason, 'save')) }
         ).finally(() => setPricingSaving(false))
       }
       const syncPricingNow = () => {
@@ -4525,7 +4557,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
             setPricingTemporalDrafts({})
             refreshRef.current()
           },
-          (reason) => { setPricingError(reason && reason.status === 403 ? 'stale' : 'sync') }
+          (reason) => { setPricingError(writeFailureCode(reason, 'sync')) }
         ).finally(() => setPricingSyncing(false))
       }
       const updatePricingSync = (enabled) => {
@@ -4557,7 +4589,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
             setPricingDraft((prev) => prev === null ? prev : Object.assign({}, prev, { sync: Object.assign({}, prev.sync, { autoEnabled: savedEnabled, intervalMs: data.pricing.sync && data.pricing.sync.intervalMs }) }))
             persistUsageUiState({ pricingAutoSync: savedEnabled })
           },
-          (reason) => rollback(reason && reason.status === 403 ? 'stale' : 'save')
+          (reason) => rollback(writeFailureCode(reason, 'save'))
         ).finally(() => setPricingSyncSaving(false))
       }
       const updateRowRate = (view, field, value) => {
@@ -4736,9 +4768,8 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         resetArchiveTransients()
       }
       const openArchivePanel = () => {
-        // The cost panel holds itself open while it saves (closePricingPanel refuses
-        // then), so maintenance waits for that write instead of stacking two panels.
-        if (pricingSaving || pricingSyncing || pricingSyncSaving) return
+        // Editors stay visible until their writes finish; maintenance waits too.
+        if (pricingSaving || pricingSyncing || pricingSyncSaving || aliasSaving) return
         closePricingPanel()
         setAliasOpen(false)
         resetArchiveTransients()
@@ -4807,16 +4838,23 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       let balanceValue = '—'
       let balanceSub = tr('查询中…', 'Checking…')
       if (balance !== null && balance !== undefined) {
+        const balanceMessage = balance.messageCode === 'unsupported-runtime'
+          ? tr('当前 DSH 运行时不支持余额查询', 'The current DSH runtime does not support balance lookups')
+          : balance.messageCode === 'balance-unavailable'
+            ? tr('DeepSeek 接口返回余额不可用', 'The DeepSeek API reported that balance information is unavailable')
+            : balance.messageCode === 'lookup-failed'
+              ? tr('余额查询失败', 'Balance lookup failed')
+              : balance.message || ''
         if (balance.status === 'missing-key') {
           balanceValue = tr('未配置', 'Not configured')
           balanceSub = tr('在 设置 → 模型 中填写 DeepSeek API Key 后可见', 'Available after you enter a DeepSeek API key in Settings → Models')
         } else if (balance.status === 'unavailable') {
           balanceValue = tr('不可用', 'Unavailable')
-          balanceSub = balance.message || tr('DeepSeek 接口返回余额不可用', 'The DeepSeek API reported that balance information is unavailable')
+          balanceSub = balanceMessage || tr('DeepSeek 接口返回余额不可用', 'The DeepSeek API reported that balance information is unavailable')
         } else if (balance.status === 'error') {
           balanceValue = tr('查询失败', 'Lookup failed')
           const detail = balance.detail ? (pickFormat(language, '（{detail}）', ' ({detail})', { detail: String(balance.detail).slice(0, 90) })) : ''
-          balanceSub = (balance.message || '') + detail + tr(' 点“刷新”重试', ' Click Refresh to try again')
+          balanceSub = (balanceMessage || tr('余额查询失败', 'Balance lookup failed')) + detail + tr(' 点“刷新”重试', ' Click Refresh to try again')
         } else if (balance.status === 'ok' && Array.isArray(balance.currencies) && balance.currencies.length > 0) {
           const list = balance.currencies
           const primary = list.find((c) => c.currency === 'CNY') || list[0]
@@ -4993,7 +5031,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         ? React.createElement('div', { className: 'uh-panel uh-anim-panel' },
           React.createElement('div', { className: 'uh-alias-panel-head' },
             React.createElement('span', {}, tr('工作区别名', 'Workspace Aliases')),
-            React.createElement('button', { className: 'uh-alias-close', onClick: () => setAliasOpen(false) }, tr('关闭', 'Close')),
+            React.createElement('button', { className: 'uh-alias-close', disabled: aliasSaving, onClick: () => setAliasOpen(false) }, tr('关闭', 'Close')),
           ),
           workspaces.length === 0
             ? React.createElement('div', { className: 'uh-empty', style: { padding: '10px 0' } }, tr('暂无工作区', 'No workspaces yet'))
@@ -5003,16 +5041,22 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
                 React.createElement('span', { className: 'uh-alias-folder', title: w.path || w.id }, (w.retiredBucket === true ? tr('已删除', 'Deleted') : (w.title || w.path || w.id)) + (w.deleted === true && w.retiredBucket !== true ? tr('（已删除）', ' (deleted)') : '')),
                 React.createElement('input', {
                   className: 'uh-alias-input',
+                  disabled: aliasSaving,
                   value: aliasDrafts[w.id] !== undefined ? aliasDrafts[w.id] : '',
                   placeholder: tr('项目别名', 'Project alias'),
-                  onChange: (e) => setAliasDrafts((prev) => Object.assign({}, prev, { [w.id]: e.target.value })),
+                  onChange: (e) => { setAliasDrafts((prev) => Object.assign({}, prev, { [w.id]: e.target.value })); setAliasError('') },
                   onKeyDown: (e) => { if (e.key === 'Enter') saveAlias(w.id, e.target.value) },
                 }),
               )),
             ),
+          aliasError !== '' ? React.createElement('div', { className: 'uh-pricing-error', role: 'alert' }, aliasError === 'persistence'
+            ? tr('设置已在当前进程应用，但尚未写入存储，请重试保存。', 'The settings are applied in this process but have not been saved to storage. Retry saving.')
+            : aliasError === 'token' || aliasError === 'stale'
+              ? tr('当前进程令牌不可用，请刷新看板', 'The process capability is unavailable; refresh the dashboard')
+              : tr('工作区别名保存失败，已保留编辑，请重试保存。', 'Workspace aliases could not be saved; your edits were kept. Retry saving.')) : null,
           React.createElement('div', { className: 'uh-alias-panel-foot' },
             React.createElement('span', { className: 'uh-note' }, tr('回车保存单个；清空别名还原文件夹名', 'Press Enter to save one; clear an alias to restore the folder name')),
-            React.createElement('button', { className: 'uh-alias-ok', onClick: saveAllAliases }, tr('全部保存', 'Save All')),
+            React.createElement('button', { className: 'uh-alias-ok', disabled: aliasSaving, onClick: saveAllAliases }, aliasSaving ? tr('保存中…', 'Saving…') : tr('全部保存', 'Save All')),
           ),
         )
         : null
@@ -5036,7 +5080,9 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
       // The host rotates its write capability whenever the plugin is applied, so
       // a rejected write is a stale capability far more often than a permission
       // problem. Say both, and report the automatic retry when it already failed.
-      const pricingErrorMessage = (code) => code === 'stale'
+      const pricingErrorMessage = (code) => code === 'persistence'
+        ? tr('设置已在当前进程应用，但尚未写入存储，请重试保存。', 'The settings are applied in this process but have not been saved to storage. Retry saving.')
+        : code === 'stale'
         ? tr('写入被拒绝：进程令牌已失效，自动重取令牌后仍失败，请刷新看板', 'Write rejected: the process capability had rotated and the automatic retry still failed; refresh the dashboard')
         : code === 'forbidden'
           ? tr('写入被拒绝：权限校验未通过（也可能是进程令牌已失效），请刷新看板后重试', 'Write rejected: the permission check failed (a stale process capability is also possible); refresh the dashboard and retry')
@@ -5178,7 +5224,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         })
         return React.createElement('div', { className: 'uh-pricing-tier-editor uh-pricing-temporal-editor' },
           header,
-          React.createElement('div', { className: 'uh-pricing-tier-empty' }, tr('谷时段（未命中规则）使用该行基础价，峰时段使用规则费率；周几与时间均为 UTC。', 'Off-peak (no rule match) uses the row base rates, peak uses the rule rates. Weekdays and times are UTC.')),
+          React.createElement('div', { className: 'uh-pricing-tier-empty' }, tr('谷时段（未命中规则）使用该行基础价，峰时段使用规则费率；周几与时间均为北京时间（UTC+8）。', 'Off-peak (no rule match) uses the row base rates, peak uses the rule rates. Weekdays and times are UTC.')),
           React.createElement('div', { className: 'uh-pricing-temporal-fields' },
             React.createElement('label', {}, React.createElement('span', {}, tr('策略 ID', 'Policy ID')), React.createElement('input', { type: 'text', value: draft.policyId, disabled: pricingBusy, onChange: (event) => applyTemporalDraft(view, Object.assign(pricingTemporalDraftClone(draft), { policyId: event.target.value })) })),
             React.createElement('label', {}, React.createElement('span', {}, tr('生效起点（北京时间，留空 = 全部历史）', 'Effective from (UTC, empty = all history)')), React.createElement('input', { type: 'date', value: draft.effectiveFromText, disabled: pricingBusy, onChange: (event) => applyTemporalDraft(view, Object.assign(pricingTemporalDraftClone(draft), { effectiveFromText: event.target.value })) })),
@@ -5314,7 +5360,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
           React.createElement('div', { className: 'uh-title-with-icon' }, React.createElement(LineIcon, { name: 'wallet', size: 16 }), React.createElement('strong', {}, tr('成本统计设置', 'Cost Statistics'))),
           React.createElement('button', { type: 'button', className: 'uh-refresh uh-icon-button', title: tr('关闭成本设置', 'Close cost settings'), 'aria-label': tr('关闭成本设置', 'Close cost settings'), disabled: pricingBusy, onClick: closePricingPanel }, React.createElement(LineIcon, { name: 'close', size: 16 })),
         ),
-        React.createElement('div', { className: 'uh-pricing-note' }, tr('价格单位为 USD / 1M Token。直接改价格框即创建或更新手工价（同一官方模型的所有行共享同一价格）；「官方模型」列选定映射后该行自动改用官方目录价；「档位」配置上下文费率档，「分时计费」配置 UTC 峰谷规则。', 'Prices are USD per 1M tokens. Editing a price box creates or updates a manual price (every row priced from the same official model shares it). Picking an official model in the mapping column switches the row to the catalog price. Bands add context-dependent rates; Time-of-day adds UTC peak rules.')),
+        React.createElement('div', { className: 'uh-pricing-note' }, tr('价格单位为 USD / 1M Token。直接改价格框即创建或更新手工价（同一官方模型的所有行共享同一价格）；「官方模型」列选定映射后该行自动改用官方目录价；「档位」配置上下文费率档，「分时计费」配置北京时间峰谷规则。', 'Prices are USD per 1M tokens. Editing a price box creates or updates a manual price (every row priced from the same official model shares it). Picking an official model in the mapping column switches the row to the catalog price. Bands add context-dependent rates; Time-of-day adds UTC peak rules.')),
         React.createElement('div', { className: 'uh-pricing-toolbar' },
           React.createElement('label', { className: 'uh-pricing-switch' },
             React.createElement('input', { type: 'checkbox', checked: pricingDraft.sync.autoEnabled === true, disabled: pricingBusy, onChange: (event) => updatePricingSync(event.target.checked) }),
@@ -5467,7 +5513,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         React.createElement('span', { className: 'uh-gh-label' }, 'GitHub'),
       )
       const rangeLabel = range === 'custom' && activeCustomRange !== null
-        ? (pickFormat(language, '{start} 至 {end}', '{start} to {end} (UTC)', { start: activeCustomRange.start, end: activeCustomRange.end }))
+        ? (pickFormat(language, '{start} 至 {end}', '{start} to {end}', { start: activeCustomRange.start, end: activeCustomRange.end }))
         : range === 'today' ? tr('今日', 'Today') : range === '7d' ? tr('近 7 天', 'Last 7 Days') : range === '30d' ? tr('近 30 天', 'Last 30 Days') : range === '90d' ? tr('近 90 天', 'Last 90 Days') : range === 'month' ? tr('当月', 'This Month') : tr('全部', 'All Time')
       const rangeFilePart = rangeFilenamePart(range, activeCustomRange, useUtc)
       const customRangeErrorText = customDraftIssue === 'invalid'
@@ -5522,11 +5568,18 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
         try {
           let cursor = null
           const all = []
-          for (let page = 0; page < 50; page += 1) {
+          const seenCursors = new Set()
+          while (true) {
             const data = await getUsageRecords(selectedDetailScope, cursor, 200)
             if (data === null || typeof data !== 'object' || !Array.isArray(data.items) || expectedQueryVersion === null || queryVersion(data) !== expectedQueryVersion) throw new Error('audit export stale')
+            if (typeof data.hasMore !== 'boolean') throw new Error('audit export invalid page')
             all.push(...data.items)
-            if (!data.hasMore || !data.nextCursor) break
+            if (!data.hasMore) {
+              if (data.nextCursor !== null && data.nextCursor !== undefined) throw new Error('audit export unexpected cursor')
+              break
+            }
+            if (data.items.length === 0 || typeof data.nextCursor !== 'string' || data.nextCursor === '' || seenCursors.has(data.nextCursor)) throw new Error('audit export invalid cursor')
+            seenCursors.add(data.nextCursor)
             cursor = data.nextCursor
           }
           const quote = (value) => '"' + String(value === undefined || value === null ? '' : value).replace(/"/g, '""') + '"'
@@ -5605,7 +5658,7 @@ body[data-ds-dark-theme] .uh-side-modal, body[data-ds-dark-theme] .uh-side-dialo
             React.createElement('button', {
               className: 'uh-refresh',
               title: tr('管理工作区别名', 'Manage workspace aliases'),
-              onClick: () => { if (aliasOpen) setAliasOpen(false); else openAliasPanel() },
+              onClick: () => { if (aliasSaving) return; if (aliasOpen) setAliasOpen(false); else openAliasPanel() },
             }, React.createElement(LineIcon, { name: 'edit', size: 14 }), tr('工作区别名', 'Workspace Aliases')),
             React.createElement('button', {
               className: 'uh-refresh',

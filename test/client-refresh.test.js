@@ -490,7 +490,7 @@ test('renders cost totals, pricing status, and the merged price table controls',
   assert.match(source, /const writeWithFreshToken = \(send, onSuccess, onFailure\) => \{/)
   assert.match(source, /reason\.status !== 403\) \{ onFailure\(reason\); return Promise\.resolve\(\) \}/)
   assert.match(source, /const retry = \(reason\) => \{/)
-  assert.match(source, /setPricingError\(reason && reason\.status === 403 \? 'stale' : 'save'\)/)
+  assert.ok(source.includes("setPricingError(writeFailureCode(reason, 'save'))"))
   assert.doesNotMatch(source, /stats\.requestToken/)
   assert.match(source, /disabled: pricingBusy, onClick: closePricingPanel/)
   assert.match(source, /pricingLoading/)
@@ -956,4 +956,223 @@ test('offers a GitHub star button beside the version chip', () => {
   assert.ok(star.includes("'GitHub'"), 'the button is labelled GitHub')
   assert.match(source, /versionBadge,\s+starButton,/, 'it sits right after the version chip')
   assert.ok(source.includes('.uh-gh-star { flex:none; fill:#f5c542; }'), 'the star is yellow')
+})
+
+// Exercise the actual effects with controllable promises. A source-string guard
+// alone cannot prove that stale status, snapshot and query completions are ignored.
+function refreshDeferred() {
+  let resolve, reject
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+const settleRefresh = async () => { for (let index = 0; index < 16; index += 1) await Promise.resolve() }
+function refreshEffectSlice(start, end) {
+  const marker = source.indexOf(start)
+  const from = source.lastIndexOf('      React.useEffect(() => {', marker)
+  const to = source.indexOf(end, marker)
+  assert.ok(marker >= 0 && from >= 0 && to > marker, 'the real refresh effect boundaries must exist')
+  return source.slice(from, to)
+}
+function refreshSnapshot(extra = {}) {
+  return { instanceId: 'host-a', revision: 10, dataRevision: 4, metadataRevision: 2, scanRevision: 8, pricingRevision: 1, queryRevision: '4:1', capabilityId: 'cap-a', requestToken: 'token-a', scan: { done: true }, ...extra }
+}
+function mountRefreshEffect() {
+  const pending = [], intervals = [], cleanups = [], retries = new Map()
+  const draft = { providerAliases: [], mappings: [], overrides: [{ model: 'local-edit', input: '7' }] }
+  const state = { stats: null, status: null, balance: null, statsError: '', pricingError: '', pricingDraft: draft, statusPublications: 0 }
+  const request = (kind, args = []) => { const item = { kind, args, ...refreshDeferred() }; pending.push(item); return item.promise }
+  const context = {
+    createRequestGate, queryVersion, statusRefreshKind, retryDelayFor, pricingDraftAfterSync,
+    React: { useCallback: (fn) => fn, useEffect: (fn) => { const cleanup = fn(); if (typeof cleanup === 'function') cleanups.push(cleanup) } },
+    statsGate: createRequestGate(), statusGate: createRequestGate(), balanceGate: createRequestGate(), pricingGate: createRequestGate(),
+    getStats: () => request('snapshot'), getStatus: () => request('status'), getBalance: (...args) => request('balance', args), getPricing: () => request('pricing'),
+    setStats: (data) => { state.stats = data }, setStatus: (data) => { state.status = data; state.statusPublications += 1 },
+    setBalance: (data) => { state.balance = data }, setStatsError: (value) => { state.statsError = value }, setLastStatsAt() {},
+    setPricingLoading: (value) => { state.pricingLoading = value }, setPricingError: (update) => { state.pricingError = typeof update === 'function' ? update(state.pricingError) : update },
+    setPricingDetails: (value) => { state.pricingDetails = value },
+    setPricingDraft: (update) => { state.pricingDraft = typeof update === 'function' ? update(state.pricingDraft) : update },
+    pricingOpenRef: { current: true }, pricingSaving: false, pricingSyncing: false, pricingSyncSaving: false,
+    invalidatePricingSearches() {}, refreshPricingPanelRef: { current() {} },
+    refreshVersionRef: { current() {} }, refreshRef: { current() {} }, refreshStatsRef: { current() {} },
+    requestTokenRef: { current: '' }, pricingModelSearchTimerRef: { current: {} },
+    timer: { interval: (callback, ms) => { const item = { callback, ms, cancelled: false }; intervals.push(item); return () => { item.cancelled = true } } },
+    setTimeout: (callback, ms) => { const id = retries.size + 1; retries.set(id, { callback, ms }); return id },
+    clearTimeout: (id) => retries.delete(id),
+  }
+  const pricingStart = source.indexOf('      const refreshOpenPricing = React.useCallback(')
+  const pricingEnd = source.indexOf('      const setLanguage =', pricingStart)
+  assert.ok(pricingStart >= 0 && pricingEnd > pricingStart)
+  vm.runInNewContext(source.slice(pricingStart, pricingEnd) + '\n' +
+    refreshEffectSlice('        let scanDone = false', '      // The snapshot carries exactly one timezone calendar per request'), context)
+  return { state, pending, context, retries, draft, requests: (kind) => pending.filter((item) => item.kind === kind),
+    tick: (ms) => intervals.filter((item) => item.ms === ms && !item.cancelled).forEach((item) => item.callback()),
+    unmount: () => cleanups.forEach((cleanup) => cleanup()) }
+}
+test('real refresh effects discard an older snapshot and retain the current capability', async () => {
+  const h = mountRefreshEffect()
+  h.context.refreshRef.current()
+  h.requests('snapshot')[1].resolve(refreshSnapshot({ instanceId: 'host-b', requestToken: 'token-b', capabilityId: 'cap-b' }))
+  await settleRefresh()
+  h.requests('snapshot')[0].resolve(refreshSnapshot())
+  await settleRefresh()
+  assert.equal(h.state.stats.instanceId, 'host-b')
+  assert.equal(h.context.requestTokenRef.current, 'token-b')
+  assert.equal(h.requests('balance').length, 1)
+  assert.equal(h.requests('balance')[0].args[1], 'token-b')
+})
+test('real status polling ignores an older status after requesting a new snapshot', async () => {
+  const h = mountRefreshEffect()
+  h.requests('snapshot')[0].resolve(refreshSnapshot())
+  await settleRefresh()
+  h.tick(15000)
+  h.tick(15000)
+  h.requests('status')[1].resolve(refreshSnapshot({ instanceId: 'host-b', capabilityId: 'cap-b', requestToken: undefined }))
+  await settleRefresh()
+  assert.equal(h.requests('snapshot').length, 2)
+  h.requests('status')[0].resolve(refreshSnapshot({ dataRevision: 99, queryRevision: '99:1' }))
+  h.requests('snapshot')[1].resolve(refreshSnapshot({ instanceId: 'host-b', requestToken: 'token-b', capabilityId: 'cap-b' }))
+  await settleRefresh()
+  assert.equal(h.state.status.instanceId, 'host-b')
+  assert.equal(h.state.status.dataRevision, 4)
+  assert.equal(h.context.requestTokenRef.current, 'token-b')
+})
+test('real query-only status updates avoid snapshots and idle duplicate publications', async () => {
+  const h = mountRefreshEffect()
+  h.requests('snapshot')[0].resolve(refreshSnapshot())
+  await settleRefresh()
+  const status = refreshSnapshot({ revision: 11, dataRevision: 5, queryRevision: '5:1' })
+  h.tick(15000)
+  h.requests('status')[0].resolve(status)
+  await settleRefresh()
+  const publications = h.state.statusPublications
+  h.tick(15000)
+  h.requests('status')[1].resolve({ ...status })
+  await settleRefresh()
+  assert.equal(h.requests('snapshot').length, 1)
+  assert.equal(h.state.status.queryRevision, '5:1')
+  assert.equal(h.state.statusPublications, publications)
+})
+test('pricing status refresh preserves the open local price draft', async () => {
+  const h = mountRefreshEffect()
+  h.requests('snapshot')[0].resolve(refreshSnapshot())
+  await settleRefresh()
+  h.tick(15000)
+  h.requests('status')[0].resolve(refreshSnapshot({ revision: 11, pricingRevision: 2, queryRevision: '4:2' }))
+  await settleRefresh()
+  assert.equal(h.requests('pricing').length, 1)
+  assert.equal(h.requests('snapshot').length, 2)
+  h.requests('pricing')[0].resolve({ config: { overrides: [{ model: 'server-price', input: '1' }] }, usedModels: [] })
+  h.requests('snapshot')[1].resolve(refreshSnapshot({ revision: 11, pricingRevision: 2, queryRevision: '4:2' }))
+  await settleRefresh()
+  assert.equal(h.state.pricingDraft.overrides[0].model, 'local-edit')
+  assert.equal(h.state.pricingDraft.overrides[0].input, '7')
+  assert.equal(h.state.pricingLoading, false)
+})
+async function pricingStatusRefreshResult(outcome, initialError, pendingError) {
+  const h = mountRefreshEffect()
+  h.requests('snapshot')[0].resolve(refreshSnapshot())
+  await settleRefresh()
+  h.state.pricingError = initialError
+  h.tick(15000)
+  const changed = refreshSnapshot({ revision: 11, pricingRevision: 2, queryRevision: '4:2' })
+  h.requests('status')[0].resolve(changed)
+  await settleRefresh()
+  assert.equal(h.requests('pricing').length, 1)
+  if (pendingError !== undefined) h.state.pricingError = pendingError
+  if (outcome === 'failure') h.requests('pricing')[0].reject(new Error('pricing read failed'))
+  else h.requests('pricing')[0].resolve(outcome === 'invalid' ? null : { config: { overrides: [{ model: 'server-price', input: '1' }] } })
+  h.requests('snapshot')[1].resolve(changed)
+  await settleRefresh()
+  return h
+}
+for (const outcome of ['success', 'failure', 'invalid']) {
+  for (const error of ['persistence', 'save', 'sync', 'stale']) {
+    test('pricing status refresh ' + outcome + ' preserves ' + error + ' write errors', async () => {
+      const h = await pricingStatusRefreshResult(outcome, error)
+      assert.equal(h.state.pricingError, error)
+      assert.equal(h.state.pricingDraft.overrides[0].model, 'local-edit')
+      assert.equal(h.state.pricingDraft.overrides[0].input, '7')
+      assert.equal(h.state.pricingLoading, false)
+      assert.equal(h.context.pricingOpenRef.current, true)
+    })
+  }
+  for (const error of ['', 'load']) {
+    test('pricing status refresh ' + outcome + ' owns only load errors from ' + (error || 'empty'), async () => {
+      const h = await pricingStatusRefreshResult(outcome, error)
+      assert.equal(h.state.pricingError, outcome === 'success' ? '' : 'load')
+      assert.equal(h.state.pricingLoading, false)
+    })
+  }
+}
+test('pricing status refresh preserves a write error published while its GET is pending', async () => {
+  const h = await pricingStatusRefreshResult('success', 'load', 'persistence')
+  assert.equal(h.state.pricingError, 'persistence')
+})
+
+test('snapshot and balance failures stay isolated and unmount cancels publications', async () => {
+  const h = mountRefreshEffect()
+  h.requests('snapshot')[0].resolve(refreshSnapshot())
+  await settleRefresh()
+  h.requests('balance')[0].reject(new Error('balance transport'))
+  await settleRefresh()
+  assert.equal(h.state.balance.status, 'error')
+  assert.equal(h.state.statsError, '')
+  assert.equal(h.state.stats.queryRevision, '4:1')
+  h.tick(15000)
+  h.unmount()
+  h.requests('status')[0].reject(new Error('late status'))
+  await settleRefresh()
+  assert.equal(h.state.statsError, '')
+  assert.equal(h.retries.size, 0)
+})
+function mountQueryEffect() {
+  const pending = [], state = { result: null, key: '', error: '', loading: false, refreshes: 0 }
+  let cleanup
+  const context = { queryGate: createRequestGate(), queryVersion,
+    React: { useEffect: (fn) => { cleanup = fn() } },
+    getUsageQuery: (scope) => { const item = { scope, ...refreshDeferred() }; pending.push(item); return item.promise },
+    refreshStatsRef: { current: () => { state.refreshes += 1 } },
+    setQueryResult: (value) => { state.result = value }, setQueryResultKey: (value) => { state.key = value },
+    setQueryError: (value) => { state.error = value }, setQueryLoading: (value) => { state.loading = value },
+  }
+  const effect = refreshEffectSlice('        if (queryScope === null || queryKey', '      const openAuditForScope =')
+  return { pending, state, mount: (key, version) => {
+    if (cleanup) cleanup()
+    Object.assign(context, { queryScope: { key }, queryKey: key, liveQueryVersion: version })
+    vm.runInNewContext(effect, context)
+  }, unmount: () => { if (cleanup) cleanup() } }
+}
+test('real query effect heals a version transition and ignores the previous scope completion', async () => {
+  const h = mountQueryEffect()
+  h.mount('scope-a', 'host-a:4:1')
+  h.pending[0].resolve(refreshSnapshot({ dataRevision: 5, queryRevision: '5:1' }))
+  await settleRefresh()
+  assert.equal(h.state.refreshes, 1)
+  assert.equal(h.pending.length, 2)
+  h.mount('scope-b', 'host-b:4:1')
+  h.pending[2].resolve(refreshSnapshot({ instanceId: 'host-b' }))
+  await settleRefresh()
+  h.pending[1].resolve(refreshSnapshot({ dataRevision: 5, queryRevision: '5:1' }))
+  await settleRefresh()
+  assert.equal(h.state.key, 'scope-b')
+  assert.equal(h.state.result.instanceId, 'host-b')
+  assert.equal(h.state.error, '')
+  assert.equal(h.state.loading, false)
+})
+test('real query effect bounds moving-revision recovery and ignores failures after unmount', async () => {
+  const h = mountQueryEffect()
+  h.mount('scope-a', 'host-a:4:1')
+  for (let index = 0; index < 3; index += 1) {
+    h.pending[index].resolve(refreshSnapshot({ dataRevision: 5 + index, queryRevision: (5 + index) + ':1' }))
+    await settleRefresh()
+  }
+  assert.equal(h.pending.length, 3)
+  assert.equal(h.state.refreshes, 1)
+  assert.equal(h.state.error, 'stale')
+  assert.equal(h.state.loading, false)
+  h.mount('scope-b', 'host-b:4:1')
+  h.unmount()
+  h.pending[3].reject(new Error('old query'))
+  await settleRefresh()
+  assert.equal(h.state.error, '')
 })

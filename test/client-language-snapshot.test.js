@@ -77,8 +77,8 @@ test("the language follows DSH's Language row until the panel chooses one", () =
   assert.equal(loadLanguage({ navigatorLanguage: 'pt-BR' }).api.storedLanguage(), 'pt', 'a regional tag resolves to its language')
   assert.equal(loadLanguage({ navigatorLanguage: 'zh-TW' }).api.storedLanguage(), 'zh', 'a Chinese browser starts in Chinese')
 
-  // Resolved once: flipping the host under a mounted panel must not move the language,
-  // because the next snapshot request would then fetch the other calendar.
+  // The locale is resolved once per page load; changing host labels later does not
+  // replace that choice. Statistics keep using the machine calendar in either case.
   const pinned = loadLanguage({ hostLocale: 'en' })
   assert.equal(pinned.api.storedLanguage(), 'en')
   pinned.withHost('zh')
@@ -99,14 +99,14 @@ test('the snapshot request always asks for the machine calendar', () => {
   }
 })
 
-test('a language switch refetches the snapshot instead of reusing the other calendar', () => {
+test('an explicit calendar flag change refetches the snapshot independently of language', () => {
   assert.match(source, /const refreshStatsRef = React\.useRef\(\(\) => \{\}\)/, 'the loader must be reachable outside its mount effect')
   assert.match(source, /refreshStatsRef\.current = refreshStats/, 'the mount effect must expose the loader')
   const at = source.indexOf('snapshotUtcRef.current === useUtc')
-  assert.notEqual(at, -1, 'a language-keyed effect must detect the switch')
+  assert.notEqual(at, -1, 'a calendar-keyed effect must detect the switch')
   const effect = source.slice(Math.max(0, at - 260), at + 260)
   assert.match(effect, /refreshStatsRef\.current\(\)/, 'the switch must refetch, not reuse the stale calendar')
-  assert.match(effect, /\}, \[useUtc\]\)/, 'the effect must run when the language-derived flag changes')
+  assert.match(effect, /\}, \[useUtc\]\)/, 'the effect must run when the explicit calendar flag changes')
   // The switch stays out of the mount effect: adding the flag to its dependency
   // array would tear down the polling timers and cost a second full fetch.
   const exposed = source.indexOf('refreshStatsRef.current = refreshStats')
@@ -117,7 +117,7 @@ test('a language switch refetches the snapshot instead of reusing the other cale
 
 test('the hourly trend guard reads the calendar the snapshot actually carries', () => {
   // The host answers a UTC snapshot with byDayUtc and an empty byDay (lib/http.js), so
-  // a guard that reads byDay alone drops every hourly series in English mode and the
+  // a guard that reads byDay alone drops every hourly series in explicit UTC mode and the
   // "today" trend falls back to a single daily point.
   const start = source.indexOf('    function processedTokensOf')
   const end = source.indexOf('    function costCallsOf')

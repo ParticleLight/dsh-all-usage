@@ -638,8 +638,18 @@ test('donut segments carry the resolved brand and keep aggregates neutral', () =
   assert.equal(buildDonutSegments([{ label: 'ws-main', value: 5 }], 'Other').segments[0].iconKey, undefined)
 })
 
+test('custom range labels follow the machine calendar in every language', () => {
+  const start = source.indexOf('      const rangeLabel =')
+  const end = source.indexOf('      const rangeFilePart =', start)
+  assert.ok(start >= 0 && end > start)
+  for (const language of ['zh', 'en', 'ja', 'es', 'fr', 'de', 'ru', 'pt']) {
+    const context = { language, range: 'custom', activeCustomRange: { start: '2026-11-01', end: '2026-11-27' }, tr: (zh, en) => language === 'zh' ? zh : en }
+    vm.runInNewContext(localeHelperSource(source) + '\n' + source.slice(start, end) + '\nglobalThis.label = rangeLabel', context)
+    assert.equal(context.label, language === 'zh' ? '2026-11-01 至 2026-11-27' : '2026-11-01 to 2026-11-27')
+  }
+})
 
-test('uses the selected language calendar bucket for custom ranges', () => {
+test('uses the explicitly selected calendar bucket for custom ranges', () => {
   const stats = {
     byDay: [day('2026-05-02', 2, 20)],
     byDayUtc: [day('2026-05-01', 7, 70)],
