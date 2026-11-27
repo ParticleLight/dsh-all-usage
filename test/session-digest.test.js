@@ -365,3 +365,48 @@ test('retargeting a session moves its digest with its rows', () => {
   }
   assert.deepEqual(residue, [], 'a workspace may keep a zeroed row, never a non-zero one: ' + JSON.stringify(residue))
 })
+
+// These injected-state controls document the recovery probe, separately from
+// the normal update-path oracle: a green query alone is not accounting proof.
+for (const utc of [false, true]) {
+  for (const [input, delta, recovers] of [[10, 1000, false], [10, 1001, true], [200000, 2000, false], [200000, 2001, true], [0, 5000, false]]) {
+    test('scoped recovery probe ' + (utc ? 'UTC' : 'local') + ' input=' + input + ' delta=' + delta + ' restores=' + recovers, () => {
+      const host = makeHost()
+      const sample = row('s1:step:1:1', 's1', 'ws-a', '2026-08-17', 'deepseek-v4-flash', '0.1', 1)
+      sample.values.input = input
+      host.aggregation.foldUsageRow(sample)
+      host.aggregation.evictColdRows({ rows: 0 })
+      assert.equal(host.state.usageByStep.size, 0, 'the digest alone must support a recovery')
+      const date = utc ? sample.dateUtc : sample.date
+      const day = (utc ? host.state.byDayUtc : host.state.byDay).get(date)
+      const original = day.queryUsage
+      const hour = [...day.queryHours.keys()][0]
+      const buckets = [day.queryUsage.get('ws-a').values().next().value, day.queryHours.get(hour).usage.get('ws-a').values().next().value]
+      for (const bucket of buckets) {
+        bucket.input += delta
+        for (const field of ['output', 'cacheRead', 'cacheWrite', 'reasoning']) bucket[field] += 99
+        bucket.calls += 1
+        bucket.cost.total = { digits: 1n, scale: 0 }
+      }
+      assert.equal(day.tokens.input, input, 'the independent day total is unchanged')
+      const scope = { start: date, end: date, utc }
+      const result = host.aggregation.queryUsageScope(scope)
+      const wanted = { ...sample.values, calls: 1 }
+      if (!recovers) {
+        wanted.input += delta
+        for (const field of ['output', 'cacheRead', 'cacheWrite', 'reasoning']) wanted[field] += 99
+        wanted.calls += 1
+      }
+      for (const metric of [result.totals, result.hourly.find(value => value.time === hour)]) {
+        assert.ok(metric, 'the selected hour remains present')
+        assert.deepEqual(Object.fromEntries(Object.keys(wanted).map(field => [field, metric[field]])), wanted)
+        assert.equal(metric.cost.total, recovers ? '0.1' : '1')
+      }
+      assert.equal(day.queryUsage === original, !recovers, 'only a triggered recovery replaces the scoped cube')
+      assert.equal(host.state.diagCounters.get('q.reconciled.' + date) || 0, Number(recovers), 'recovery counter independently reports its own coverage')
+      host.aggregation.queryUsageScope(scope)
+      assert.equal(host.state.diagCounters.get('q.reconciled.' + date) || 0, Number(recovers), 'a repeated query does not add a second recovery')
+      assert.equal(host.state.totals.input, input, 'recovery does not change the independent global total')
+    })
+  }
+}

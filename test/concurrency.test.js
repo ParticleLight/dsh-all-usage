@@ -32,6 +32,7 @@ function valuesOf(event) {
 }
 function fixedMoney(value) {
   const [whole, frac = ''] = String(value || '0').split('.')
+  assert.match(frac.slice(12), /^0*$/, 'money exceeds oracle precision')
   return BigInt(whole) * 1000000000000n + BigInt((frac + '0'.repeat(12)).slice(0, 12))
 }
 function expectedMoney(values, factor = 1) {
@@ -102,73 +103,106 @@ function makeHost(disk = new Map(), logs = new Map()) {
   }
   return host
 }
-function assertOracle(host, expected, factor = 1) {
-  const state = host.state
-  const totals = Object.fromEntries(TOKEN_KEYS.map(k => [k, 0]))
-  const dates = [new Map(), new Map()]
-  let totalMoney = 0n
-  for (const row of expected) {
-    const v = valuesOf(row)
-    const rowFactor = typeof factor === 'function' ? factor(row) : factor
-    totalMoney += expectedMoney(v, rowFactor)
-    for (const k of TOKEN_KEYS) totals[k] += v[k]
-    for (const utc of [false, true]) {
-      const d = new Date(row.time)
-      const date = utc ? d.toISOString().slice(0, 10) : d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
-      const day = dates[Number(utc)].get(date) || { calls: 0, money: 0n, hours: new Map(), ...Object.fromEntries(TOKEN_KEYS.map(k => [k, 0])) }
-      day.calls++; day.money += expectedMoney(v, rowFactor)
-      for (const k of TOKEN_KEYS) day[k] += v[k]
-      const hourDate = new Date(row.time)
-      if (utc) hourDate.setUTCMinutes(0, 0, 0); else hourDate.setMinutes(0, 0, 0)
-      const hour = day.hours.get(hourDate.getTime()) || { calls: 0, money: 0n, ...Object.fromEntries(TOKEN_KEYS.map(k => [k, 0])) }
-      hour.calls++; hour.money += expectedMoney(v, rowFactor)
-      for (const k of TOKEN_KEYS) hour[k] += v[k]
-      day.hours.set(hourDate.getTime(), hour)
-      dates[Number(utc)].set(date, day)
-    }
+function oracleRows(expected, factor = 1, workspaceFor = () => 'w') {
+  return expected.map(event => {
+    const source = event.data.message.source
+    return { event, sid: event.data.message.id.split(':').slice(0, -2).join(':'),
+      wsId: workspaceFor(event), modelKey: JSON.stringify([source.provider, source.model, source.model, null]),
+      factor: typeof factor === 'function' ? factor(event) : factor, values: valuesOf(event) }
+  })
+}
+function oracleGroups(rows, keyFor) {
+  const groups = new Map()
+  for (const row of rows) {
+    const key = keyFor(row)
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(row)
   }
-  for (const k of TOKEN_KEYS) assert.equal(state.totals[k], totals[k], 'total.' + k)
-  const cost = serializeCostAggregate(state.totals.cost)
-  assert.equal(cost.pricedCalls, expected.length)
-  assert.equal(fixedMoney(cost.total), totalMoney, 'total cost equals the independent per-request integer sum')
-  assert.equal(Array.from(state.perModel.values()).reduce((n, m) => n + m.calls, 0), expected.length)
+  return groups
+}
+function assertOracleMetric(actual, rows, label) {
+  const values = actual?.values || actual?.tokens || actual || {}
+  for (const key of TOKEN_KEYS) assert.equal(values[key] || 0, rows.reduce((sum, row) => sum + row.values[key], 0), label + '.' + key)
+  const cost = serializeCostAggregate(actual?.cost)
+  assert.equal(actual?.calls ?? cost.pricedCalls, rows.length, label + '.calls')
+  assert.equal(cost.pricedCalls, rows.length, label + '.pricedCalls')
+  for (const key of ['unpricedCalls', 'ambiguousCalls', 'unsupportedCalls']) assert.equal(cost[key], 0, label + '.' + key)
+  const money = rows.reduce((sum, row) => sum + expectedMoney(row.values, row.factor), 0n)
+  assert.equal(fixedMoney(cost.total), money, label + '.cost.total')
+  assert.equal(fixedMoney(cost.baseTotal), money, label + '.cost.baseTotal')
+  for (const [key, rate] of [['input', 1000000n], ['output', 2000000n], ['cacheRead', 250000n], ['cacheWrite', 500000n]]) {
+    assert.equal(fixedMoney(cost[key]), rows.reduce((sum, row) => sum + BigInt(row.values[key]) * rate * BigInt(row.factor), 0n), label + '.cost.' + key)
+  }
+  if (actual?.sessions instanceof Set) assert.deepEqual([...actual.sessions].sort(), [...new Set(rows.map(row => row.sid))].sort(), label + '.sessions')
+}
+function assertOracleMap(actual, groups, label) {
+  for (const key of new Set([...actual.keys(), ...groups.keys()])) assertOracleMetric(actual.get(key), groups.get(key) || [], label + ':' + key)
+}
+function assertOracleScoped(actual, rows, label) {
+  const workspaces = oracleGroups(rows, row => row.wsId)
+  for (const wsId of new Set([...actual.keys(), ...workspaces.keys()])) {
+    assertOracleMap(actual.get(wsId) || new Map(), oracleGroups(workspaces.get(wsId) || [], row => row.modelKey), label + ':workspace:' + wsId + ':model')
+  }
+}
+function oracleDate(time, utc) {
+  const date = new Date(time)
+  return utc ? date.toISOString().slice(0, 10) : date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0')
+}
+function oracleHour(time, utc) {
+  const date = new Date(time)
+  if (utc) date.setUTCMinutes(0, 0, 0); else date.setMinutes(0, 0, 0)
+  return date.getTime()
+}
+// No query, snapshot, or ledger load may run until every raw projection passes.
+function assertRawOracle(host, expected, factor = 1, workspaceFor = () => 'w') {
+  const { state } = host
+  const rows = oracleRows(expected, factor, workspaceFor)
+  assertOracleMetric(state.totals, rows, 'raw global')
+  assertOracleMap(state.perWorkspace, oracleGroups(rows, row => row.wsId), 'raw workspace')
+  assertOracleMap(state.perModel, oracleGroups(rows, row => row.modelKey), 'raw model')
   for (const utc of [false, true]) {
-    const map = utc ? state.byDayUtc : state.byDay
-    const observedTokens = Object.fromEntries(TOKEN_KEYS.map(k => [k, 0]))
-    let observedCalls = 0, observedMoney = 0n
-    for (const day of map.values()) {
-      for (const k of TOKEN_KEYS) observedTokens[k] += day.tokens[k]
-      observedCalls += Array.from(day.byModel.values()).reduce((n,m) => n + m.calls, 0)
-      observedMoney += fixedMoney(serializeCostAggregate(day.cost).total)
-    }
-    for (const k of TOKEN_KEYS) assert.equal(observedTokens[k], totals[k], 'all day tokens:' + k)
-    assert.equal(observedCalls, expected.length, 'all day calls')
-    assert.equal(observedMoney, totalMoney, 'all day cost')
-    for (const [date, want] of dates[Number(utc)]) {
-      const day = map.get(date)
-      assert.ok(day)
-      for (const k of TOKEN_KEYS) assert.equal(day.tokens[k], want[k], date + ':' + k)
-      assert.equal(Array.from(day.byModel.values()).reduce((n, m) => n + m.calls, 0), want.calls)
-      assert.equal(fixedMoney(serializeCostAggregate(day.cost).total), want.money)
-      const queryBuckets = Array.from(day.queryUsage.values()).flatMap(models => Array.from(models.values()))
-      assert.equal(queryBuckets.reduce((n,m) => n + m.calls, 0), want.calls, 'raw query calls')
-      for (const k of TOKEN_KEYS) assert.equal(queryBuckets.reduce((n,m) => n + m[k], 0), want[k], 'raw query:' + date + ':' + k)
-      assert.equal(queryBuckets.reduce((n,m) => n + fixedMoney(serializeCostAggregate(m.cost).total), 0n), want.money, 'raw query cost')
-      for (const [hour, wanted] of want.hours) {
-        const buckets = day.queryHours.get(hour)?.usage
-        assert.ok(buckets, 'hour ' + hour)
-        const metrics = Array.from(buckets.values()).flatMap(m => Array.from(m.values()))
-        assert.equal(metrics.reduce((n, m) => n + m.calls, 0), wanted.calls)
-        for (const k of TOKEN_KEYS) assert.equal(metrics.reduce((n, m) => n + m[k], 0), wanted[k], 'hour:' + hour + ':' + k)
-        assert.equal(metrics.reduce((n, m) => n + fixedMoney(serializeCostAggregate(m.cost).total), 0n), wanted.money)
+    const days = utc ? state.byDayUtc : state.byDay
+    const dates = oracleGroups(rows, row => oracleDate(row.event.time, utc))
+    const label = 'raw ' + (utc ? 'UTC' : 'local')
+    for (const date of new Set([...days.keys(), ...dates.keys()])) {
+      const day = days.get(date)
+      const wanted = dates.get(date) || []
+      assertOracleMetric(day, wanted, label + ':' + date)
+      assertOracleMap(day?.byWs || new Map(), oracleGroups(wanted, row => row.wsId), label + ':' + date + ':workspace')
+      assertOracleMap(day?.byModel || new Map(), oracleGroups(wanted, row => row.modelKey), label + ':' + date + ':model')
+      assertOracleScoped(day?.queryUsage || new Map(), wanted, label + ':' + date + ':query')
+      const hours = oracleGroups(wanted, row => oracleHour(row.event.time, utc))
+      for (const hour of new Set([...(day?.queryHours.keys() || []), ...hours.keys()])) {
+        assertOracleScoped(day?.queryHours.get(hour)?.usage || new Map(), hours.get(hour) || [], label + ':' + date + ':hour:' + hour)
       }
-      const q = host.aggregation.queryUsageScope({ start: date, end: date, utc })
-      assert.equal(q.totals.calls, want.calls)
-      assert.equal(fixedMoney(q.totals.cost.total), want.money)
-      for (const k of TOKEN_KEYS) assert.equal(q.totals[k], want[k], 'query:' + date + ':' + k)
     }
   }
-  for (const [key, value] of state.diagCounters || []) if (key.startsWith('q.reconciled.')) assert.equal(value, 0, 'the stress oracle must not depend on query self-healing')
+  const sessions = oracleGroups(rows, row => row.sid)
+  for (const sid of new Set([...state.perSession.keys(), ...sessions.keys()])) {
+    const session = state.perSession.get(sid)
+    const wanted = sessions.get(sid) || []
+    const keyFor = row => sid + ':step:' + row.event.data.turn + ':' + row.event.data.step
+    assert.deepEqual([...(session?.keys.keys() || [])].sort(), wanted.map(keyFor).sort(), 'raw digest:' + sid + ':keys')
+    for (const row of wanted) {
+      const meta = session.keys.get(keyFor(row))
+      assert.equal(meta.wsId, row.wsId, 'raw digest:' + sid + ':key workspace')
+      assert.equal(meta.identity.identityKey, row.modelKey, 'raw digest:' + sid + ':key model')
+      assert.equal(meta.time, row.event.time, 'raw digest:' + sid + ':key time')
+    }
+    const bucketKey = row => JSON.stringify([oracleDate(row.event.time, false), oracleDate(row.event.time, true), row.wsId, row.modelKey, oracleHour(row.event.time, false), oracleHour(row.event.time, true)])
+    assertOracleMap(session?.buckets || new Map(), oracleGroups(wanted, bucketKey), 'raw digest:' + sid + ':bucket')
+  }
+  return rows
+}
+function assertOracle(host, expected, factor = 1, workspaceFor = () => 'w') {
+  const rows = assertRawOracle(host, expected, factor, workspaceFor)
+  for (const utc of [false, true]) {
+    for (const [date, wanted] of oracleGroups(rows, row => oracleDate(row.event.time, utc))) {
+      const q = host.aggregation.queryUsageScope({ start: date, end: date, utc })
+      assertOracleMetric(q.totals, wanted, 'query:' + date)
+    }
+  }
+  for (const [key, value] of host.state.diagCounters || []) if (key.startsWith('q.reconciled.')) assert.equal(value, 0, 'the stress oracle must not depend on query self-healing')
 }
 
 for (const evict of [false, true]) {
@@ -272,6 +306,7 @@ test('an active ledger write survives cache pressure, cold reads and repricing',
     assert.equal(current.usage.length, 2)
     host.aggregation.evictColdRows({ rows: 0 })
     assert.equal(host.state.usageByStep.size, 2, 'detail rows remain recoverable until their write settles')
+    assertRawOracle(host, [before, after])
     repricing = host.pricing.updatePricingState({ catalogEntries: catalog(2) }, false, true)
     gate.resolve()
     await Promise.all([installing, repricing])
@@ -478,6 +513,8 @@ test('cold rows keep per-key workspace ownership during partial retirement', asy
     await host.sessionSync.enqueue('s', () => host.sessionSync.processLiveEvent('s', 'w', after))
     assert.equal(host.state.perWorkspace.get('w').input, 10)
     assert.equal(host.state.perWorkspace.get('retired:deleted').input, 20)
+    const workspaceFor = event => event === before ? 'w' : 'retired:deleted'
+    assertRawOracle(host, [before, after], 1, workspaceFor)
     const record = host.ledger.buildLedgerRecord({ id: 's', header: { cwd: 'C:/stress' }, events: [before, after] }, 'w', 'flush', undefined, host.disk.get('s'), true)
     host.ledger.replaceLedgerRecord(record)
     await host.ledger.persistLedgerRecord(record)
@@ -487,10 +524,11 @@ test('cold rows keep per-key workspace ownership during partial retirement', asy
     assert.deepEqual(page.items.map(row => [row.values.input, row.workspaceId]).sort((a, b) => a[0] - b[0]), [[10, 'w'], [20, 'retired:deleted']])
     assert.equal(host.state.perWorkspace.get('w').input, 10)
     assert.equal(host.state.perWorkspace.get('retired:deleted').input, 20)
+    assertRawOracle(host, [before, after], 1, workspaceFor)
     gate.resolve(); await retiring
     assert.equal(host.state.perWorkspace.get('w')?.input || 0, 0)
     assert.equal(host.state.perWorkspace.get('retired:deleted').input, 30)
-    assertOracle(host, [before, after])
+    assertOracle(host, [before, after], 1, () => 'retired:deleted')
     assert.equal(host.disk.get('s').workspaceId, 'w')
   } finally {
     gate.resolve()
@@ -524,6 +562,7 @@ test('workspace removal racing a truncated history and cold read never retires d
     host.logs.set('s', [])
     await host.sessionSync.enqueue('s', () => host.sessionSync.syncLiveSession('s', 'w', null, 0))
     await host.ledger.drainLedgerWrites()
+    assertRawOracle(host, [])
     host.ledger.replaceLedgerRecord({ ...host.disk.get('s'), sessionId: 'other', updatedAt: Date.now() })
     gate.resolve(); await retiring
     assertOracle(host, [])
@@ -568,13 +607,13 @@ test('live appends and cold pages during workspace retirement stay in the retire
     assert.equal(page.items[0].workspaceId, 'retired:deleted', 'cold detail follows the aggregate while metadata retirement is awaiting another session')
     host.aggregation.evictColdRows({ rows:0 })
     await host.pricing.updatePricingState({ catalogEntries: catalog(2) }, false, true)
-    assertOracle(host, [before], 2)
+    assertOracle(host, [before], 2, () => 'retired:deleted')
     const after = usage(MIDNIGHT_CST + 1000, 1, 2, 20, 1, 'a')
     host.logs.set('a', [before, after])
     const resolvedWs = host.sessionSync.wsForLiveSession({ header: { cwd:'C:/stress' } }, 'a')
     await host.sessionSync.enqueue('a', () => host.sessionSync.processLiveEvent('a', resolvedWs, after))
     gate.resolve(); await retiring
-    assertOracle(host, [before, after], 2)
+    assertOracle(host, [before, after], 2, () => 'retired:deleted')
     assert.equal(host.state.perWorkspace.get('w')?.input || 0, 0, 'late live usage does not recreate the removed workspace bucket')
     assert.equal(host.state.perWorkspace.get('retired:deleted').input, 30)
     const finalPage = await host.aggregation.queryRecords({ utc: true, start:'2026-10-12', end:'2026-10-13' }, undefined, 10)
@@ -693,26 +732,37 @@ function canonical(events) {
   for (const event of events) rows.set(event.data.message.id, event)
   return Array.from(rows.values())
 }
-function assertDurableOracle(host, source) {
+function assertDurableOracle(host, source, expectedPrices) {
   const expected = []
-  const prices = new Map()
+  assert.ok(expectedPrices instanceof Map, 'independent expected price snapshots are required')
   for (const [sid, events] of source) {
     const rows = canonical(events)
-    const diskRows = host.disk.get(sid).usage
+    const record = host.disk.get(sid)
+    const diskRows = record.usage
+    assert.equal(record.sessionId, sid, 'durable session identity')
+    assert.equal(record.workspaceId, 'w', 'durable original workspace')
+    assert.deepEqual(diskRows.map(item => item.key).sort(), rows.map(event => sid + ':step:' + event.data.turn + ':' + event.data.step).sort(), 'durable logical keys for ' + sid)
     assert.equal(diskRows.length, rows.length, 'durable row count for ' + sid)
     for (const event of rows) {
       const item = diskRows.find(r => r.turn === event.data.turn && r.step === event.data.step)
       assert.ok(item, 'missing durable logical row')
+      assert.equal(item.time, event.time, 'durable event time for ' + sid)
+      assert.equal(item.workspaceId, 'w', 'durable row original workspace')
+      const source = event.data.message.source
+      const identity = item.identity || record.usageIdentities?.[item.identityRef]
+      assert.ok(identity, 'durable identity reference for ' + sid)
+      assert.equal(identity.identityKey, JSON.stringify([source.provider, source.model, source.model, null]), 'durable model for ' + sid)
       const value = valuesOf(event)
       for (const k of TOKEN_KEYS) assert.equal(item.values[k], value[k], 'disk ' + sid + ':' + k)
-      const factor = Number(item.cost.rates.input)
-      assert.ok([1, 2, 3].includes(factor))
+      const factor = expectedPrices.get(event.data.message.id)
+      assert.ok([1, 2, 3].includes(factor), 'missing expected price snapshot for ' + event.data.message.id)
+      assert.deepEqual(item.cost.rates, { input: String(factor), output: String(2 * factor), cacheRead: String(0.25 * factor), cacheWrite: String(0.5 * factor) }, 'durable rate snapshot for ' + sid + ':' + event.data.message.id)
       assert.equal(fixedMoney(item.cost.total), expectedMoney(value, factor), 'independent durable cost')
-      prices.set(event.data.message.id, factor)
+      assert.equal(fixedMoney(item.cost.baseTotal), expectedMoney(value, factor), 'independent durable base cost')
       expected.push(event)
     }
   }
-  assertOracle(host, expected, row => prices.get(row.data.message.id))
+  assertOracle(host, expected, row => expectedPrices.get(row.data.message.id))
   assert.equal(host.state.ledgerReading.size, 0, 'all cold-read pins released')
 }
 
@@ -729,14 +779,18 @@ test('seeded mixed live, history rewrite, cold paging, repricing, and recovery s
       const next = () => { entropy = (Math.imul(entropy, 1664525) + 1013904223) >>> 0; return entropy }
       let host = makeHost()
       const source = new Map()
+      // Price snapshots follow fixture actions, never persisted cost fields.
+      const expectedPrices = new Map()
       let factor = 1, writes = 0, queries = 0, recoveries = 0
       try {
         for (let i = 0; i < 16; i++) {
           const sid = 's' + i, base = i % 2 ? MIDNIGHT_CST : MIDNIGHT_UTC
           const events = [usage(base - 1000, 1, 1, 10 + i, 0, sid), usage(base + 1000, 1, 2, 20 + i, 1, sid)]
-          source.set(sid, events); await host.install(sid, events)
+          source.set(sid, events)
+          for (const event of events) expectedPrices.set(event.data.message.id, factor)
+          await host.install(sid, events)
         }
-        assertDurableOracle(host, source)
+        assertDurableOracle(host, source, expectedPrices)
         for (let round = 0; round < rounds; round++) {
           host.aggregation.evictColdRows({ rows: 0 })
           const selected = new Set()
@@ -753,7 +807,9 @@ test('seeded mixed live, history rewrite, cold paging, repricing, and recovery s
               const turn = choice === 1 ? old.data.turn : round + 2
               const step = choice === 1 ? old.data.step : 1
               const time = (next() % 2 ? MIDNIGHT_CST : MIDNIGHT_UTC) + (next() % 5 - 2) * 3600000 + round * 100
-              events.push(usage(time, turn, step, 1 + (next() % 1000), seq, sid))
+              const event = usage(time, turn, step, 1 + (next() % 1000), seq, sid)
+              events.push(event)
+              expectedPrices.set(event.data.message.id, factor)
             }
             source.set(sid, events); host.logs.set(sid, structuredClone(events))
             tasks.push(host.sessionSync.enqueue(sid, () => host.sessionSync.syncLiveSession(sid, 'w', null, 0)))
@@ -771,8 +827,12 @@ test('seeded mixed live, history rewrite, cold paging, repricing, and recovery s
             tasks.push(host.pricing.updatePricingState({ catalogEntries: catalog(factor) }, false, true))
           }
           await Promise.all(tasks)
+          if (round % 4 === 0) {
+            // Only the explicit reestimate replaces existing event-time snapshots.
+            for (const events of source.values()) for (const event of canonical(events)) expectedPrices.set(event.data.message.id, factor)
+          }
           await host.ledger.drainLedgerWrites()
-          assertDurableOracle(host, source)
+          assertDurableOracle(host, source, expectedPrices)
           if (round % 8 === 7) {
             const disk = host.disk, logs = host.logs
             await host.close()
@@ -783,7 +843,7 @@ test('seeded mixed live, history rewrite, cold paging, repricing, and recovery s
               host.ledger.replaceLedgerRecord(record); host.ledger.applyLedgerRecord(record, 'ledger-reuse')
             }
             recoveries++
-            assertDurableOracle(host, source)
+            assertDurableOracle(host, source, expectedPrices)
           }
         }
         result.push({ seed, rounds, writes, queries, recoveries, remainingRows: Array.from(source.values()).reduce((n, e) => n + canonical(e).length, 0) })
@@ -1019,7 +1079,8 @@ test('compact cold pages preserve workspace, model, provider, local-day and UTC-
     })
     events.push(...rows); await host.install(sid, rows, workspaceId)
   }
-  assertOracle(host, events)
+  const workspaceFor = event => event.data.message.id.startsWith('a:') ? 'w' : 'w2'
+  assertOracle(host, events, 1, workspaceFor)
   const all = (await host.aggregation.queryRecords(recordsScope, undefined, 100)).items
   const scopes = [
     ...[false, true].flatMap(utc => ['2026-10-12', '2026-10-13'].map(date => ({ start: date, end: date, utc }))),
@@ -1059,7 +1120,7 @@ test('compact cold pages preserve workspace, model, provider, local-day and UTC-
     assert.equal(host.state.ledgerReading.size, 0)
   }
   host.ledger.loadRowsForRange = range
-  assertOracle(host, events)
+  assertOracle(host, events, 1, workspaceFor)
 })
 
 test('a missing indexed key on the first page stays visible as stale instead of silently rebuilding a shorter scope', async t => {
@@ -1194,4 +1255,150 @@ test('pricing health reports unclassified routes and the last reconcile', async 
   } finally {
     await host.close()
   }
+})
+
+test('raw oracle detects ownership swaps that conserve every global total', async t => {
+  const host = makeHost(); t.after(host.close)
+  const first = usage(MIDNIGHT_UTC + 1000, 1, 1, 10, 0, 'a')
+  const second = usage(MIDNIGHT_UTC + 2000, 1, 1, 20, 0, 'b')
+  await host.install('a', [first], 'w')
+  await host.install('b', [second], 'w2')
+  const workspaceFor = event => event === first ? 'w' : 'w2'
+  assertRawOracle(host, [first, second], 1, workspaceFor)
+  let queries = 0
+  host.aggregation.queryUsageScope = () => { queries++; throw new Error('query ran before raw validation') }
+  const day = host.state.byDayUtc.get('2026-10-13')
+  const original = day.queryUsage.get('w')
+  day.queryUsage.set('w', day.queryUsage.get('w2'))
+  day.queryUsage.set('w2', original)
+  assert.throws(() => assertOracle(host, [first, second], 1, workspaceFor), /raw.*workspace/)
+  assert.equal(queries, 0)
+})
+
+for (const utc of [false, true]) {
+  for (const plane of ['day', 'hour']) {
+    for (const field of [...TOKEN_KEYS, 'calls', 'cost']) {
+      test('raw oracle catches isolated ' + field + ' drift in ' + (utc ? 'UTC' : 'local') + ' scoped ' + plane + ' buckets', async t => {
+        const host = makeHost(); t.after(host.close)
+        const event = usage(MIDNIGHT_UTC + 1000, 1, 1, 10, 0)
+        await host.install('s', [event])
+        host.aggregation.evictColdRows({ rows: 0 })
+        assertRawOracle(host, [event])
+        const day = (utc ? host.state.byDayUtc : host.state.byDay).get(oracleDate(event.time, utc))
+        const modelKey = oracleRows([event])[0].modelKey
+        const scoped = plane === 'day' ? day.queryUsage : day.queryHours.get(oracleHour(event.time, utc)).usage
+        const bucket = scoped.get('w').get(modelKey)
+        if (field === 'cost') bucket.cost.total = { digits: 1n, scale: 0 }
+        else bucket[field] += 1
+        const failure = plane === 'day' ? /raw.*query/ : /raw.*hour/
+        assert.throws(() => assertRawOracle(host, [event]), failure)
+        const result = host.aggregation.queryUsageScope({ start: oracleDate(event.time, utc), end: oracleDate(event.time, utc), utc })
+        assert.equal([...host.state.diagCounters].filter(([key]) => key.startsWith('q.reconciled.')).length, 0, 'the recovery probe is independent of this injected drift')
+        const metric = plane === 'day' ? result.totals : result.hourly.find(value => value.time === oracleHour(event.time, utc))
+        assert.ok(metric, 'the mutated metric remains observable')
+        if (field === 'cost') assert.equal(metric.cost.total, '1')
+        else assert.equal(metric[field], (field === 'calls' ? 1 : valuesOf(event)[field]) + 1)
+        assert.throws(() => assertRawOracle(host, [event]), failure, 'query must not hide an injected drift outside the recovery probe')
+      })
+    }
+  }
+}
+
+for (const [name, choose] of [
+  ['global', host => host.state.totals],
+  ['workspace', host => host.state.perWorkspace.get('w')],
+  ['model', host => host.state.perModel.values().next().value],
+  ['day', host => host.state.byDayUtc.values().next().value.tokens],
+  ['day workspace', host => host.state.byDayUtc.values().next().value.byWs.get('w')],
+  ['day model', host => host.state.byDayUtc.values().next().value.byModel.values().next().value],
+  ['digest', host => host.state.perSession.get('s').buckets.values().next().value.values],
+]) {
+  test('raw oracle rejects isolated output drift in ' + name, async t => {
+    const host = makeHost(); t.after(host.close)
+    const event = usage(MIDNIGHT_UTC + 1000, 1, 1, 10, 0)
+    await host.install('s', [event])
+    assertRawOracle(host, [event])
+    choose(host).output += 1
+    assert.throws(() => assertRawOracle(host, [event]), /raw/)
+  })
+}
+
+test('durable oracle rejects an isolated disk cache drift before any query', async t => {
+  const host = makeHost(); t.after(host.close)
+  const event = usage(MIDNIGHT_UTC + 1000, 1, 1, 10, 0)
+  await host.install('s', [event])
+  const source = new Map([['s', [event]]])
+  const expectedPrices = new Map([[event.data.message.id, 1]])
+  assertDurableOracle(host, source, expectedPrices)
+  let queries = 0
+  host.aggregation.queryUsageScope = () => { queries++; throw new Error('query ran before durable validation') }
+  host.disk.get('s').usage[0].values.cacheRead += 1
+  assert.throws(() => assertDurableOracle(host, source, expectedPrices), /disk s:cacheRead/)
+  assert.equal(queries, 0)
+})
+
+test('durable oracle preserves event-time prices across catalog refresh and explicit reestimate', async t => {
+  const host = makeHost(); t.after(host.close)
+  const old = usage(MIDNIGHT_UTC + 1000, 1, 1, 10, 0, 'old')
+  const added = usage(MIDNIGHT_UTC + 2000, 1, 1, 20, 0, 'new')
+  const source = new Map([['old', [old]]])
+  const expectedPrices = new Map([[old.data.message.id, 1]])
+  await host.install('old', [old])
+  assertDurableOracle(host, source, expectedPrices)
+
+  // Refresh base prices without changing the existing temporal policy.
+  const refreshed = catalog(2)
+  refreshed[0].temporalPricing = catalog(1)[0].temporalPricing
+  await host.pricing.updatePricingState({ catalogEntries: refreshed }, false)
+  source.set('new', [added])
+  expectedPrices.set(added.data.message.id, 2)
+  await host.install('new', [added])
+  assertDurableOracle(host, source, expectedPrices)
+
+  const resumed = makeHost(host.disk, host.logs); t.after(resumed.close)
+  resumed.state.pricingState = normalizePricingState({ catalogEntries: refreshed, sync: { autoEnabled: false } })
+  for (const [sid, raw] of host.disk) {
+    const record = resumed.ledger.normalizeLedgerRecord(raw, sid)
+    resumed.ledger.replaceLedgerRecord(record)
+    resumed.ledger.applyLedgerRecord(record, 'ledger-reuse')
+  }
+  assertDurableOracle(resumed, source, expectedPrices)
+
+  await host.pricing.updatePricingState({ catalogEntries: catalog(3) }, false, true)
+  for (const events of source.values()) for (const event of canonical(events)) expectedPrices.set(event.data.message.id, 3)
+  assertDurableOracle(host, source, expectedPrices)
+})
+
+test('durable oracle rejects a coherently doubled rate snapshot before any query', async t => {
+  const host = makeHost(); t.after(host.close)
+  const event = usage(MIDNIGHT_UTC + 1000, 1, 1, 10, 0)
+  const source = new Map([['s', [event]]])
+  const expectedPrices = new Map([[event.data.message.id, 1]])
+  await host.install('s', [event])
+  assertDurableOracle(host, source, expectedPrices)
+
+  const record = structuredClone(host.disk.get('s'))
+  const cost = record.usage[0].cost
+  cost.rates = { input: '2', output: '4', cacheRead: '0.5', cacheWrite: '1' }
+  cost.breakdown = { input: '0.00002', output: '0.000008', cacheRead: '0.000002', cacheWrite: '0.000001' }
+  cost.baseTotal = cost.total = '0.000031'
+  const resumed = makeHost(new Map([['s', record]]), host.logs); t.after(resumed.close)
+  const restored = resumed.ledger.normalizeLedgerRecord(record, 's')
+  resumed.ledger.replaceLedgerRecord(restored)
+  resumed.ledger.applyLedgerRecord(restored, 'ledger-reuse')
+  assert.equal(resumed.state.pricingState.catalogEntries[0].input, '1')
+  let queries = 0
+  const query = resumed.aggregation.queryUsageScope
+  resumed.aggregation.queryUsageScope = scope => { queries++; return query(scope) }
+  assert.throws(() => assertDurableOracle(resumed, source, expectedPrices), /durable rate snapshot/)
+  assert.equal(queries, 0, 'wrong rate selection fails before a query can run')
+})
+
+test('raw oracle rejects a nonzero cost digit beyond twelve decimal places', async t => {
+  const host = makeHost(); t.after(host.close)
+  const event = usage(MIDNIGHT_UTC + 1000, 1, 1, 10, 0)
+  await host.install('s', [event])
+  assertRawOracle(host, [event])
+  host.state.totals.cost.total = { digits: expectedMoney(valuesOf(event)) * 10n + 1n, scale: 13 }
+  assert.throws(() => assertRawOracle(host, [event]), /money exceeds oracle precision/)
 })
