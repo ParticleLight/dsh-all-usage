@@ -32,7 +32,7 @@ function makeRequest(method, headers = {}, body = '') {
   }
 }
 
-async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride, readSession: readSessionOverride, ledgerSeed = {}, storage: storageUnitOverride, timeout: timeoutOverride } = {}) {
+async function createApp({ key = 'test-key', workspaces = [], withStorage = false, sessions = [], events = new Map(), listSessions: listSessionsOverride, readSession: readSessionOverride, ledgerSeed = {}, storage: storageUnitOverride, openStorage: openStorageOverride, timeout: timeoutOverride } = {}) {
   const routes = new Map()
   const cleanups = []
   const listeners = {}
@@ -100,7 +100,7 @@ async function createApp({ key = 'test-key', workspaces = [], withStorage = fals
       if (service === 'settings') return { get: () => ({}) }
       if (service === 'storage') {
         return withStorage
-          ? { backend: { get: () => ({ kv: { open: async () => storageUnit } }) } }
+          ? { backend: { get: () => ({ kv: { open: openStorageOverride || (async () => storageUnit) } }) } }
           : undefined
       }
       if (service === 'webServer') return webServer
@@ -530,6 +530,217 @@ test('requires the capability for alias writes and persists trusted updates', as
   assert.deepEqual(app.storageUnit.saved, [{ 'ws-1': 'Main repo' }])
 })
 
+test('reports alias persistence failure and retries the same alias', async () => {
+  const attempts = []
+  let failNext = true
+  const storage = {
+    saved: [],
+    records: { sessions: {} },
+    async loadAll() { return { global: {}, tables: this.records } },
+    async putRecord(table, key, value) { this.records[table][key] = value },
+    async deleteRecord(table, key) { delete this.records[table][key] },
+    async setGlobal(value) {
+      attempts.push(value)
+      if (failNext) { failNext = false; throw new Error('fixture-storage-failure') }
+      this.saved.push(value)
+    },
+    async close() {},
+  }
+  const app = await createApp({ withStorage: true, storage, workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }] })
+  const stats = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  const headers = { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': stats.json().requestToken }
+  const body = JSON.stringify({ workspaceId: 'ws-1', alias: 'Main repo' })
+  const request = () => call(app, '/api/all-usage/alias', makeRequest('POST', headers, body))
+
+  const failed = await request()
+  assert.equal(failed.status, 503)
+  assert.deepEqual(failed.json(), { ok: false, messageCode: 'persistence-failed', stage: 'alias', applied: true, persisted: false, aliases: { 'ws-1': 'Main repo' } })
+  assert.equal(failed.body.includes('fixture-storage-failure'), false)
+
+  const retry = await request()
+  assert.equal(retry.status, 200)
+  assert.equal(retry.json().persisted, true)
+  assert.equal(retry.json().stage, 'alias')
+  assert.deepEqual(retry.json().aliases, { 'ws-1': 'Main repo' })
+  assert.equal(attempts.length, 2)
+  assert.deepEqual(storage.saved, [{ 'ws-1': 'Main repo' }])
+})
+
+test('reports pricing persistence failure and retries the same value', async () => {
+  const attempts = []
+  let failNext = true
+  const storage = {
+    saved: [],
+    records: { sessions: {} },
+    async loadAll() { return { global: {}, tables: this.records } },
+    async putRecord(table, key, value) { this.records[table][key] = value },
+    async deleteRecord(table, key) { delete this.records[table][key] },
+    async setGlobal(value) {
+      attempts.push(value)
+      if (failNext) { failNext = false; throw new Error('fixture-storage-failure') }
+      this.saved.push(value)
+    },
+    async close() {},
+  }
+  const app = await createApp({ withStorage: true, storage })
+  const stats = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  const headers = { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': stats.json().requestToken }
+  const body = JSON.stringify({ pricing: { sync: { autoEnabled: true } }, backfill: false })
+  const request = () => call(app, '/api/all-usage/pricing', makeRequest('POST', headers, body))
+
+  const failed = await request()
+  assert.equal(failed.status, 503)
+  assert.equal(failed.json().messageCode, 'persistence-failed')
+  assert.equal(failed.json().stage, 'pricing')
+  assert.equal(failed.json().applied, true)
+  assert.equal(failed.json().persisted, false)
+  assert.equal(failed.json().reestimated, true)
+  assert.equal(failed.json().pricing.sync.autoEnabled, true)
+  assert.equal(failed.body.includes('fixture-storage-failure'), false)
+
+  const retry = await request()
+  assert.equal(retry.status, 200)
+  assert.equal(retry.json().persisted, true)
+  assert.equal(retry.json().pricing.sync.autoEnabled, true)
+  assert.equal(attempts.length, 2)
+  assert.equal(storage.saved.length, 1)
+})
+
+test('restores only persisted aliases and pricing after failure and same-value retry', async () => {
+  const units = new Map()
+  const failOnce = new Set(['all_usage_aliases', 'all_usage_pricing'])
+  const attempts = []
+  const oldAlias = 'Persisted repo'
+  const newAlias = 'Retried repo'
+  const oldInterval = 21600000
+  const newInterval = 43200000
+  const openStorage = async ({ name }) => {
+    if (!units.has(name)) {
+      const seed = name === 'all_usage_aliases'
+        ? { 'ws-1': oldAlias }
+        : name === 'all_usage_pricing'
+          ? { pricing: { sync: { autoEnabled: false, intervalMs: oldInterval } } }
+          : {}
+      units.set(name, {
+        global: structuredClone(seed),
+        records: { sessions: {} },
+        async loadAll() { return { global: structuredClone(this.global), tables: structuredClone(this.records) } },
+        async putRecord(table, key, value) {
+          if (!this.records[table]) this.records[table] = {}
+          this.records[table][key] = structuredClone(value)
+        },
+        async deleteRecord(table, key) { if (this.records[table]) delete this.records[table][key] },
+        async setGlobal(value) {
+          attempts.push(name)
+          if (failOnce.delete(name)) throw new Error('fixture-storage-failure')
+          this.global = structuredClone(value)
+        },
+        async close() {},
+      })
+    }
+    return units.get(name)
+  }
+  const options = { withStorage: true, openStorage, workspaces: [{ id: 'ws-1', path: 'C:/repo', title: 'Repo' }] }
+  const readRestored = async () => {
+    const restarted = await createApp(options)
+    try {
+      const snapshot = await call(restarted, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+      const pricing = await call(restarted, '/api/all-usage/pricing', makeRequest('GET', { host: '127.0.0.1:3080' }))
+      assert.equal(snapshot.status, 200)
+      assert.equal(pricing.status, 200)
+      assert.equal(pricing.json().sync.autoEnabled, false)
+      return { aliases: snapshot.json().aliases, intervalMs: pricing.json().sync.intervalMs }
+    } finally {
+      for (const cleanup of restarted.cleanups) await cleanup()
+    }
+  }
+  const app = await createApp(options)
+  try {
+    const stats = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    const headers = { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': stats.json().requestToken }
+    const aliasBody = JSON.stringify({ workspaceId: 'ws-1', alias: newAlias })
+    const pricingBody = JSON.stringify({ pricing: { sync: { autoEnabled: false, intervalMs: newInterval } }, backfill: false })
+    const writeAlias = () => call(app, '/api/all-usage/alias', makeRequest('POST', headers, aliasBody))
+    const writePricing = () => call(app, '/api/all-usage/pricing', makeRequest('POST', headers, pricingBody))
+
+    for (const [write, stage] of [[writeAlias, 'alias'], [writePricing, 'pricing']]) {
+      const failed = await write()
+      assert.equal(failed.status, 503)
+      assert.equal(failed.json().messageCode, 'persistence-failed')
+      assert.equal(failed.json().stage, stage)
+      assert.equal(failed.json().applied, true)
+      assert.equal(failed.json().persisted, false)
+    }
+    assert.equal((await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))).json().aliases['ws-1'], newAlias)
+    assert.equal((await call(app, '/api/all-usage/pricing', makeRequest('GET', { host: '127.0.0.1:3080' }))).json().sync.intervalMs, newInterval)
+    assert.deepEqual(await readRestored(), { aliases: { 'ws-1': oldAlias }, intervalMs: oldInterval })
+    assert.notEqual(units.get('all_usage_aliases'), units.get('all_usage_pricing'))
+    assert.deepEqual(attempts, ['all_usage_aliases', 'all_usage_pricing'])
+
+    for (const write of [writeAlias, writePricing]) {
+      const retry = await write()
+      assert.equal(retry.status, 200)
+      assert.equal(retry.json().persisted, true)
+    }
+    assert.deepEqual(await readRestored(), { aliases: { 'ws-1': newAlias }, intervalMs: newInterval })
+    assert.deepEqual(attempts, ['all_usage_aliases', 'all_usage_pricing', 'all_usage_aliases', 'all_usage_pricing'])
+  } finally {
+    for (const cleanup of app.cleanups) await cleanup()
+  }
+})
+
+test('binds concurrent pricing responses to their own saved snapshots', async () => {
+  let releaseFirstWrite
+  let firstWriteStarted
+  const firstWriteGate = new Promise((resolve) => { releaseFirstWrite = resolve })
+  const started = new Promise((resolve) => { firstWriteStarted = resolve })
+  const writes = []
+  const storage = {
+    records: { sessions: {} },
+    async loadAll() { return { global: {}, tables: this.records } },
+    async putRecord(table, key, value) { this.records[table][key] = value },
+    async deleteRecord(table, key) { delete this.records[table][key] },
+    async setGlobal(value) {
+      writes.push(value)
+      if (writes.length === 1) { firstWriteStarted(); await firstWriteGate }
+    },
+    async close() {},
+  }
+  const app = await createApp({ withStorage: true, storage })
+  const stats = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  const headers = { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': stats.json().requestToken }
+  const request = (autoEnabled) => call(app, '/api/all-usage/pricing', makeRequest('POST', headers, JSON.stringify({ pricing: { sync: { autoEnabled } }, backfill: false })))
+  const first = request(true)
+  await started
+  const second = request(false)
+  await new Promise((resolve) => setImmediate(resolve))
+  releaseFirstWrite()
+  const [firstResponse, secondResponse] = await Promise.all([first, second])
+
+  assert.equal(firstResponse.status, 200)
+  assert.equal(firstResponse.json().pricing.sync.autoEnabled, true)
+  assert.equal(secondResponse.status, 200)
+  assert.equal(secondResponse.json().pricing.sync.autoEnabled, false)
+  assert.equal(writes.length, 2)
+})
+
+test('reports applied-but-unpersisted when storage is unavailable', async () => {
+  const app = await createApp({ workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }] })
+  const stats = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+  const headers = { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': stats.json().requestToken }
+  const alias = await call(app, '/api/all-usage/alias', makeRequest('POST', headers, JSON.stringify({ workspaceId: 'ws-1', alias: 'Memory only' })))
+  assert.equal(alias.status, 503)
+  assert.equal(alias.json().messageCode, 'persistence-failed')
+  assert.equal(alias.json().stage, 'alias')
+  assert.deepEqual({ ok: alias.json().ok, applied: alias.json().applied, persisted: alias.json().persisted }, { ok: false, applied: true, persisted: false })
+  const pricing = await call(app, '/api/all-usage/pricing', makeRequest('POST', headers, JSON.stringify({ pricing: { sync: { autoEnabled: true } }, backfill: false })))
+  assert.equal(pricing.status, 503)
+  assert.equal(pricing.json().messageCode, 'persistence-failed')
+  assert.equal(pricing.json().stage, 'pricing')
+  assert.equal(pricing.json().applied, true)
+  assert.equal(pricing.json().persisted, false)
+})
+
 test('rejects oversized state updates and malformed aliases', async () => {
   const app = await createApp({
     withStorage: true,
@@ -751,6 +962,7 @@ test('serves a lightweight status snapshot with full stats route protections', a
 test('advances the status revision after alias and live usage changes', async () => {
   const eventTime = Date.now() - 60 * 1000
   const app = await createApp({
+    withStorage: true,
     workspaces: [{ id: 'ws-1', path: 'C:\repo', title: 'Repo', sessionIds: ['s-1'] }],
     sessions: [{ header: { id: 's-1', cwd: 'C:\repo' } }],
     events: new Map([['s-1', [{ seq: 1, time: eventTime, type: 'turn/end', data: {} }]]]),
@@ -769,6 +981,7 @@ test('advances the status revision after alias and live usage changes', async ()
     'x-all-usage-request-token': token,
   }, JSON.stringify({ workspaceId: 'ws-1', alias: 'Main' })))
   assert.equal(alias.status, 200)
+  assert.ok(app.storageUnit.saved.some((entry) => entry['ws-1'] === 'Main'))
   await new Promise((resolve) => setImmediate(resolve))
   const afterAlias = (await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
   assert.ok(afterAlias.revision > before.revision)
@@ -849,7 +1062,7 @@ test('enforces route methods', async () => {
 })
 
 test('protects pricing configuration writes with loopback, origin, and process capability', async () => {
-  const app = await createApp({ workspaces: [{ id: 'ws-1', path: 'C:\repo', title: 'Repo' }] })
+  const app = await createApp({ withStorage: true, workspaces: [{ id: 'ws-1', path: 'C:\repo', title: 'Repo' }] })
   const stats = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
   const token = stats.json().requestToken
   assert.equal((await call(app, '/api/all-usage/pricing', makeRequest('GET', { host: '127.0.0.1:3080' }))).status, 200)
@@ -861,10 +1074,11 @@ test('protects pricing configuration writes with loopback, origin, and process c
   assert.equal(allowed.status, 200)
   assert.equal(allowed.json().ok, true)
   assert.equal(allowed.json().pricing.sync.autoEnabled, false)
+  assert.ok(app.storageUnit.saved.some((entry) => entry.pricing?.sync?.autoEnabled === false))
 })
 
 test('accepts writes from the desktop shell, which cannot send an Origin', async () => {
-  const app = await createApp({ workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }] })
+  const app = await createApp({ withStorage: true, workspaces: [{ id: 'ws-1', path: 'C:\\repo', title: 'Repo' }] })
   const stats = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
   const token = stats.json().requestToken
   const body = JSON.stringify({ sync: { autoEnabled: false } })
@@ -877,6 +1091,7 @@ test('accepts writes from the desktop shell, which cannot send an Origin', async
   }, body))
   assert.equal(noOrigin.status, 200)
   assert.equal(noOrigin.json().ok, true)
+  assert.ok(app.storageUnit.saved.some((entry) => entry.pricing?.sync?.autoEnabled === false))
   // The shell's own scheme is accepted when it does forward one.
   const shellOrigin = await call(app, '/api/all-usage/pricing', makeRequest('POST', {
     host: '127.0.0.1:3080',
@@ -956,3 +1171,69 @@ test('full snapshot waits for the persisted pricing state before responding', as
   assert.equal(response.json().pricing.catalogModelCount, 1)
   assert.equal(response.json().pricing.configured, true)
 })
+
+for (const disposeEarly of [false, true]) {
+  test('pricing HTTP reestimation receipt follows traversal completion: ' + (disposeEarly ? 'disposed' : 'normal'), { timeout: 5000 }, async (t) => {
+    let releaseWrite
+    let writeStarted
+    let blockWrites = false
+    let closed = false
+    const writeGate = new Promise((resolve) => { releaseWrite = resolve })
+    const started = new Promise((resolve) => { writeStarted = resolve })
+    const storage = {
+      records: { sessions: {} },
+      async loadAll() { return { global: {}, tables: this.records } },
+      async putRecord(table, key, value) {
+        if (blockWrites) { writeStarted(); await writeGate }
+        if (!this.records[table]) this.records[table] = {}
+        this.records[table][key] = value
+      },
+      async deleteRecord(table, key) { delete this.records[table][key] },
+      async setGlobal() {},
+      async close() { closed = true },
+    }
+    const eventTime = Date.now() - 60000
+    const ledgerSeed = {
+      's-1': { version: 1, sessionId: 's-1', workspaceId: 'ws-1', turns: [{ key: '1', time: eventTime, workspaceId: 'ws-1' }], usage: [{ key: 's-1:step:1:1', seq: 2, time: eventTime, workspaceId: 'ws-1', modelId: 'custom / unknown', values: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, reasoning: 0 } }] },
+    }
+    const app = await createApp({ withStorage: true, storage, ledgerSeed, workspaces: [{ id: 'ws-1', path: 'G:/fixture/one' }] })
+    let cleanup
+    const dispose = () => {
+      if (cleanup === undefined) cleanup = Promise.all(app.cleanups.map((fn) => fn()).filter((value) => value && typeof value.then === 'function'))
+      return cleanup
+    }
+    t.after(async () => { releaseWrite(); await dispose() })
+    let snapshot
+    for (let i = 0; i < 100; i += 1) {
+      snapshot = await call(app, '/api/all-usage', makeRequest('GET', { host: '127.0.0.1:3080' }))
+      if (snapshot.json().scan.done) break
+      await new Promise((resolve) => setImmediate(resolve))
+    }
+    assert.equal(snapshot.json().scan.done, true)
+    const headers = { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-all-usage-request-token': snapshot.json().requestToken }
+    const events = [
+      { seq: 1, time: eventTime, type: 'turn/end', data: {} },
+      { seq: 3, time: eventTime, type: 'assistant/message', data: { turn: 1, step: 1, message: { source: { provider: 'custom', model: 'unknown' } }, usage: { inputTokens: 10, outputTokens: 20 } } },
+    ]
+    blockWrites = true
+    const flush = app.listeners['session/flush'][0]({ id: 's-1', header: { id: 's-1', cwd: 'G:/fixture/one' }, events })
+    await started
+    const pending = call(app, '/api/all-usage/pricing', makeRequest('POST', headers, JSON.stringify({ pricing: { sync: { autoEnabled: false }, overrides: [{ providerId: 'custom', modelId: 'unknown', input: '1', output: '1', cacheRead: '0', cacheWrite: '0', currency: 'USD' }] }, backfill: true })))
+    await new Promise((resolve) => setImmediate(resolve))
+    const during = await call(app, '/api/all-usage/pricing', makeRequest('GET', { host: '127.0.0.1:3080' }))
+    assert.equal(during.json().overrideCount, 1)
+    if (disposeEarly) void dispose()
+    assert.equal(closed, false)
+    releaseWrite()
+    const response = await pending
+    await flush
+    const receipt = response.json()
+    assert.equal(response.status, disposeEarly ? 503 : 200)
+    assert.equal(receipt.applied, true)
+    assert.equal(receipt.persisted, !disposeEarly)
+    assert.equal(receipt.reestimated, !disposeEarly)
+    assert.deepEqual(receipt.backfill, { considered: disposeEarly ? 0 : 1, priced: disposeEarly ? 0 : 1, remaining: disposeEarly ? 1 : 0, temporalReconciled: 0 })
+    await dispose()
+    assert.equal(closed, true)
+  })
+}

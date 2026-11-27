@@ -741,6 +741,7 @@ test('separates data, metadata, and query revisions across live changes', async 
     { seq: 3, time: eventTime, type: 'turn/end', data: { turn: 1 } },
   ]
   const app = await createApp({
+    withStorage: true,
     workspaces: [{ id: 'ws-revisions', path: 'C:/revisions', title: 'Revisions' }],
     sessions: [{ header: { id: 's-revisions', cwd: 'C:/revisions' } }],
     events: new Map([['s-revisions', events]]),
@@ -764,6 +765,7 @@ test('separates data, metadata, and query revisions across live changes', async 
     'x-all-usage-request-token': token,
   }, JSON.stringify({ workspaceId: 'ws-revisions', alias: 'Renamed' })))
   assert.equal(alias.status, 200)
+  assert.ok(app.storageUnit.saved.some((entry) => entry['ws-revisions'] === 'Renamed'))
   await new Promise((resolve) => setImmediate(resolve))
   const afterMetadata = (await call(app, '/api/all-usage/status', makeRequest('GET', { host: '127.0.0.1:3080' }))).json()
   assert.ok(afterMetadata.metadataRevision > afterData.metadataRevision)
