@@ -161,7 +161,9 @@ test('an apply writes the month files, removes their documents and answers for t
     const unit = fixture.state.ledgerUnit
     assert.deepEqual(await unit.treeStore().listKeys(), [NEW_ID], 'the trees no longer name the archived records')
     assert.equal(await unit.treeStore().readRecord(OLD_IDS[0]), undefined)
-    for (const id of OLD_IDS) assert.deepEqual(await unit.readRecord(id), serializeLedgerRecord(originals.get(id)), 'attachArchive() answers for ' + id)
+    const sameMonthRows = await Promise.all(Array.from({ length: 8 }, () => unit.readRecord(OLD_IDS[0])))
+    for (const row of sameMonthRows) assert.deepEqual(row, serializeLedgerRecord(originals.get(OLD_IDS[0])), 'concurrent attachArchive() reads keep the stored record shape')
+    assert.deepEqual(await unit.readRecord(OLD_IDS[1]), serializeLedgerRecord(originals.get(OLD_IDS[1])), 'the other month remains readable')
     assert.deepEqual((await unit.listKeys()).sort(), [NEW_ID, ...OLD_IDS].sort(), 'listKeys() still names every record of the ledger')
 
     // A second run has nothing to do: the unit store plans from the trees only, so

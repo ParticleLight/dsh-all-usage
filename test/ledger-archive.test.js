@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { gunzipSync } from 'node:zlib'
+import { gunzipSync, gzipSync } from 'node:zlib'
 import { archiveRecords, createArchiveReader } from '../lib/archive.js'
 import { serializeLedgerRecord } from '../lib/ledger.js'
 import {
@@ -335,14 +335,19 @@ test('a damaged month is treated as missing while the readable months still load
     const garbage = 'this is not a gzip stream'
     await writeFile(damaged, garbage, 'utf8')
 
-    const reader = await createArchiveReader(root)
+    const counting = await countingFs()
+    const reader = await createArchiveReader(root, { fs: counting.fs })
     assert.ok(reader !== null)
     assert.deepEqual(reader.months, ['2026-05', '2026-06'], 'the damaged month is still listed, so a retry can repair it')
+    assert.equal(counting.count('readFile'), 2, 'construction loads only the two month indexes')
     const warnings = quietWarnings()
     try {
       assert.equal(await reader.readRecord('s-june-1').then((row) => row !== undefined), true, 'a readable month still answers')
+      assert.equal(counting.count('readFile'), 3)
       assert.equal(await reader.readRecord('s-may-1'), undefined, 'the damaged month answers nothing')
+      assert.equal(counting.count('readFile'), 4)
       assert.equal(await reader.readRecord('s-may-1'), undefined, 'and stays missing on the next read')
+      assert.equal(counting.count('readFile'), 4, 'a permanently broken month is not read or decompressed again')
     } finally {
       warnings.restore()
     }
@@ -517,6 +522,193 @@ test('a record rewritten between the plan and the delete keeps its tree document
     assert.equal(filed.usage.length, rev6.usage.length)
     const archivedOnly = await coldStart(root)
     assert.equal((await archivedOnly.ledger.recordFor(sid)).usage.length, rev6.usage.length, 'a cold read now folds rev6 from the archive')
+  } finally {
+    await removeTempRoot(root)
+  }
+})
+
+test('same-month cold reads share one in-flight file load', async () => {
+  const root = await createTempRoot()
+  try {
+    await seedTree(root, fixtureRecords())
+    await archiveRecords({ root, store: await treeStore(root), cutoffMs: OLD_CUTOFF })
+    const counting = await countingFs()
+    let monthReads = 0
+    let releaseRead
+    const gate = new Promise((resolve) => { releaseRead = resolve })
+    const fs = {
+      ...counting.fs,
+      readFile(path, ...args) {
+        if (String(path).endsWith('2026-06.jsonl.gz')) {
+          monthReads += 1
+          if (monthReads === 1) setImmediate(releaseRead)
+          return gate.then(() => counting.fs.readFile(path, ...args))
+        }
+        return counting.fs.readFile(path, ...args)
+      },
+    }
+    const reader = await createArchiveReader(root, { fs })
+    const ids = Array.from({ length: 12 }, (_, index) => index % 2 === 0 ? 's-june-1' : 's-june-2')
+    const rows = await Promise.all(ids.map((id) => reader.readRecord(id)))
+    assert.deepEqual(rows.map((row) => row.sessionId), ids)
+    assert.equal(monthReads, 1, 'concurrent cold reads share one month read and decompression')
+  } finally {
+    await removeTempRoot(root)
+  }
+})
+
+test('a rejected month read can be retried once for concurrent callers', async () => {
+  const root = await createTempRoot()
+  try {
+    await seedTree(root, fixtureRecords())
+    await archiveRecords({ root, store: await treeStore(root), cutoffMs: OLD_CUTOFF })
+    const counting = await countingFs()
+    let monthReads = 0
+    let releaseRetry
+    const retryGate = new Promise((resolve) => { releaseRetry = resolve })
+    const fs = {
+      ...counting.fs,
+      readFile(path, ...args) {
+        if (!String(path).endsWith('2026-06.jsonl.gz')) return counting.fs.readFile(path, ...args)
+        monthReads += 1
+        if (monthReads === 1) return Promise.reject(new Error('transient archive read failure'))
+        return retryGate.then(() => counting.fs.readFile(path, ...args))
+      },
+    }
+    const reader = await createArchiveReader(root, { fs })
+    const warnings = quietWarnings()
+    try {
+      assert.equal(await reader.readRecord('s-june-1'), undefined, 'the first I/O failure is treated as missing for that request')
+      const ids = Array.from({ length: 8 }, (_, index) => index % 2 === 0 ? 's-june-1' : 's-june-2')
+      const retry = Promise.all(ids.map((id) => reader.readRecord(id)))
+      await new Promise((resolve) => setImmediate(resolve))
+      const readsBeforeRelease = monthReads
+      releaseRetry()
+      const rows = await retry
+      assert.equal(readsBeforeRelease, 2, 'concurrent callers share one retry after the failed load is cleared')
+      assert.equal(monthReads, 2)
+      assert.deepEqual(rows.map((row) => row.sessionId), ids)
+      assert.equal(reader.keys().has('s-june-1'), true, 'a transient read error preserves the loaded key index')
+      assert.equal(warnings.lines.filter((line) => line.includes('unreadable')).length, 1, 'the transient failure warns once')
+    } finally {
+      releaseRetry()
+      warnings.restore()
+    }
+  } finally {
+    await removeTempRoot(root)
+  }
+})
+
+test('a missing key index can recover after a transient month read failure', async () => {
+  const root = await createTempRoot()
+  try {
+    await seedTree(root, fixtureRecords())
+    await archiveRecords({ root, store: await treeStore(root), cutoffMs: OLD_CUTOFF })
+    await rm(join(root, 'archive', '2026-06.keys.json.gz'))
+    const counting = await countingFs()
+    let monthReads = 0
+    const fs = {
+      ...counting.fs,
+      readFile(path, ...args) {
+        if (String(path).endsWith('2026-06.jsonl.gz')) {
+          monthReads += 1
+          if (monthReads === 1) return Promise.reject(new Error('transient archive read failure'))
+        }
+        return counting.fs.readFile(path, ...args)
+      },
+    }
+    const warnings = quietWarnings()
+    try {
+      const reader = await createArchiveReader(root, { fs })
+      assert.ok(reader !== null)
+      assert.equal(monthReads, 1, 'missing-index startup tries the month file once')
+      assert.equal(reader.keys().has('s-june-1'), false, 'the unavailable month has no derived keys yet')
+      const record = fixtureRecords().find((row) => row.sessionId === 's-june-1')
+      assert.deepEqual(await reader.readRecord('s-june-1'), serializeLedgerRecord(record))
+      assert.equal(monthReads, 2, 'an explicit read retries the failed startup load')
+      assert.equal(reader.keys().has('s-june-1'), true, 'successful retry restores the derived key index')
+      assert.equal(warnings.lines.filter((line) => line.includes('unreadable')).length, 1)
+    } finally {
+      warnings.restore()
+    }
+  } finally {
+    await removeTempRoot(root)
+  }
+})
+
+test('missing sidecar recovery preserves newest shared record', async () => {
+  const mayShared = { sessionId: 'shared', updatedAt: Date.parse('2026-05-15T00:00:00Z'), total: 10 }
+  const juneShared = { sessionId: 'shared', updatedAt: Date.parse('2026-06-15T00:00:00Z'), total: 90 }
+  const juneOnly = { sessionId: 'june-only', updatedAt: Date.parse('2026-06-16T00:00:00Z'), total: 7 }
+  const gzipJson = (value) => gzipSync(Buffer.from(JSON.stringify(value)))
+  const gzipRows = (rows) => gzipSync(Buffer.from(rows.map((row) => JSON.stringify(row)).join('\n') + '\n'))
+  const files = new Map([
+    ['2026-05.jsonl.gz', gzipRows([mayShared])],
+    ['2026-05.keys.json.gz', gzipJson(['shared'])],
+    ['2026-06.jsonl.gz', gzipRows([juneShared, juneOnly])],
+  ])
+  let juneReads = 0
+  const fs = {
+    async readdir() {
+      return Array.from(files.keys(), (name) => ({ name, isFile: () => true }))
+    },
+    async readFile(path) {
+      const name = String(path).split(/[\\/]/).pop()
+      if (name === '2026-06.jsonl.gz') {
+        juneReads += 1
+        if (juneReads === 1) throw Object.assign(new Error('temporary archive I/O failure'), { code: 'EIO' })
+      }
+      if (!files.has(name)) throw Object.assign(new Error('missing fixture file'), { code: 'ENOENT' })
+      return files.get(name)
+    },
+  }
+  const warnings = quietWarnings()
+  try {
+    const reader = await createArchiveReader('/memory-ledger', { fs })
+    assert.ok(reader !== null)
+    assert.equal(juneReads, 1, 'startup attempts the missing-index month once and hits EIO')
+    assert.equal((await reader.readRecord('shared')).total, 90, 'direct owner lookup also searches the unindexed recovered month')
+    assert.equal(juneReads, 2, 'the shared-key lookup retries June only once')
+    for (let index = 0; index < 2; index += 1) assert.equal((await reader.readRecord('shared')).total, 90)
+    assert.equal((await reader.readRecord('june-only')).total, 7, 'the recovered month exposes its unrelated key too')
+    assert.equal(juneReads, 2, 'later reads use the recovered month cache')
+    assert.equal(reader.keys().has('june-only'), true)
+    assert.equal(warnings.lines.filter((line) => line.includes('unreadable')).length, 1, 'the startup I/O failure warns once')
+  } finally {
+    warnings.restore()
+  }
+})
+
+test('different month cold reads are not serialized', async () => {
+  const root = await createTempRoot()
+  try {
+    await seedTree(root, fixtureRecords())
+    await archiveRecords({ root, store: await treeStore(root), cutoffMs: OLD_CUTOFF })
+    const counting = await countingFs()
+    const entered = new Set()
+    let releaseReads
+    const gate = new Promise((resolve) => { releaseReads = resolve })
+    const fs = {
+      ...counting.fs,
+      readFile(path, ...args) {
+        const name = String(path)
+        const month = ['2026-05', '2026-06'].find((value) => name.endsWith(value + '.jsonl.gz'))
+        if (month === undefined) return counting.fs.readFile(path, ...args)
+        entered.add(month)
+        return gate.then(() => counting.fs.readFile(path, ...args))
+      },
+    }
+    const reader = await createArchiveReader(root, { fs })
+    const pending = Promise.all([
+      reader.readRecord('s-may-1'),
+      reader.readRecord('s-june-1'),
+    ])
+    await new Promise((resolve) => setImmediate(resolve))
+    const monthsBeforeRelease = Array.from(entered).sort()
+    releaseReads()
+    const rows = await pending
+    assert.deepEqual(monthsBeforeRelease, ['2026-05', '2026-06'], 'both month loads enter before either is released')
+    assert.deepEqual(rows.map((row) => row.sessionId), ['s-may-1', 's-june-1'])
   } finally {
     await removeTempRoot(root)
   }
