@@ -7,7 +7,7 @@
 [![stars](https://img.shields.io/github/stars/ParticleLight/dsh-all-usage?label=stars&logo=github)](https://github.com/ParticleLight/dsh-all-usage/stargazers)
 [![license](https://img.shields.io/github/license/ParticleLight/dsh-all-usage?label=license&color=green)](LICENSE)
 [![CI](https://github.com/ParticleLight/dsh-all-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/ParticleLight/dsh-all-usage/actions/workflows/ci.yml)
-[![DSH runtime compatibility](https://img.shields.io/badge/DSH%20runtime-11%20verified-4D6BFE)](#compatibilidad-y-limitaciones-conocidas)
+[![DSH runtime compatibility](https://img.shields.io/badge/DSH%20runtime-12%20verified-4D6BFE)](#compatibilidad-y-limitaciones-conocidas)
 [![status](https://img.shields.io/badge/status-stable-brightgreen)](https://github.com/ParticleLight/dsh-all-usage/releases)
 
 [中文](README.md) · [English](README.en.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Русский](README.ru.md) · [Português](README.pt.md)

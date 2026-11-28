@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.2.5（开发中）
+
+### 修复
+- **请求日志 CSV 不再静默截断于 10,000 条** —— 读取到分页结束；游标异常或数据版本变化时明确报错，避免下载不完整文件。
+- **价格与工作区别名按实际存储结果回执** —— 写入失败会提示重试，保留编辑内容；已在当前进程应用但尚未保存时明确说明，同值也能重试。
+- **账户切换后余额不再沿用旧账户缓存** —— 同一凭据引用换密钥也会失效，较早请求的响应不会覆盖新请求的缓存；读取失败会退出等待状态。
+- **归档最终删除与同条记录的新写入串行执行** —— 面板、命令行归档与运行时写入共用逐记录跨进程锁；仍存活的本机进程持有维护锁时不再按锁龄抢占。
+- **冷归档临时读取失败后可重试** —— 同月并发读取合并，缺少索引的月份恢复后仍会参与跨月较新记录比较。
+- **归档发布中断后重试不会漏掉新增记录** —— 重试会先重建完整 keys 索引，再删除热副本，避免旧索引掩盖已经写入冷文件的记录。
+- **命令行归档失败返回失败退出码** —— 全部读取或发布失败时明确输出错误，混合结果仍保留已成功归档的统计。
+- **时间说明与现有日历一致** —— 自定义范围去除固定 UTC 后缀，中文峰谷时段说明与北京时间编辑规则一致。
+
+### Fixes
+- **Request-log CSV exports no longer stop silently at 10,000 rows** — pagination runs to completion; invalid cursors or a changed data revision report an error instead of downloading a partial file.
+- **Price and workspace-alias saves report the actual storage result** — failures keep edits available for retry, including an unchanged value; settings applied only in the current process are identified explicitly.
+- **Balance caches follow the current account and credential** — key rotation invalidates cached results, older responses do not replace newer cached results, and failed lookups exit the checking state.
+- **Archiving and writes to the same record share a cross-process lock** — runtime writes and the final compare/delete in panel and CLI archiving are serialized; a live local maintenance-lock owner is no longer displaced by lock age alone.
+- **Transient cold-archive reads can be retried** — concurrent reads of one month are coalesced, and recovered months without key sidecars still participate in newest-record selection.
+- **Retrying an interrupted archive publication preserves new records** — the complete key index is republished before hot copies are removed, so an older index cannot hide records already written to the cold file.
+- **CLI archive failures return a failure exit code** — runs whose reads or publications all fail report the errors; mixed results retain statistics for successfully archived records.
+- **Time labels match the existing calendar** — custom ranges lose the fixed UTC suffix, and Chinese peak-window help matches the Beijing-time editor.
+
 ## v1.2.4（2026-11-11）
 ### 新功能
 - **界面语言跟随 DSH 自带的八种语言** —— 首次打开跟随宿主语言，手动选择后记住。
