@@ -397,6 +397,100 @@ test('the archive CLI refuses to run without the maintenance lock', async () => 
   }
 })
 
+test('the archive CLI reports read failures without claiming nothing was eligible', async () => {
+  const root = await createTempRoot()
+  const sid = 's-cli-broken'
+  const source = '{not json'
+  const path = join(treeDir(root, sid), sid + '.json')
+  try {
+    await mkdir(treeDir(root, sid), { recursive: true })
+    await writeFile(path, source, 'utf8')
+    const result = await run(process.execPath, [CLI, '--root', root, '--older-than-days', '30', '--apply'], { encoding: 'utf8' }).then(
+      (out) => ({ code: 0, ...out }),
+      (error) => ({ code: error.code, stdout: error.stdout || '', stderr: error.stderr || '' }),
+    )
+    assert.equal(result.code, 1, 'an unreadable-only ledger is a failed archive')
+    assert.match(result.stderr, /archive failed for s-cli-broken/)
+    assert.doesNotMatch(result.stdout, /nothing to archive/)
+    assert.equal(await readFile(path, 'utf8'), source, 'the unreadable source stays byte-for-byte unchanged')
+    assert.deepEqual(await archivedMonths(root), [])
+  } finally {
+    await removeTempRoot(root)
+  }
+})
+
+test('the archive CLI reports month write failures and preserves source documents', async () => {
+  const root = await createTempRoot()
+  try {
+    const records = fixtureRecords().filter((record) => record.updatedAt < OLD_CUTOFF)
+    await seedTree(root, records)
+    const sources = new Map()
+    for (const record of records) {
+      const path = join(treeDir(root, record.sessionId), record.sessionId + '.json')
+      sources.set(path, await readFile(path, 'utf8'))
+    }
+    await writeFile(join(root, 'archive'), 'not an archive directory', 'utf8')
+    const result = await run(process.execPath, [CLI, '--root', root, '--older-than-days', '30', '--apply'], { encoding: 'utf8' }).then(
+      (out) => ({ code: 0, ...out }),
+      (error) => ({ code: error.code, stdout: error.stdout || '', stderr: error.stderr || '' }),
+    )
+    assert.equal(result.code, 1, 'failed month writes are not an empty archive')
+    assert.match(result.stderr, /archive failed for 2026-05/)
+    assert.match(result.stderr, /archive failed for 2026-06/)
+    assert.doesNotMatch(result.stdout, /nothing to archive/)
+    for (const [path, source] of sources) assert.equal(await readFile(path, 'utf8'), source, 'every failed month keeps its exact hot document')
+    assert.equal(await readFile(join(root, 'archive'), 'utf8'), 'not an archive directory')
+    assert.deepEqual(await treeIds(root), OLD_IDS)
+  } finally {
+    await removeTempRoot(root)
+  }
+})
+
+test('the archive CLI reports mixed read failures after archiving healthy rows', async () => {
+  const root = await createTempRoot()
+  const sid = 's-cli-mixed-broken'
+  const source = '{not json'
+  const path = join(treeDir(root, sid), sid + '.json')
+  try {
+    const record = fixtureRecords().find((row) => row.updatedAt < OLD_CUTOFF)
+    await seedTree(root, [record])
+    await mkdir(treeDir(root, sid), { recursive: true })
+    await writeFile(path, source, 'utf8')
+    const result = await run(process.execPath, [CLI, '--root', root, '--older-than-days', '30', '--apply'], { encoding: 'utf8' }).then(
+      (out) => ({ code: 0, ...out }),
+      (error) => ({ code: error.code, stdout: error.stdout || '', stderr: error.stderr || '' }),
+    )
+    assert.equal(result.code, 1, 'a healthy month does not hide a failed source read')
+    assert.match(result.stderr, /archive failed for s-cli-mixed-broken/)
+    assert.match(result.stderr, /1 record group\(s\) stayed in the ledger trees/)
+    assert.match(result.stdout, /months:\s+2026-06/)
+    assert.match(result.stdout, /records:\s+1/)
+    assert.doesNotMatch(result.stdout, /nothing to archive/)
+    assert.equal(await readFile(path, 'utf8'), source, 'the failed source stays untouched')
+    assert.deepEqual(await treeIds(root), [sid])
+    const reader = await createArchiveReader(root)
+    assert.deepEqual(await reader.readRecord(record.sessionId), serializeLedgerRecord(record), 'the healthy source was archived before the failure was reported')
+  } finally {
+    await removeTempRoot(root)
+  }
+})
+
+test('the archive CLI accepts an empty tree as an empty archive', async () => {
+  const root = await createTempRoot()
+  try {
+    const result = await run(process.execPath, [CLI, '--root', root, '--older-than-days', '30', '--apply'], { encoding: 'utf8' }).then(
+      (out) => ({ code: 0, ...out }),
+      (error) => ({ code: error.code, stdout: error.stdout || '', stderr: error.stderr || '' }),
+    )
+    assert.equal(result.code, 0, result.stderr)
+    assert.match(result.stdout, /nothing to archive/)
+    assert.equal(result.stderr, '')
+    assert.deepEqual(await readdir(root), [], 'an empty run leaves no archive or maintenance lock')
+  } finally {
+    await removeTempRoot(root)
+  }
+})
+
 test('the archive CLI plans by default and writes only with --apply', async () => {
   const root = await createTempRoot()
   const records = fixtureRecords()

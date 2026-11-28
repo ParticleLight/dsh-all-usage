@@ -14,7 +14,7 @@
 import { readFile, readdir, unlink } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { archiveRecords } from '../lib/archive.js'
-import { withLedgerMaintenanceLock } from '../lib/ledger.js'
+import { withLedgerMaintenanceLock, withLedgerRecordLock } from '../lib/ledger.js'
 
 const USAGE = 'usage: node scripts/archive-ledger.mjs --root <dir> [--older-than-days 90] [--apply]'
 const DEFAULT_DAYS = 90
@@ -83,19 +83,20 @@ async function openTreeStore(root) {
     async deleteRecord(key, expected) {
       const path = paths.get(key)
       if (path === undefined) return false
-      // Same optimistic check as the ledger's own store: a session that published a
-      // newer revision while this run was planning keeps its document, and the next
-      // run archives that revision instead of losing it.
-      if (expected !== undefined) {
-        if (expected === null || typeof expected !== 'object') return false
-        let doc = null
-        try { doc = JSON.parse(await readFile(path, 'utf8')) } catch (error) { return false }
-        if (doc === null || typeof doc !== 'object' || doc.record === null || typeof doc.record !== 'object') return false
-        if (doc.record.updatedAt !== expected.updatedAt) return false
-        if (JSON.stringify(doc.record) !== JSON.stringify(expected)) return false
-      }
-      paths.delete(key)
-      return unlink(path).then(() => true, () => false)
+      // Use the runtime's per-record lock for the whole comparison and deletion.
+      const outcome = await withLedgerRecordLock(root, key, async () => {
+        if (expected !== undefined) {
+          if (expected === null || typeof expected !== 'object') return false
+          let doc = null
+          try { doc = JSON.parse(await readFile(path, 'utf8')) } catch (error) { return false }
+          if (doc === null || typeof doc !== 'object' || doc.record === null || typeof doc.record !== 'object') return false
+          if (doc.record.updatedAt !== expected.updatedAt) return false
+          if (JSON.stringify(doc.record) !== JSON.stringify(expected)) return false
+        }
+        paths.delete(key)
+        return unlink(path).then(() => true, () => false)
+      })
+      return outcome.acquired && outcome.value
     },
   }
 }
@@ -134,14 +135,15 @@ async function main() {
       return 2
     }
     const result = outcome.value
-    if (result.months.length === 0 && result.archived === 0) {
+    const hasErrors = result.errors.length > 0
+    if (result.months.length === 0 && result.archived === 0 && !hasErrors) {
       console.log('  nothing to archive: no record is older than the cutoff')
       return 0
     }
     console.log('  months:  ' + result.months.join(', '))
     console.log('  records: ' + result.archived)
     console.log('  bytes:   ' + formatBytes(result.bytes) + ' of records' + (options.apply ? ' -> ' + formatBytes(result.compressed) + ' of month files' : ''))
-    if (result.errors.length > 0) {
+    if (hasErrors) {
       for (const error of result.errors) console.error('[all-usage] archive failed for ' + (error.month === undefined ? error.key : error.month) + ': ' + error.message)
       console.error('[all-usage] ' + result.errors.length + ' record group(s) stayed in the ledger trees')
       return 1
