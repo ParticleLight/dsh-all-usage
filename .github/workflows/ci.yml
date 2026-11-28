@@ -91,6 +91,8 @@ jobs:
           # every line. 0.1.7 replaced the file-backed provider with that seam
           # alone, so dsh-settings-file exists only up to 0.1.5.
           case "$RUNTIME_VERSION" in
+            0.2.2-alpha.3) CORDIS_VERSION=4.0.6-alpha.2; LOADER_VERSION=1.0.7-alpha.2; TIMER_VERSION=1.1.8-alpha.2; SETTINGS_FILE_PACKAGE= ;;
+            0.2.2-rc.1 | 0.2.2-rc.2) CORDIS_VERSION=4.1.0; LOADER_VERSION=1.1.0; TIMER_VERSION=1.2.0; SETTINGS_FILE_PACKAGE= ;;
             0.2.1-alpha.2) CORDIS_VERSION=4.0.5-alpha.1; LOADER_VERSION=1.0.6-alpha.1; TIMER_VERSION=1.1.7-alpha.1; SETTINGS_FILE_PACKAGE= ;;
             0.2.1-rc.1) CORDIS_VERSION=4.0.5; LOADER_VERSION=1.0.6; TIMER_VERSION=1.1.7; SETTINGS_FILE_PACKAGE= ;;
             0.2.1-rc.2) CORDIS_VERSION=4.0.5; LOADER_VERSION=1.0.6; TIMER_VERSION=1.1.7; SETTINGS_FILE_PACKAGE= ;;
@@ -211,8 +213,8 @@ jobs:
           echo "DSH_RUNTIME_VERSION=$RUNTIME_VERSION" >> "$GITHUB_ENV"
           echo "DSH_REQUIRE_RUNTIME_SMOKE=1" >> "$GITHUB_ENV"
       - name: Run real Cordis smoke test
-        # Skipped only when the step above proved the 0.2.1-line upstream gap
-        # (0.2.1-alpha.2, 0.2.1-rc.1 or 0.2.1-rc.2); every other runtime line always runs
-        # this smoke test.
+        # Skipped only when the step above proved the upstream gap for one of the
+        # six explicitly listed 0.2.1/0.2.2 versions; every other runtime line
+        # always runs this smoke test.
         if: steps.runtime-install.outputs.smoke_skipped != 'true'
         run: npm run test:runtime
